@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.receipt import Receipt
 
 pytestmark = pytest.mark.asyncio
 
@@ -69,3 +74,56 @@ async def test_review_queue_and_export(client: AsyncClient, auth_headers: dict):
     export_csv = await client.get("/api/expenses/export?format=csv&month=2026-04", headers=auth_headers)
     assert export_csv.status_code == 200
     assert "merchant" in export_csv.text
+
+
+async def test_create_expense_from_receipt_is_listed_in_saved_month(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+    receipt = Receipt(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        original_filename="march-receipt.jpg",
+        stored_filename="stored-march-receipt.jpg",
+        content_type="image/jpeg",
+        storage_path="receipts/test-user/march-receipt.jpg",
+        preview_data={
+            "merchant": "Old Town Cafe",
+            "amount": 18.5,
+            "currency": "EUR",
+            "expense_date": "2026-03-28",
+            "category_name": "Dining",
+            "confidence": 0.97,
+        },
+        extraction_confidence=0.97,
+        extraction_status="review",
+        needs_review=True,
+    )
+    db_session.add(receipt)
+    await db_session.commit()
+
+    create_response = await client.post(
+        "/api/expenses/from-receipt",
+        json={
+            "receipt_id": str(receipt.id),
+            "merchant": "Old Town Cafe",
+            "description": "Lunch",
+            "amount": 18.5,
+            "currency": "EUR",
+            "expense_date": "2026-03-28",
+            "category_name": "Dining",
+            "confidence": 0.97,
+        },
+        headers=auth_headers,
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["source"] == "receipt"
+    assert created["expense_date"] == "2026-03-28"
+
+    march_list_response = await client.get("/api/expenses?month=2026-03", headers=auth_headers)
+    assert march_list_response.status_code == 200
+    march_listing = march_list_response.json()
+    assert any(item["id"] == created["id"] for item in march_listing["items"])
+
+    april_list_response = await client.get("/api/expenses?month=2026-04", headers=auth_headers)
+    assert april_list_response.status_code == 200
+    april_listing = april_list_response.json()
+    assert all(item["id"] != created["id"] for item in april_listing["items"])

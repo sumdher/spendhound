@@ -10,7 +10,6 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: "📊" },
   { href: "/expenses", label: "Expenses", icon: "💸" },
   { href: "/expenses/new", label: "Add expense", icon: "✚" },
-  { href: "/receipts", label: "Receipts", icon: "🧾" },
   { href: "/budgets", label: "Budgets", icon: "🎯" },
   { href: "/categories", label: "Categories", icon: "🏷️" },
   { href: "/settings", label: "Settings", icon: "⚙️" },

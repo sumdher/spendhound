@@ -58,6 +58,10 @@ class Settings(BaseSettings):
         default=0.75,
         description="Confidence threshold below which extracted receipts require review",
     )
+    receipt_multimodal_max_bytes: int = Field(
+        default=7_500_000,
+        description="Maximum image size in bytes sent directly to multimodal receipt extraction",
+    )
 
 
 settings = Settings()

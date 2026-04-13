@@ -22,6 +22,26 @@ def _split_system(messages: list[Message]) -> tuple[str | None, list[Message]]:
     return None, messages
 
 
+def _build_content_blocks(message: Message) -> str | list[dict]:
+    if not message.images:
+        return message.content
+    blocks: list[dict] = []
+    if message.content:
+        blocks.append({"type": "text", "text": message.content})
+    blocks.extend(
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": image.media_type,
+                "data": image.data,
+            },
+        }
+        for image in message.images
+    )
+    return blocks
+
+
 class AnthropicProvider(BaseLLMProvider):
     """LLM provider backed by the Anthropic Messages API."""
 
@@ -51,7 +71,7 @@ class AnthropicProvider(BaseLLMProvider):
         max_tokens = config.max_tokens if config else 4096
 
         system_prompt, user_messages = _split_system(messages)
-        anthropic_messages = [{"role": m.role, "content": m.content} for m in user_messages]
+        anthropic_messages = [{"role": m.role, "content": _build_content_blocks(m)} for m in user_messages]
 
         kwargs: dict = {
             "model": model,
@@ -81,7 +101,7 @@ class AnthropicProvider(BaseLLMProvider):
         max_tokens = config.max_tokens if config else 4096
 
         system_prompt, user_messages = _split_system(messages)
-        anthropic_messages = [{"role": m.role, "content": m.content} for m in user_messages]
+        anthropic_messages = [{"role": m.role, "content": _build_content_blocks(m)} for m in user_messages]
 
         kwargs: dict = {
             "model": model,

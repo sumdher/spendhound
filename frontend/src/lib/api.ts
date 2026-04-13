@@ -75,6 +75,12 @@ export interface ReceiptPreview {
   description?: string | null;
   category_name?: string | null;
   notes?: string | null;
+  items?: Array<{
+    description?: string;
+    quantity?: number | null;
+    unit_price?: number | null;
+    total?: number | null;
+  }>;
   confidence?: number;
 }
 
