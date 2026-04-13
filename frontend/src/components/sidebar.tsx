@@ -18,6 +18,13 @@ const NAV_ITEMS = [
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const pathname = usePathname();
   const { data: session } = useSession();
+  const avatarUrl = session?.user?.image || session?.user?.avatar_url;
+  const initials = (session?.user?.name || session?.user?.email || "SH")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((chunk) => chunk[0]?.toUpperCase() || "")
+    .join("");
 
   return (
     <>
@@ -30,7 +37,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       />
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-border bg-card transition-transform duration-300 lg:static lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex h-screen w-72 flex-col border-r border-border bg-card transition-transform duration-300 lg:static lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full"
         )}
       >
@@ -45,7 +52,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           <button onClick={onClose} className="ml-auto rounded-md p-1 hover:bg-accent lg:hidden">✕</button>
         </div>
 
-        <nav className="flex-1 space-y-1 p-3">
+        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
           {NAV_ITEMS.map((item) => {
             const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
             return (
@@ -80,8 +87,16 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </nav>
 
         <div className="border-t border-border p-4">
-          <div className="mb-3 text-xs text-muted-foreground">
-            Signed in as <span className="font-medium text-foreground">{session?.user?.email}</span>
+          <div className="mb-4 flex items-center gap-3 rounded-xl border border-border bg-background p-3">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt={session?.user?.name || session?.user?.email || "Profile photo"} className="h-11 w-11 rounded-full object-cover" referrerPolicy="no-referrer" />
+            ) : (
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/15 text-sm font-semibold text-primary">{initials || "SH"}</div>
+            )}
+            <div className="min-w-0">
+              <div className="truncate text-sm font-medium text-foreground">{session?.user?.name || session?.user?.email}</div>
+              <div className="truncate text-xs text-muted-foreground">{session?.user?.email}</div>
+            </div>
           </div>
           <button
             onClick={() => signOut({ callbackUrl: "/login" })}

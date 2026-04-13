@@ -23,10 +23,14 @@ logger = structlog.get_logger(__name__)
 _ACTION_TOKEN_EXPIRY_HOURS = 72
 
 
-async def get_admin_user(current_user: User = Depends(get_current_user)) -> User:
+def is_admin_email(email: str | None) -> bool:
     configured_admin = (settings.admin_email or "").strip().lower()
-    current_email = (current_user.email or "").strip().lower()
-    if not configured_admin or current_email != configured_admin:
+    current_email = (email or "").strip().lower()
+    return bool(configured_admin and current_email == configured_admin)
+
+
+async def get_admin_user(current_user: User = Depends(get_current_user)) -> User:
+    if not is_admin_email(current_user.email):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return current_user
 
@@ -128,13 +132,13 @@ async def list_users(_admin: User = Depends(get_admin_user), db: AsyncSession = 
 
 @router.patch("/panel/users/{user_id}/status")
 async def update_user_status(user_id: uuid.UUID, body: UpdateStatusRequest, admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)) -> dict:
-    if body.status not in ("pending", "approved", "rejected"):
-        raise HTTPException(status_code=400, detail="Invalid status value")
+    if body.status not in ("approved", "rejected"):
+        raise HTTPException(status_code=400, detail="Invalid status value. Expected 'approved' or 'rejected'.")
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    if settings.admin_email and user.email.lower() == settings.admin_email.lower():
+    if is_admin_email(user.email):
         raise HTTPException(status_code=400, detail="Cannot change admin's own status")
     user.status = body.status
     await db.commit()
@@ -148,7 +152,7 @@ async def delete_user(user_id: uuid.UUID, admin: User = Depends(get_admin_user),
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
-    if settings.admin_email and user.email.lower() == settings.admin_email.lower():
+    if is_admin_email(user.email):
         raise HTTPException(status_code=400, detail="Cannot delete the admin account")
     logger.info("Deleting user and all related SpendHound data", target=user.email, admin=admin.email)
     await db.delete(user)

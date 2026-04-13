@@ -8,14 +8,19 @@ from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 
+import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from app.config import settings
 from app.models.budget import Budget
 from app.models.category import Category, MerchantRule
 from app.models.expense import Expense
+from app.models.expense_item import ExpenseItem
 from app.models.receipt import Receipt
+
+logger = structlog.get_logger(__name__)
 
 DEFAULT_CATEGORIES: list[tuple[str, str, str]] = [
     ("Groceries", "#34d399", "shopping-cart"),
@@ -28,6 +33,27 @@ DEFAULT_CATEGORIES: list[tuple[str, str, str]] = [
     ("Shopping", "#22c55e", "store"),
     ("Travel", "#38bdf8", "plane"),
     ("Other", "#94a3b8", "circle-help"),
+]
+
+GROCERY_SUBCATEGORY_RULES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\b(lettuce|tomato|spinach|potato|onion|broccoli|carrot|pepper|cucumber|zucchini|mushroom|salad|vegetable|veg)\b", re.IGNORECASE), "Vegetables"),
+    (re.compile(r"\b(apple|banana|orange|lemon|lime|berry|berries|grape|melon|pear|peach|kiwi|mango|avocado|fruit)\b", re.IGNORECASE), "Fruit"),
+    (re.compile(r"\b(chicken|beef|pork|turkey|sausage|bacon|mince|steak|ham|meat)\b", re.IGNORECASE), "Meat"),
+    (re.compile(r"\b(salmon|tuna|cod|shrimp|prawn|mussel|fish|seafood)\b", re.IGNORECASE), "Fish & Seafood"),
+    (re.compile(r"\b(milk|yogurt|cheese|butter|cream|mozzarella|parmesan|egg|eggs)\b", re.IGNORECASE), "Dairy & Eggs"),
+    (re.compile(r"\b(bread|bagel|croissant|bun|roll|baguette|cake|muffin|bakery|pastry|tortilla)\b", re.IGNORECASE), "Bakery"),
+    (re.compile(r"\b(frozen|ice cream|gelato|pizza|fries|fish fingers)\b", re.IGNORECASE), "Frozen"),
+    (re.compile(r"\b(chips|crisps|cracker|chocolate|cookie|biscuit|snack|candy|popcorn|nuts|trail mix)\b", re.IGNORECASE), "Snacks"),
+    (re.compile(r"\b(water|juice|cola|soda|sparkling|coffee|tea|beer|wine|drink|beverage)\b", re.IGNORECASE), "Beverages"),
+    (re.compile(r"\b(detergent|dish soap|dishwasher|bleach|cleaner|disinfectant|toilet cleaner|laundry|softener|descaler|cleaning)\b", re.IGNORECASE), "Cleaning Products"),
+    (re.compile(r"\b(shampoo|conditioner|soap|body wash|deodorant|toothpaste|toothbrush|razor|lotion|personal care)\b", re.IGNORECASE), "Personal Care"),
+    (re.compile(r"\b(diaper|diapers|wipes|formula|baby food|baby)\b", re.IGNORECASE), "Baby"),
+    (re.compile(r"\b(cat food|dog food|pet food|kibble|litter|treats|pet)\b", re.IGNORECASE), "Pet Care"),
+    (re.compile(r"\b(paper towel|paper towels|napkin|napkins|foil|cling film|garbage bag|trash bag|bin bag|batteries|light bulb|household)\b", re.IGNORECASE), "Household"),
+    (re.compile(r"\b(cereal|granola|oats|muesli|breakfast)\b", re.IGNORECASE), "Breakfast & Cereal"),
+    (re.compile(r"\b(ketchup|mustard|mayo|mayonnaise|vinegar|hot sauce|soy sauce|peppercorn|spice|spices|herb|seasoning|salt)\b", re.IGNORECASE), "Condiments & Spices"),
+    (re.compile(r"\b(pasta|rice|flour|oil|sauce|beans|lentils|canned|soup|pantry|sugar|breadcrumbs|noodles)\b", re.IGNORECASE), "Pantry"),
+    (re.compile(r"\b(ready meal|prepared|meal deal|sandwich|wrap|sushi|rotisserie|deli|take away)\b", re.IGNORECASE), "Prepared Meals"),
 ]
 
 
@@ -43,6 +69,36 @@ def next_month(month_start: date) -> date:
     if month_start.month == 12:
         return date(month_start.year + 1, 1, 1)
     return date(month_start.year, month_start.month + 1, 1)
+
+
+def normalize_grocery_description(description: str | None) -> str:
+    cleaned = re.sub(r"[^a-z0-9&]+", " ", (description or "").lower())
+    return re.sub(r"\s+", " ", cleaned).strip()[:180]
+
+
+def is_grocery_category_name(category_name: str | None) -> bool:
+    return bool(category_name and "groc" in category_name.lower())
+
+
+def derive_grocery_subcategory(description: str | None) -> tuple[str, float]:
+    normalized = normalize_grocery_description(description)
+    if not normalized:
+        return "Other Grocery", 0.55
+    for pattern, label in GROCERY_SUBCATEGORY_RULES:
+        if pattern.search(normalized):
+            return label, 0.92
+    return "Other Grocery", 0.55
+
+
+async def expense_category_name(db: AsyncSession, expense: Expense, category_name: str | None = None) -> str | None:
+    if category_name is not None:
+        return category_name
+    if expense.category is not None:
+        return expense.category.name
+    if expense.category_id is None:
+        return None
+    result = await db.execute(select(Category.name).where(Category.id == expense.category_id))
+    return result.scalar_one_or_none()
 
 
 async def ensure_default_categories(db: AsyncSession, user_id: uuid.UUID) -> None:
@@ -189,6 +245,7 @@ def serialize_receipt(receipt: Receipt) -> dict:
         "ocr_text": receipt.ocr_text,
         "preview": receipt.preview_data,
         "extraction_confidence": receipt.extraction_confidence,
+        "document_kind": receipt.document_kind,
         "extraction_status": receipt.extraction_status,
         "needs_review": receipt.needs_review,
         "review_notes": receipt.review_notes,
@@ -198,8 +255,29 @@ def serialize_receipt(receipt: Receipt) -> dict:
     }
 
 
-def serialize_expense(expense: Expense, *, category_name: str | None = None, receipt_filename: str | None = None) -> dict:
+def serialize_expense_item(item: ExpenseItem) -> dict:
     return {
+        "id": str(item.id),
+        "description": item.description,
+        "quantity": item.quantity,
+        "unit_price": float(item.unit_price) if item.unit_price is not None else None,
+        "total": float(item.total_price) if item.total_price is not None else None,
+        "subcategory": item.subcategory,
+        "subcategory_confidence": item.subcategory_confidence,
+    }
+
+
+def serialize_expense(
+    expense: Expense,
+    *,
+    category_name: str | None = None,
+    receipt_filename: str | None = None,
+    include_items: bool = False,
+    receipt_preview: dict | None = None,
+    receipt_document_kind: str | None = None,
+    receipt_ocr_text: str | None = None,
+) -> dict:
+    payload = {
         "id": str(expense.id),
         "merchant": expense.merchant,
         "description": expense.description,
@@ -219,6 +297,75 @@ def serialize_expense(expense: Expense, *, category_name: str | None = None, rec
         "created_at": expense.created_at.isoformat(),
         "updated_at": expense.updated_at.isoformat(),
     }
+    if include_items:
+        payload["items"] = [serialize_expense_item(item) for item in expense.items]
+        payload["receipt_preview"] = receipt_preview
+        payload["receipt_document_kind"] = receipt_document_kind
+        payload["receipt_ocr_text"] = receipt_ocr_text
+    return payload
+
+
+def _coerce_optional_money(value: Decimal | float | str | None) -> Decimal | None:
+    if value in (None, ""):
+        return None
+    return normalize_money(value)
+
+
+def _coerce_optional_float(value: float | str | None) -> float | None:
+    if value in (None, ""):
+        return None
+    return round(float(value), 2)
+
+
+def _item_value(item: object, field_name: str):
+    if isinstance(item, dict):
+        return item.get(field_name)
+    return getattr(item, field_name, None)
+
+
+async def replace_expense_items(db: AsyncSession, expense: Expense, items: list[object] | None, *, category_name: str | None = None) -> None:
+    resolved_category_name = await expense_category_name(db, expense, category_name)
+    is_grocery_expense = is_grocery_category_name(resolved_category_name)
+    normalized_items: list[ExpenseItem] = []
+    derived_subcategory_count = 0
+    for item in items or []:
+        description = str(_item_value(item, "description") or "").strip()[:300]
+        total_price = _coerce_optional_money(_item_value(item, "total"))
+        if not description and total_price is None:
+            continue
+        subcategory = str(_item_value(item, "subcategory") or "").strip()[:120] or None
+        subcategory_confidence = _coerce_optional_float(_item_value(item, "subcategory_confidence"))
+        if is_grocery_expense and not subcategory:
+            subcategory, subcategory_confidence = derive_grocery_subcategory(description)
+            derived_subcategory_count += 1
+        normalized_items.append(
+            ExpenseItem(
+                expense_id=expense.id,
+                description=description or "Item",
+                quantity=_coerce_optional_float(_item_value(item, "quantity")),
+                unit_price=_coerce_optional_money(_item_value(item, "unit_price")),
+                total_price=total_price,
+                subcategory=subcategory,
+                subcategory_confidence=subcategory_confidence,
+            )
+        )
+
+    await db.execute(
+        delete(ExpenseItem)
+        .where(ExpenseItem.expense_id == expense.id)
+        .execution_options(synchronize_session=False)
+    )
+    if normalized_items:
+        db.add_all(normalized_items)
+    await db.flush()
+    set_committed_value(expense, "items", list(normalized_items))
+    if is_grocery_expense and normalized_items:
+        logger.info(
+            "spendhound.expense_items.subcategories_assigned",
+            expense_id=str(expense.id),
+            item_count=len(normalized_items),
+            derived_subcategory_count=derived_subcategory_count,
+        )
 
 
 async def recompute_recurring_expenses(db: AsyncSession, user_id: uuid.UUID) -> None:

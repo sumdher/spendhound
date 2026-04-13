@@ -32,9 +32,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!session || session.userStatus !== "approved") return null;
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex h-screen overflow-hidden bg-background">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
         <header className="flex h-14 items-center gap-3 border-b border-border bg-card px-4 lg:hidden">
           <button onClick={() => setSidebarOpen(true)} className="rounded-md p-1.5 hover:bg-accent">☰</button>
           <Image src="/icon.svg" alt="SpendHound" width={22} height={22} unoptimized />

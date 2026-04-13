@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.category import Category
+from app.models.expense import Expense
+from app.models.expense_item import ExpenseItem
 from app.models.receipt import Receipt
+from app.services.spendhound import normalize_money, replace_expense_items
 
 pytestmark = pytest.mark.asyncio
 
@@ -90,8 +96,13 @@ async def test_create_expense_from_receipt_is_listed_in_saved_month(client: Asyn
             "currency": "EUR",
             "expense_date": "2026-03-28",
             "category_name": "Dining",
+            "items": [
+                {"description": "Soup", "quantity": 1, "unit_price": 6.5, "total": 6.5},
+                {"description": "Sandwich", "quantity": 1, "unit_price": 12.0, "total": 12.0},
+            ],
             "confidence": 0.97,
         },
+        document_kind="receipt",
         extraction_confidence=0.97,
         extraction_status="review",
         needs_review=True,
@@ -127,3 +138,313 @@ async def test_create_expense_from_receipt_is_listed_in_saved_month(client: Asyn
     assert april_list_response.status_code == 200
     april_listing = april_list_response.json()
     assert all(item["id"] != created["id"] for item in april_listing["items"])
+
+    detail_response = await client.get(f"/api/expenses/{created['id']}", headers=auth_headers)
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert len(detail["items"]) == 2
+    assert detail["items"][0]["description"] == "Soup"
+
+
+async def test_create_expense_from_statement_entry_updates_queue(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+    statement = Receipt(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        original_filename="statement-april.pdf",
+        stored_filename="statement-april.pdf",
+        content_type="application/pdf",
+        storage_path="receipts/test-user/statement-april.pdf",
+        preview_data={
+            "summary": "Parsed 2 statement entries.",
+            "confidence": 0.81,
+            "entries": [
+                {
+                    "merchant": "Carrefour Market",
+                    "amount": 45.67,
+                    "currency": "EUR",
+                    "expense_date": "2026-04-12",
+                    "description": "CARREFOUR MARKET",
+                    "category_name": "Groceries",
+                    "confidence": 0.88,
+                    "status": "pending",
+                    "saved_expense_id": None,
+                },
+                {
+                    "merchant": "Fuel Station",
+                    "amount": 30.0,
+                    "currency": "EUR",
+                    "expense_date": "2026-04-13",
+                    "description": "FUEL STATION",
+                    "category_name": "Transport",
+                    "confidence": 0.84,
+                    "status": "pending",
+                    "saved_expense_id": None,
+                },
+            ],
+        },
+        extraction_confidence=0.81,
+        document_kind="statement",
+        extraction_status="review",
+        needs_review=True,
+    )
+    db_session.add(statement)
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/expenses/from-statement-entry",
+        json={
+            "receipt_id": str(statement.id),
+            "entry_index": 0,
+            "merchant": "Carrefour Market",
+            "description": "Card purchase",
+            "amount": 45.67,
+            "currency": "EUR",
+            "expense_date": "2026-04-12",
+            "category_name": "Groceries",
+            "confidence": 0.88,
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["expense"]["source"] == "statement"
+    assert payload["statement"]["preview"]["entries"][0]["status"] == "finalized"
+    assert payload["statement"]["preview"]["entries"][1]["status"] == "pending"
+
+
+async def test_replace_expense_items_replaces_rows_without_relationship_assignment(db_session: AsyncSession, test_user):
+    expense = Expense(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        merchant="Market Square",
+        amount=normalize_money(12.40),
+        currency="EUR",
+        expense_date=date(2026, 4, 12),
+        source="receipt",
+        confidence=0.91,
+        needs_review=False,
+    )
+    db_session.add(expense)
+    await db_session.flush()
+
+    await replace_expense_items(
+        db_session,
+        expense,
+        [
+            {"description": "Milk", "quantity": 1, "unit_price": 1.8, "total": 1.8},
+            {"description": "Bread", "quantity": 2, "unit_price": 1.2, "total": 2.4},
+        ],
+    )
+    await replace_expense_items(
+        db_session,
+        expense,
+        [
+            {"description": "Coffee", "quantity": 1, "unit_price": 4.5, "total": 4.5},
+        ],
+    )
+
+    stored_items = (
+        (
+            await db_session.execute(
+                select(ExpenseItem).where(ExpenseItem.expense_id == expense.id).order_by(ExpenseItem.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    assert len(stored_items) == 1
+    assert stored_items[0].description == "Coffee"
+    assert stored_items[0].total_price == normalize_money(4.5)
+    assert [item.description for item in expense.items] == ["Coffee"]
+
+
+async def test_replace_expense_items_assigns_deterministic_grocery_subcategories(db_session: AsyncSession, test_user):
+    grocery_category = Category(user_id=test_user.id, name="Groceries", color="#34d399")
+    db_session.add(grocery_category)
+    await db_session.flush()
+
+    expense = Expense(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        merchant="Neighborhood Market",
+        amount=normalize_money(19.80),
+        currency="EUR",
+        expense_date=date(2026, 4, 12),
+        category_id=grocery_category.id,
+        source="receipt",
+        confidence=0.94,
+        needs_review=False,
+    )
+    db_session.add(expense)
+    await db_session.flush()
+
+    await replace_expense_items(
+        db_session,
+        expense,
+        [
+            {"description": "Baby spinach", "quantity": 1, "unit_price": 2.2, "total": 2.2},
+            {"description": "Chicken breast", "quantity": 1, "unit_price": 8.5, "total": 8.5},
+            {"description": "Dish detergent", "quantity": 1, "unit_price": 3.9, "total": 3.9},
+        ],
+    )
+
+    stored_items = (
+        (
+            await db_session.execute(
+                select(ExpenseItem).where(ExpenseItem.expense_id == expense.id).order_by(ExpenseItem.created_at.asc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    assert [item.subcategory for item in stored_items] == ["Vegetables", "Meat", "Cleaning Products"]
+    assert all(item.subcategory_confidence is not None for item in stored_items)
+
+
+async def test_dashboard_analytics_derives_grocery_subcategories_for_existing_blank_items(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+    grocery_category = Category(user_id=test_user.id, name="Groceries", color="#34d399")
+    db_session.add(grocery_category)
+    await db_session.flush()
+
+    expense = Expense(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        merchant="Fresh Mart",
+        amount=normalize_money(17.20),
+        currency="EUR",
+        expense_date=date(2026, 4, 13),
+        category_id=grocery_category.id,
+        source="receipt",
+        confidence=0.96,
+        needs_review=False,
+    )
+    db_session.add(expense)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            ExpenseItem(expense_id=expense.id, description="Bananas", quantity=1, unit_price=1.8, total_price=normalize_money(1.8)),
+            ExpenseItem(expense_id=expense.id, description="Laundry detergent", quantity=1, unit_price=5.4, total_price=normalize_money(5.4)),
+            ExpenseItem(expense_id=expense.id, description="Pasta", quantity=2, unit_price=1.5, total_price=normalize_money(3.0)),
+        ]
+    )
+    await db_session.commit()
+
+    response = await client.get("/api/analytics/dashboard?month=2026-04", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    grouped_names = {item["name"] for item in payload["grocery_insights"]["top_subcategories"]}
+    assert "Fruit" in grouped_names
+    assert "Cleaning Products" in grouped_names
+    assert "Pantry" in grouped_names
+    assert payload["grocery_insights"]["uncategorized_count"] == 0
+
+
+async def test_create_expense_from_receipt_is_idempotent_for_repeated_submission(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+    receipt = Receipt(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        original_filename="duplicate-receipt.jpg",
+        stored_filename="duplicate-receipt.jpg",
+        content_type="image/jpeg",
+        storage_path="receipts/test-user/duplicate-receipt.jpg",
+        preview_data={
+            "merchant": "Corner Bakery",
+            "amount": 9.8,
+            "currency": "EUR",
+            "expense_date": "2026-04-11",
+            "category_name": "Dining",
+            "confidence": 0.92,
+        },
+        extraction_confidence=0.92,
+        document_kind="receipt",
+        extraction_status="review",
+        needs_review=True,
+    )
+    db_session.add(receipt)
+    await db_session.commit()
+
+    payload = {
+        "receipt_id": str(receipt.id),
+        "merchant": "Corner Bakery",
+        "description": "Breakfast",
+        "amount": 9.8,
+        "currency": "EUR",
+        "expense_date": "2026-04-11",
+        "category_name": "Dining",
+        "confidence": 0.92,
+    }
+    first_response = await client.post("/api/expenses/from-receipt", json=payload, headers=auth_headers)
+    second_response = await client.post("/api/expenses/from-receipt", json=payload, headers=auth_headers)
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert first_response.json()["id"] == second_response.json()["id"]
+
+    expense_count = await db_session.scalar(select(func.count(Expense.id)).where(Expense.receipt_id == receipt.id))
+    assert expense_count == 1
+
+    await db_session.refresh(receipt)
+    assert receipt.extraction_status == "finalized"
+    assert receipt.finalized_at is not None
+
+
+async def test_create_expense_from_statement_entry_is_idempotent_for_repeated_submission(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+    statement = Receipt(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        original_filename="duplicate-statement.pdf",
+        stored_filename="duplicate-statement.pdf",
+        content_type="application/pdf",
+        storage_path="receipts/test-user/duplicate-statement.pdf",
+        preview_data={
+            "summary": "Parsed 1 statement entry.",
+            "confidence": 0.8,
+            "entries": [
+                {
+                    "merchant": "Station Kiosk",
+                    "amount": 14.25,
+                    "currency": "EUR",
+                    "expense_date": "2026-04-12",
+                    "description": "STATION KIOSK",
+                    "category_name": "Transport",
+                    "confidence": 0.86,
+                    "status": "pending",
+                    "saved_expense_id": None,
+                }
+            ],
+        },
+        extraction_confidence=0.8,
+        document_kind="statement",
+        extraction_status="review",
+        needs_review=True,
+    )
+    db_session.add(statement)
+    await db_session.commit()
+
+    payload = {
+        "receipt_id": str(statement.id),
+        "entry_index": 0,
+        "merchant": "Station Kiosk",
+        "description": "Transit purchase",
+        "amount": 14.25,
+        "currency": "EUR",
+        "expense_date": "2026-04-12",
+        "category_name": "Transport",
+        "confidence": 0.86,
+    }
+    first_response = await client.post("/api/expenses/from-statement-entry", json=payload, headers=auth_headers)
+    second_response = await client.post("/api/expenses/from-statement-entry", json=payload, headers=auth_headers)
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert first_response.json()["expense"]["id"] == second_response.json()["expense"]["id"]
+
+    expense_count = await db_session.scalar(select(func.count(Expense.id)).where(Expense.receipt_id == statement.id, Expense.source == "statement"))
+    assert expense_count == 1
+
+    await db_session.refresh(statement)
+    assert statement.preview_data["entries"][0]["status"] == "finalized"
+    assert statement.preview_data["entries"][0]["saved_expense_id"] == first_response.json()["expense"]["id"]

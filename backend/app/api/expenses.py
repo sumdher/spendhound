@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.middleware.auth import get_current_user
@@ -19,9 +20,30 @@ from app.models.category import Category
 from app.models.expense import Expense
 from app.models.receipt import Receipt
 from app.models.user import User
-from app.services.spendhound import apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_money, recompute_recurring_expenses, resolve_category, serialize_expense
+from app.services.spendhound import apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_money, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_receipt
 
 router = APIRouter()
+
+
+async def _get_existing_receipt_expense(db: AsyncSession, *, user_id: uuid.UUID, receipt_id: uuid.UUID, source: str = "receipt") -> tuple[Expense, str | None] | None:
+    result = await db.execute(
+        select(Expense, Category.name)
+        .outerjoin(Category, Category.id == Expense.category_id)
+        .where(Expense.user_id == user_id, Expense.receipt_id == receipt_id, Expense.source == source)
+        .order_by(Expense.created_at.asc())
+        .limit(1)
+    )
+    return result.first()
+
+
+async def _get_expense_with_category_name(db: AsyncSession, *, user_id: uuid.UUID, expense_id: uuid.UUID) -> tuple[Expense, str | None] | None:
+    result = await db.execute(
+        select(Expense, Category.name)
+        .outerjoin(Category, Category.id == Expense.category_id)
+        .where(Expense.user_id == user_id, Expense.id == expense_id)
+        .limit(1)
+    )
+    return result.first()
 
 
 class ExpenseCreate(BaseModel):
@@ -49,6 +71,12 @@ class ExpenseUpdate(BaseModel):
 
 class ReceiptExpenseCreate(ExpenseCreate):
     receipt_id: uuid.UUID
+    confidence: float | None = None
+
+
+class StatementExpenseCreate(ExpenseCreate):
+    receipt_id: uuid.UUID
+    entry_index: int
     confidence: float | None = None
 
 
@@ -80,6 +108,7 @@ async def review_queue(current_user: User = Depends(get_current_user), db: Async
                 "id": str(receipt.id),
                 "original_filename": receipt.original_filename,
                 "preview": receipt.preview_data,
+                "document_kind": receipt.document_kind,
                 "needs_review": receipt.needs_review,
                 "extraction_status": receipt.extraction_status,
                 "created_at": receipt.created_at.isoformat(),
@@ -134,10 +163,25 @@ async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_c
 
 @router.post("/from-receipt")
 async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    receipt_result = await db.execute(select(Receipt).where(Receipt.id == body.receipt_id, Receipt.user_id == current_user.id))
+    receipt_result = await db.execute(select(Receipt).where(Receipt.id == body.receipt_id, Receipt.user_id == current_user.id).with_for_update())
     receipt = receipt_result.scalar_one_or_none()
     if receipt is None:
         raise HTTPException(status_code=404, detail="Receipt not found")
+    if receipt.document_kind != "receipt":
+        raise HTTPException(status_code=400, detail="This document is not a receipt upload")
+
+    existing_expense_row = await _get_existing_receipt_expense(db, user_id=current_user.id, receipt_id=receipt.id)
+    if existing_expense_row is not None:
+        existing_expense, existing_category_name = existing_expense_row
+        if receipt.extraction_status != "finalized":
+            receipt.extraction_status = "finalized"
+            receipt.needs_review = existing_expense.needs_review
+            receipt.finalized_at = receipt.finalized_at or datetime.now(timezone.utc)
+            await db.flush()
+        return serialize_expense(existing_expense, category_name=existing_category_name, receipt_filename=receipt.original_filename)
+
+    if receipt.extraction_status == "finalized":
+        raise HTTPException(status_code=409, detail="Receipt has already been finalized")
 
     category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant)
     confidence = body.confidence if body.confidence is not None else receipt.extraction_confidence or 0.5
@@ -164,25 +208,118 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
         "description": body.description,
         "category_name": category.name if category else body.category_name,
         "notes": body.notes,
+        "items": (receipt.preview_data or {}).get("items", []),
         "confidence": confidence,
     }
     receipt.needs_review = expense.needs_review
     receipt.extraction_status = "finalized"
     receipt.finalized_at = datetime.now(timezone.utc)
     await db.flush()
+    await replace_expense_items(db, expense, (receipt.preview_data or {}).get("items", []), category_name=category.name if category else body.category_name)
     await recompute_recurring_expenses(db, current_user.id)
     await db.refresh(expense)
     return serialize_expense(expense, category_name=category.name if category else None, receipt_filename=receipt.original_filename)
 
 
+@router.post("/from-statement-entry")
+async def create_expense_from_statement_entry(body: StatementExpenseCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    receipt_result = await db.execute(select(Receipt).where(Receipt.id == body.receipt_id, Receipt.user_id == current_user.id).with_for_update())
+    receipt = receipt_result.scalar_one_or_none()
+    if receipt is None:
+        raise HTTPException(status_code=404, detail="Statement import not found")
+    if receipt.document_kind != "statement":
+        raise HTTPException(status_code=400, detail="This document is not a statement import")
+
+    preview_data = dict(receipt.preview_data or {})
+    entries = list(preview_data.get("entries") or [])
+    if body.entry_index < 0 or body.entry_index >= len(entries):
+        raise HTTPException(status_code=400, detail="Statement entry index is out of range")
+    entry = dict(entries[body.entry_index] or {})
+    if entry.get("status") == "finalized":
+        saved_expense_id = entry.get("saved_expense_id")
+        if saved_expense_id:
+            existing_expense_row = await _get_expense_with_category_name(db, user_id=current_user.id, expense_id=uuid.UUID(str(saved_expense_id)))
+            if existing_expense_row is not None:
+                existing_expense, existing_category_name = existing_expense_row
+                return {
+                    "expense": serialize_expense(existing_expense, category_name=existing_category_name, receipt_filename=receipt.original_filename),
+                    "statement": serialize_receipt(receipt),
+                }
+        raise HTTPException(status_code=409, detail="Statement entry has already been finalized")
+
+    category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant)
+    confidence = body.confidence if body.confidence is not None else float(entry.get("confidence") or receipt.extraction_confidence or 0.5)
+    expense = Expense(
+        user_id=current_user.id,
+        merchant=body.merchant.strip(),
+        description=body.description,
+        amount=normalize_money(body.amount),
+        currency=body.currency,
+        expense_date=datetime.fromisoformat(body.expense_date).date(),
+        category_id=category.id if category else None,
+        receipt_id=receipt.id,
+        notes=body.notes,
+        source="statement",
+        confidence=confidence,
+        needs_review=expense_requires_review(category, confidence, "statement"),
+    )
+    db.add(expense)
+    await db.flush()
+
+    entry.update(
+        {
+            "merchant": body.merchant,
+            "amount": body.amount,
+            "currency": body.currency,
+            "expense_date": body.expense_date,
+            "description": body.description,
+            "category_name": category.name if category else body.category_name,
+            "notes": body.notes,
+            "confidence": confidence,
+            "status": "finalized",
+            "saved_expense_id": str(expense.id),
+        }
+    )
+    entries[body.entry_index] = entry
+    preview_data["entries"] = entries
+    receipt.preview_data = preview_data
+    has_pending = any((candidate or {}).get("status") != "finalized" for candidate in entries)
+    receipt.extraction_status = "review" if has_pending else "finalized"
+    receipt.needs_review = has_pending or expense.needs_review
+    receipt.finalized_at = None if has_pending else datetime.now(timezone.utc)
+    await db.flush()
+    await recompute_recurring_expenses(db, current_user.id)
+    await db.refresh(expense)
+    return {
+        "expense": serialize_expense(expense, category_name=category.name if category else None, receipt_filename=receipt.original_filename),
+        "statement": serialize_receipt(receipt),
+    }
+
+
 @router.get("/{expense_id}")
 async def get_expense(expense_id: uuid.UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    result = await db.execute(select(Expense, Category.name, Receipt.original_filename).outerjoin(Category, Category.id == Expense.category_id).outerjoin(Receipt, Receipt.id == Expense.receipt_id).where(Expense.id == expense_id, Expense.user_id == current_user.id))
-    row = result.one_or_none()
-    if row is None:
+    result = await db.execute(
+        select(Expense)
+        .options(selectinload(Expense.items), selectinload(Expense.receipt))
+        .where(Expense.id == expense_id, Expense.user_id == current_user.id)
+    )
+    expense = result.scalar_one_or_none()
+    if expense is None:
         raise HTTPException(status_code=404, detail="Expense not found")
-    expense, category_name, receipt_filename = row
-    return serialize_expense(expense, category_name=category_name, receipt_filename=receipt_filename)
+    category_name = None
+    if expense.category_id:
+        category_result = await db.execute(select(Category.name).where(Category.id == expense.category_id, Category.user_id == current_user.id))
+        category_name = category_result.scalar_one_or_none()
+    receipt = expense.receipt
+    return serialize_expense(
+        expense,
+        category_name=category_name,
+        receipt_filename=receipt.original_filename if receipt else None,
+        include_items=True,
+        receipt_preview=receipt.preview_data if receipt else None,
+        receipt_document_kind=receipt.document_kind if receipt else None,
+        receipt_ocr_text=receipt.ocr_text if receipt else None,
+    )
 
 
 @router.patch("/{expense_id}")

@@ -48,7 +48,7 @@ Required values:
 
 Optional values:
 
-- `ADMIN_EMAIL` to require admin approval
+- `ADMIN_EMAIL` to override the default admin email of `srsudhir31@gmail.com`
 - `RESEND_API_KEY` and `RESEND_FROM_EMAIL` for approval emails
 - `OLLAMA_URL` or other LLM provider settings for receipt extraction assist
 - root `.env` values only if you use `docker-compose.prod.yml` or the optional Cloudflare tunnel service
@@ -73,8 +73,8 @@ The backend container runs `alembic upgrade head` automatically before starting 
 
 - Open http://localhost:3001
 - Sign in with Google
-- If `ADMIN_EMAIL` is empty, the first sign-in is auto-approved
-- If `ADMIN_EMAIL` is set, an admin must approve access before the user can enter the app
+- `srsudhir31@gmail.com` is the default admin account and is auto-approved on sign-in
+- Other users require admin approval before they can enter the app unless `ADMIN_EMAIL` is intentionally cleared or changed
 
 ## Local development without Docker
 

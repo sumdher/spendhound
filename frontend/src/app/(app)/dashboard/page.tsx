@@ -108,6 +108,52 @@ export default function DashboardPage() {
                 </ResponsiveContainer>
               </div>
             </div>
+
+            <div className="rounded-2xl border border-border bg-card p-5">
+              <div className="mb-4">
+                <h2 className="font-semibold">Grocery subcategory insights</h2>
+                <p className="text-sm text-muted-foreground">LLM-assisted grouping of stored receipt line items to show what grocery things you buy most and least.</p>
+              </div>
+              {data.grocery_insights.item_count === 0 ? <div className="py-16 text-center text-muted-foreground">No itemized grocery receipts yet for this month.</div> : (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-border bg-background p-4 text-sm text-muted-foreground">{data.grocery_insights.summary}</div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <div className="mb-2 text-sm font-medium">Top grocery subcategories</div>
+                      <div className="space-y-2">
+                        {data.grocery_insights.top_subcategories.map((item) => (
+                          <div key={item.name} className="flex items-center justify-between rounded-xl border border-border px-3 py-3 text-sm">
+                            <div>
+                              <div className="font-medium">{item.name}</div>
+                              <div className="text-xs text-muted-foreground">{item.item_count} items</div>
+                            </div>
+                            <div>{formatCurrency(item.amount)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="mb-2 text-sm font-medium">Lowest-spend grocery subcategories</div>
+                      <div className="space-y-2">
+                        {data.grocery_insights.least_subcategories.map((item) => (
+                          <div key={item.name} className="flex items-center justify-between rounded-xl border border-border px-3 py-3 text-sm">
+                            <div>
+                              <div className="font-medium">{item.name}</div>
+                              <div className="text-xs text-muted-foreground">{item.item_count} items</div>
+                            </div>
+                            <div>{formatCurrency(item.amount)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between rounded-xl border border-border bg-background px-4 py-3 text-sm">
+                    <span>Itemized grocery spend</span>
+                    <span className="font-medium">{formatCurrency(data.grocery_insights.total_itemized_spend)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">

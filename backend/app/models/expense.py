@@ -38,3 +38,4 @@ class Expense(Base):
     user: Mapped["User"] = relationship("User", back_populates="expenses")
     category: Mapped["Category | None"] = relationship("Category", back_populates="expenses")
     receipt: Mapped["Receipt | None"] = relationship("Receipt", back_populates="expenses")
+    items: Mapped[list["ExpenseItem"]] = relationship("ExpenseItem", back_populates="expense", cascade="all, delete-orphan")

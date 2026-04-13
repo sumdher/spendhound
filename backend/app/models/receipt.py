@@ -26,6 +26,7 @@ class Receipt(Base):
     ocr_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     preview_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     extraction_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    document_kind: Mapped[str] = mapped_column(String(20), nullable=False, server_default="receipt")
     extraction_status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="uploaded")
     needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     review_notes: Mapped[str | None] = mapped_column(Text, nullable=True)

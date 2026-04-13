@@ -6,6 +6,18 @@ import { useEffect, useState } from "react";
 import { deleteUser, listAllUsers, updateUserStatus, type AdminUser } from "@/lib/api";
 import { formatDate } from "@/lib/utils";
 
+const STATUS_STYLES: Record<string, string> = {
+  pending: "bg-yellow-500/15 text-yellow-400",
+  approved: "bg-green-500/15 text-green-400",
+  rejected: "bg-orange-500/15 text-orange-400",
+};
+
+const ACTION_BUTTON_STYLES = {
+  approve: "border-green-500/30 text-green-400 hover:bg-green-500/10",
+  reject: "border-orange-500/30 text-orange-400 hover:bg-orange-500/10",
+  delete: "border-red-500/30 text-red-400 hover:bg-red-500/10",
+};
+
 export default function AdminPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -44,18 +56,18 @@ export default function AdminPage() {
               <tbody>
                 {users.map((user) => {
                   const isSelf = user.email === session.user?.email;
+                  const statusLabel = `${user.status.charAt(0).toUpperCase()}${user.status.slice(1)}`;
                   return (
                     <tr key={user.id} className="border-b border-border/50">
                       <td className="py-3 pr-4"><div className="font-medium">{user.name || user.email}</div><div className="text-xs text-muted-foreground">{user.email}</div></td>
-                      <td className="py-3 pr-4"><span className={`rounded-full px-2 py-1 text-xs ${user.status === "approved" ? "bg-green-500/15 text-green-400" : user.status === "pending" ? "bg-yellow-500/15 text-yellow-400" : "bg-red-500/15 text-red-400"}`}>{user.status}</span></td>
+                      <td className="py-3 pr-4"><span className={`rounded-full px-2 py-1 text-xs ${STATUS_STYLES[user.status] ?? "bg-muted text-muted-foreground"}`}>{statusLabel}</span></td>
                       <td className="py-3 pr-4">{user.expense_count}</td>
                       <td className="py-3 pr-4 text-muted-foreground">{formatDate(user.created_at)}</td>
                       <td className="py-3 text-right">
                         <div className="flex justify-end gap-2">
-                          {(["approved", "pending", "rejected"] as const).map((nextStatus) => (
-                            <button key={nextStatus} disabled={isSelf || user.status === nextStatus} onClick={() => updateUserStatus(user.id, nextStatus).then(() => setUsers((prev) => prev.map((item) => item.id === user.id ? { ...item, status: nextStatus } : item)))} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:opacity-50">{nextStatus}</button>
-                          ))}
-                          <button disabled={isSelf} onClick={() => { if (window.confirm(`Delete ${user.email} and all data?`)) deleteUser(user.id).then(() => setUsers((prev) => prev.filter((item) => item.id !== user.id))); }} className="rounded-lg border border-red-500/30 px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 disabled:opacity-50">Delete</button>
+                          <button disabled={isSelf || user.status === "approved"} onClick={() => updateUserStatus(user.id, "approved").then(() => setUsers((prev) => prev.map((item) => item.id === user.id ? { ...item, status: "approved" } : item)))} className={`rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50 ${ACTION_BUTTON_STYLES.approve}`}>Approve</button>
+                          <button disabled={isSelf || user.status === "rejected"} onClick={() => updateUserStatus(user.id, "rejected").then(() => setUsers((prev) => prev.map((item) => item.id === user.id ? { ...item, status: "rejected" } : item)))} className={`rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50 ${ACTION_BUTTON_STYLES.reject}`}>Reject</button>
+                          <button disabled={isSelf} onClick={() => { if (window.confirm(`Delete ${user.email} and all data?`)) deleteUser(user.id).then(() => setUsers((prev) => prev.filter((item) => item.id !== user.id))); }} className={`rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50 ${ACTION_BUTTON_STYLES.delete}`}>Delete</button>
                         </div>
                       </td>
                     </tr>

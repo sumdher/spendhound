@@ -6,13 +6,91 @@ import uuid
 from collections import defaultdict
 from datetime import date
 
-from sqlalchemy import select
+import structlog
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.expense import Expense
-from app.services.spendhound import month_start_from_string, next_month, serialize_budget
+from app.models.expense_item import ExpenseItem
+from app.services.spendhound import derive_grocery_subcategory, month_start_from_string, next_month, serialize_budget
+
+logger = structlog.get_logger(__name__)
+
+
+async def _build_grocery_insights(db: AsyncSession, user_id: uuid.UUID, selected_month: date, month_end: date) -> dict:
+    result = await db.execute(
+        select(ExpenseItem)
+        .join(Expense, Expense.id == ExpenseItem.expense_id)
+        .outerjoin(Category, Category.id == Expense.category_id)
+        .where(
+            Expense.user_id == user_id,
+            Expense.expense_date >= selected_month,
+            Expense.expense_date < month_end,
+            func.lower(Category.name).like("%groc%"),
+        )
+    )
+    grocery_items = result.scalars().all()
+    if not grocery_items:
+        return {
+            "item_count": 0,
+            "total_itemized_spend": 0.0,
+            "summary": "No itemized grocery receipts yet for this month.",
+            "top_subcategories": [],
+            "least_subcategories": [],
+            "uncategorized_count": 0,
+        }
+
+    totals: dict[str, float] = defaultdict(float)
+    counts: dict[str, int] = defaultdict(int)
+    total_itemized_spend = 0.0
+    derived_subcategory_count = 0
+
+    for item in grocery_items:
+        amount = float(item.total_price) if item.total_price is not None else float(item.unit_price or 0) * float(item.quantity or 0)
+        total_itemized_spend += amount
+        label = item.subcategory
+        if not label:
+            label, _ = derive_grocery_subcategory(item.description)
+            derived_subcategory_count += 1
+        totals[label] += amount
+        counts[label] += 1
+
+    if derived_subcategory_count:
+        logger.info(
+            "analytics.grocery_subcategories.derived_for_dashboard",
+            user_id=str(user_id),
+            derived_subcategory_count=derived_subcategory_count,
+            grocery_item_count=len(grocery_items),
+        )
+
+    ordered = sorted(totals.items(), key=lambda candidate: candidate[1], reverse=True)
+    top_subcategories = [
+        {"name": name, "amount": round(amount, 2), "item_count": counts[name]}
+        for name, amount in ordered[:5]
+    ]
+    least_subcategories = [
+        {"name": name, "amount": round(amount, 2), "item_count": counts[name]}
+        for name, amount in sorted(totals.items(), key=lambda candidate: candidate[1])[:3]
+    ]
+    summary = (
+        f"Most grocery spend went to {top_subcategories[0]['name']}"
+        + (f", followed by {top_subcategories[1]['name']}" if len(top_subcategories) > 1 else "")
+        + (
+            f". Your lightest categories were {', '.join(item['name'] for item in least_subcategories)}."
+            if least_subcategories
+            else "."
+        )
+    )
+    return {
+        "item_count": len(grocery_items),
+        "total_itemized_spend": round(total_itemized_spend, 2),
+        "summary": summary,
+        "top_subcategories": top_subcategories,
+        "least_subcategories": least_subcategories,
+        "uncategorized_count": 0,
+    }
 
 
 async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, month: str | None) -> dict:
@@ -77,6 +155,8 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
         actual = monthly_total if category_name is None else category_actuals.get(category_name, 0.0)
         budgets.append(serialize_budget(budget, category_name=category_name, actual=actual))
 
+    grocery_insights = await _build_grocery_insights(db, user_id, selected_month, month_end)
+
     return {
         "month": selected_month.strftime("%Y-%m"),
         "summary": {
@@ -99,4 +179,5 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
         ],
         "recurring_expenses": recurring_items,
         "budgets": budgets,
+        "grocery_insights": grocery_insights,
     }
