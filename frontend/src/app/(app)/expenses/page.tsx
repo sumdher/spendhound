@@ -9,11 +9,11 @@ import { currentMonthString, formatCurrency, formatDate, formatSignedCurrency, m
 function cadenceBadgeClasses(cadence: string) {
   switch (cadence) {
     case "monthly":
-      return "bg-blue-500/15 text-blue-300";
+      return "bg-primary/15 text-primary";
     case "yearly":
-      return "bg-violet-500/15 text-violet-300";
+      return "bg-emerald-500/15 text-emerald-300";
     default:
-      return "bg-slate-500/15 text-slate-300";
+      return "bg-secondary text-muted-foreground";
   }
 }
 
