@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell, Line, LineChart } from "recharts";
 import { getDashboardAnalytics, type DashboardAnalytics } from "@/lib/api";
-import { currentMonthString, formatCurrency, formatDate, formatSignedCurrency, monthLabel, transactionTypeLabel } from "@/lib/utils";
+import { currentMonthString, formatCurrency, formatDate, formatSignedCurrency, monthLabel, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
 
 const COLORS = ["#60a5fa", "#34d399", "#f59e0b", "#f472b6", "#a78bfa", "#fb7185", "#38bdf8"];
 
@@ -217,12 +217,30 @@ export default function DashboardPage() {
                   <div key={expense.id} className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
                     <div>
                       <div className="font-medium">{expense.merchant}</div>
-                      <div className="text-sm text-muted-foreground">{expense.category_name} · {formatDate(expense.expense_date)} · {transactionTypeLabel(expense.transaction_type)}</div>
+                      <div className="text-sm text-muted-foreground">{expense.category_name} · {formatDate(expense.expense_date)} · {transactionTypeLabel(expense.transaction_type)} · {transactionCadenceLabel(expense.cadence)}</div>
                     </div>
                     <div className={`text-right font-medium ${expense.transaction_type === "credit" ? "text-emerald-400" : "text-red-400"}`}>{formatSignedCurrency(expense.amount, expense.transaction_type, expense.currency)}</div>
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <div className="mb-4">
+              <h2 className="font-semibold">Major one-time purchases</h2>
+              <p className="text-sm text-muted-foreground">Large irregular spending called out separately from recurring cashflow so big buys like phones or watches stay visible.</p>
+            </div>
+            <div className="space-y-3">
+              {data.major_one_time_purchases.length === 0 ? <div className="py-12 text-center text-muted-foreground">No major one-time purchases marked for this month.</div> : data.major_one_time_purchases.map((expense) => (
+                <div key={expense.id} className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
+                  <div>
+                    <div className="font-medium">{expense.merchant}</div>
+                    <div className="text-sm text-muted-foreground">{expense.category_name} · {formatDate(expense.expense_date)} · {transactionCadenceLabel(expense.cadence)}</div>
+                  </div>
+                  <div className="text-right font-medium text-red-400">{formatSignedCurrency(expense.amount, expense.transaction_type, expense.currency)}</div>
+                </div>
+              ))}
             </div>
           </div>
 

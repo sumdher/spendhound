@@ -29,6 +29,17 @@ export function transactionTypeLabel(transactionType: string | null | undefined)
   return transactionType === "credit" ? "Money in" : "Money out";
 }
 
+export function transactionCadenceLabel(cadence: string | null | undefined) {
+  switch (cadence) {
+    case "monthly":
+      return "Monthly recurring";
+    case "yearly":
+      return "Yearly recurring";
+    default:
+      return "One-time / irregular";
+  }
+}
+
 export function formatDate(value: string | null | undefined) {
   if (!value) return "—";
   return new Date(value).toLocaleDateString("en-GB", {
@@ -39,6 +50,7 @@ export function formatDate(value: string | null | undefined) {
 }
 
 export function monthLabel(month: string) {
+  if (!month || month === "all") return "All time";
   const [year, monthNumber] = month.split("-").map(Number);
   return new Date(year, monthNumber - 1, 1).toLocaleDateString("en-GB", {
     month: "long",

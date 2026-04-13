@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { getExpense, type Expense, type ReceiptPreview, type StatementImportPreview } from "@/lib/api";
-import { formatCurrency, formatDate, formatSignedCurrency, monthLabel, transactionTypeLabel } from "@/lib/utils";
+import { formatCurrency, formatDate, formatSignedCurrency, monthLabel, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
 
 function isStatementPreview(preview: Expense["receipt_preview"]): preview is StatementImportPreview {
   return Boolean(preview && typeof preview === "object" && "entries" in preview);
@@ -60,8 +60,9 @@ export default function ExpenseDetailPage() {
               <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Description</dt><dd className="mt-1 text-sm">{expense.description || "—"}</dd></div>
               <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Receipt / import file</dt><dd className="mt-1 text-sm">{expense.receipt_filename || "—"}</dd></div>
               <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Transaction type</dt><dd className="mt-1 text-sm">{transactionTypeLabel(expense.transaction_type)}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Cadence</dt><dd className="mt-1 text-sm">{transactionCadenceLabel(expense.cadence)}</dd></div>
               <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Confidence</dt><dd className="mt-1 text-sm">{Math.round(expense.confidence * 100)}%</dd></div>
-              <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Review status</dt><dd className="mt-1 text-sm">{expense.needs_review ? "Needs review" : expense.is_recurring ? "Recurring" : "Tracked"}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Review status</dt><dd className="mt-1 text-sm">{expense.needs_review ? "Needs review" : expense.is_major_purchase ? "Major one-time purchase" : expense.is_recurring ? "Recurring" : "Tracked"}</dd></div>
               <div className="md:col-span-2"><dt className="text-xs uppercase tracking-wide text-muted-foreground">Notes</dt><dd className="mt-1 whitespace-pre-wrap text-sm">{expense.notes || "—"}</dd></div>
             </dl>
           </div>

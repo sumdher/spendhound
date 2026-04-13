@@ -14,7 +14,7 @@ from app.models.budget import Budget
 from app.models.category import Category
 from app.models.expense import Expense
 from app.models.expense_item import ExpenseItem
-from app.services.spendhound import TRANSACTION_TYPE_CREDIT, TRANSACTION_TYPE_DEBIT, derive_grocery_subcategory, month_start_from_string, next_month, serialize_budget, signed_amount
+from app.services.spendhound import CADENCE_ONE_TIME, TRANSACTION_TYPE_CREDIT, TRANSACTION_TYPE_DEBIT, derive_grocery_subcategory, month_start_from_string, next_month, serialize_budget, signed_amount
 
 logger = structlog.get_logger(__name__)
 
@@ -121,6 +121,7 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
     by_merchant_map: dict[str, float] = defaultdict(float)
     income_by_merchant_map: dict[str, float] = defaultdict(float)
     recurring_items: list[dict] = []
+    major_one_time_purchases: list[dict] = []
 
     for expense, category_name in expense_rows:
         bucket = category_name or "Uncategorized"
@@ -141,6 +142,23 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
                     "currency": expense.currency,
                     "expense_date": expense.expense_date.isoformat(),
                     "category_name": bucket,
+                    "cadence": expense.cadence,
+                    "is_major_purchase": expense.is_major_purchase,
+                }
+            )
+        if expense.transaction_type == TRANSACTION_TYPE_DEBIT and expense.cadence == CADENCE_ONE_TIME and expense.is_major_purchase:
+            major_one_time_purchases.append(
+                {
+                    "id": str(expense.id),
+                    "merchant": expense.merchant,
+                    "amount": float(expense.amount),
+                    "signed_amount": signed_amount(expense.amount, expense.transaction_type),
+                    "transaction_type": expense.transaction_type,
+                    "currency": expense.currency,
+                    "expense_date": expense.expense_date.isoformat(),
+                    "category_name": bucket,
+                    "cadence": expense.cadence,
+                    "is_major_purchase": True,
                 }
             )
 
@@ -221,6 +239,7 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
         ],
         "recurring_transactions": recurring_items,
         "recurring_expenses": recurring_items,
+        "major_one_time_purchases": sorted(major_one_time_purchases, key=lambda item: item["amount"], reverse=True)[:6],
         "budgets": budgets,
         "grocery_insights": grocery_insights,
     }

@@ -83,6 +83,7 @@ export interface ReceiptPreview {
   merchant?: string;
   amount?: number | null;
   transaction_type?: string;
+  cadence?: string | null;
   currency?: string;
   expense_date?: string | null;
   description?: string | null;
@@ -90,18 +91,21 @@ export interface ReceiptPreview {
   notes?: string | null;
   items?: ReceiptPreviewItem[];
   confidence?: number;
+  is_major_purchase?: boolean;
 }
 
 export interface StatementImportEntry {
   merchant?: string;
   amount?: number | null;
   transaction_type?: string;
+  cadence?: string | null;
   currency?: string;
   expense_date?: string | null;
   description?: string | null;
   category_name?: string | null;
   notes?: string | null;
   confidence?: number;
+  is_major_purchase?: boolean;
   status?: "pending" | "finalized";
   saved_expense_id?: string | null;
 }
@@ -138,6 +142,9 @@ export interface Expense {
   notes?: string | null;
   is_recurring: boolean;
   recurring_group?: string | null;
+  cadence: string;
+  cadence_override?: string | null;
+  is_major_purchase: boolean;
   category_id?: string | null;
   category_name?: string | null;
   receipt_id?: string | null;
@@ -196,6 +203,8 @@ export interface DashboardAnalytics {
     currency: string;
     expense_date: string;
     category_name: string;
+    cadence: string;
+    is_major_purchase: boolean;
   }>;
   recurring_expenses: Array<{
     id: string;
@@ -206,6 +215,20 @@ export interface DashboardAnalytics {
     currency: string;
     expense_date: string;
     category_name: string;
+    cadence: string;
+    is_major_purchase: boolean;
+  }>;
+  major_one_time_purchases: Array<{
+    id: string;
+    merchant: string;
+    amount: number;
+    signed_amount: number;
+    transaction_type: string;
+    currency: string;
+    expense_date: string;
+    category_name: string;
+    cadence: string;
+    is_major_purchase: boolean;
   }>;
   budgets: Budget[];
   grocery_insights: {

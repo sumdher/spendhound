@@ -14,7 +14,7 @@ from app.models.category import Category
 from app.models.expense import Expense
 from app.models.expense_item import ExpenseItem
 from app.models.receipt import Receipt
-from app.services.spendhound import normalize_money, replace_expense_items
+from app.services.spendhound import normalize_money, recompute_recurring_expenses, replace_expense_items
 
 pytestmark = pytest.mark.asyncio
 
@@ -76,6 +76,36 @@ async def test_create_credit_transaction_and_filter_by_type(client: AsyncClient,
     credit_listing = credit_list_response.json()
     assert any(item["id"] == created["id"] for item in credit_listing["items"])
     assert all(item["transaction_type"] == "credit" for item in credit_listing["items"])
+
+
+async def test_all_time_listing_and_cadence_filter(client: AsyncClient, auth_headers: dict):
+    response = await client.post(
+        "/api/expenses",
+        json={
+            "merchant": "Annual Insurance",
+            "amount": 640.00,
+            "currency": "EUR",
+            "expense_date": "2018-05-10",
+            "category_name": "Bills",
+            "description": "Insurance premium",
+            "cadence": "yearly",
+        },
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 200
+    created = response.json()
+    assert created["cadence"] == "yearly"
+    assert created["is_recurring"] is True
+
+    filtered = await client.get("/api/expenses?month=all&cadence=yearly", headers=auth_headers)
+    assert filtered.status_code == 200
+    payload = filtered.json()
+    assert any(item["id"] == created["id"] for item in payload["items"])
+
+    current_month = await client.get("/api/expenses?month=2026-04", headers=auth_headers)
+    assert current_month.status_code == 200
+    assert all(item["id"] != created["id"] for item in current_month.json()["items"])
 
 
 async def test_review_queue_and_export(client: AsyncClient, auth_headers: dict):
@@ -470,6 +500,60 @@ async def test_dashboard_analytics_separates_money_in_and_out(client: AsyncClien
     assert payload["summary"]["net"] == 2960.0
     assert payload["spend_by_category"][0]["name"] == "Groceries"
     assert payload["income_by_category"][0]["name"] == "Salary"
+
+
+async def test_dashboard_analytics_surfaces_yearly_and_major_one_time_transactions(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+    bills_category = Category(user_id=test_user.id, name="Bills", color="#f87171", transaction_type="debit")
+    shopping_category = Category(user_id=test_user.id, name="Shopping", color="#22c55e", transaction_type="debit")
+    db_session.add_all([bills_category, shopping_category])
+    await db_session.flush()
+
+    yearly_insurance = Expense(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        merchant="Contoso Insurance",
+        amount=normalize_money(680.00),
+        transaction_type="debit",
+        currency="EUR",
+        expense_date=date(2026, 4, 5),
+        category_id=bills_category.id,
+        source="manual",
+        confidence=1.0,
+        needs_review=False,
+        cadence="yearly",
+        cadence_override="yearly",
+    )
+    phone_purchase = Expense(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        merchant="Tech Store",
+        amount=normalize_money(1199.00),
+        transaction_type="debit",
+        currency="EUR",
+        expense_date=date(2026, 4, 9),
+        category_id=shopping_category.id,
+        source="manual",
+        confidence=1.0,
+        needs_review=False,
+        cadence="one_time",
+        cadence_override="one_time",
+        is_major_purchase=True,
+    )
+    db_session.add_all([yearly_insurance, phone_purchase])
+    await db_session.flush()
+    await recompute_recurring_expenses(db_session, test_user.id)
+    await db_session.commit()
+
+    response = await client.get("/api/analytics/dashboard?month=2026-04", headers=auth_headers)
+    assert response.status_code == 200
+    payload = response.json()
+
+    recurring = {item["merchant"]: item for item in payload["recurring_transactions"]}
+    assert recurring["Contoso Insurance"]["cadence"] == "yearly"
+
+    major_purchases = {item["merchant"]: item for item in payload["major_one_time_purchases"]}
+    assert major_purchases["Tech Store"]["cadence"] == "one_time"
+    assert major_purchases["Tech Store"]["is_major_purchase"] is True
 
 
 async def test_create_expense_from_receipt_is_idempotent_for_repeated_submission(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):

@@ -25,6 +25,10 @@ logger = structlog.get_logger(__name__)
 TRANSACTION_TYPE_DEBIT = "debit"
 TRANSACTION_TYPE_CREDIT = "credit"
 
+CADENCE_ONE_TIME = "one_time"
+CADENCE_MONTHLY = "monthly"
+CADENCE_YEARLY = "yearly"
+
 DEFAULT_CATEGORIES: list[tuple[str, str, str, str]] = [
     ("Groceries", "#34d399", "shopping-cart", TRANSACTION_TYPE_DEBIT),
     ("Dining", "#f59e0b", "utensils-crossed", TRANSACTION_TYPE_DEBIT),
@@ -47,7 +51,7 @@ DEFAULT_CATEGORIES: list[tuple[str, str, str, str]] = [
 
 GROCERY_SUBCATEGORY_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b(lettuce|tomato|spinach|potato|onion|broccoli|carrot|pepper|cucumber|zucchini|mushroom|salad|vegetable|veg)\b", re.IGNORECASE), "Vegetables"),
-    (re.compile(r"\b(apple|banana|orange|lemon|lime|berry|berries|grape|melon|pear|peach|kiwi|mango|avocado|fruit)\b", re.IGNORECASE), "Fruit"),
+    (re.compile(r"\b(apple|apples|banana|bananas|orange|oranges|lemon|lemons|lime|limes|berry|berries|grape|grapes|melon|melons|pear|pears|peach|peaches|kiwi|kiwis|mango|mangoes|avocado|avocados|fruit)\b", re.IGNORECASE), "Fruit"),
     (re.compile(r"\b(chicken|beef|pork|turkey|sausage|bacon|mince|steak|ham|meat)\b", re.IGNORECASE), "Meat"),
     (re.compile(r"\b(salmon|tuna|cod|shrimp|prawn|mussel|fish|seafood)\b", re.IGNORECASE), "Fish & Seafood"),
     (re.compile(r"\b(milk|yogurt|cheese|butter|cream|mozzarella|parmesan|egg|eggs)\b", re.IGNORECASE), "Dairy & Eggs"),
@@ -105,9 +109,57 @@ def normalize_transaction_type(value: str | None, default: str = TRANSACTION_TYP
     return mapping.get(normalized, default)
 
 
+def normalize_cadence(value: str | None, default: str = CADENCE_ONE_TIME) -> str:
+    normalized = (value or default).strip().lower().replace("-", "_").replace(" ", "_")
+    mapping = {
+        "one_time": CADENCE_ONE_TIME,
+        "oneoff": CADENCE_ONE_TIME,
+        "one_off": CADENCE_ONE_TIME,
+        "once": CADENCE_ONE_TIME,
+        "irregular": CADENCE_ONE_TIME,
+        "non_recurring": CADENCE_ONE_TIME,
+        "monthly": CADENCE_MONTHLY,
+        "month": CADENCE_MONTHLY,
+        "recurring_monthly": CADENCE_MONTHLY,
+        "yearly": CADENCE_YEARLY,
+        "annual": CADENCE_YEARLY,
+        "annually": CADENCE_YEARLY,
+        "recurring_yearly": CADENCE_YEARLY,
+    }
+    return mapping.get(normalized, default)
+
+
+def cadence_is_recurring(value: str | None) -> bool:
+    return normalize_cadence(value) in {CADENCE_MONTHLY, CADENCE_YEARLY}
+
+
 def signed_amount(value: Decimal | float, transaction_type: str) -> float:
     amount = float(value)
     return round(amount if normalize_transaction_type(transaction_type) == TRANSACTION_TYPE_CREDIT else -amount, 2)
+
+
+def _expense_group_key(expense: Expense) -> tuple[str, str, str]:
+    merchant_key = re.sub(r"[^a-z0-9]+", " ", expense.merchant.lower()).strip()
+    return merchant_key, expense.currency, expense.transaction_type
+
+
+def _detect_recurring_cadence(group: list[Expense]) -> str | None:
+    if len(group) < 2:
+        return None
+    amounts = [float(item.amount) for item in group]
+    avg_amount = sum(amounts) / len(amounts)
+    if avg_amount <= 0:
+        return None
+    if any(abs(amount - avg_amount) / avg_amount > 0.05 for amount in amounts):
+        return None
+    gaps = [(group[index].expense_date - group[index - 1].expense_date).days for index in range(1, len(group))]
+    if not gaps:
+        return None
+    if all(20 <= gap <= 40 for gap in gaps):
+        return CADENCE_MONTHLY
+    if all(330 <= gap <= 390 for gap in gaps):
+        return CADENCE_YEARLY
+    return None
 
 
 def derive_grocery_subcategory(description: str | None) -> tuple[str, float]:
@@ -346,6 +398,9 @@ def serialize_expense(
         "notes": expense.notes,
         "is_recurring": expense.is_recurring,
         "recurring_group": expense.recurring_group,
+        "cadence": expense.cadence,
+        "cadence_override": expense.cadence_override,
+        "is_major_purchase": expense.is_major_purchase,
         "category_id": str(expense.category_id) if expense.category_id else None,
         "category_name": category_name,
         "receipt_id": str(expense.receipt_id) if expense.receipt_id else None,
@@ -427,31 +482,39 @@ async def replace_expense_items(db: AsyncSession, expense: Expense, items: list[
 async def recompute_recurring_expenses(db: AsyncSession, user_id: uuid.UUID) -> None:
     result = await db.execute(select(Expense).where(Expense.user_id == user_id).order_by(Expense.expense_date.asc()))
     expenses = result.scalars().all()
+    grouped: dict[tuple[str, str, str], list[Expense]] = defaultdict(list)
+
     for expense in expenses:
         expense.is_recurring = False
         expense.recurring_group = None
+        if expense.cadence_override:
+            overridden_cadence = normalize_cadence(expense.cadence_override)
+            expense.cadence = overridden_cadence
+            if cadence_is_recurring(overridden_cadence):
+                merchant_key, currency, transaction_type = _expense_group_key(expense)
+                expense.is_recurring = True
+                expense.recurring_group = f"manual:{merchant_key}:{currency}:{transaction_type}:{overridden_cadence}"
+            continue
 
-    grouped: dict[tuple[str, str, str], list[Expense]] = defaultdict(list)
-    for expense in expenses:
-        merchant_key = re.sub(r"[^a-z0-9]+", " ", expense.merchant.lower()).strip()
-        grouped[(merchant_key, expense.currency, expense.transaction_type)].append(expense)
+        expense.cadence = CADENCE_ONE_TIME
+        grouped[_expense_group_key(expense)].append(expense)
 
     for (merchant_key, currency, transaction_type), group in grouped.items():
-        if len(group) < 2 or not merchant_key:
+        if not merchant_key:
             continue
-        amounts = [float(item.amount) for item in group]
-        avg_amount = sum(amounts) / len(amounts)
-        if avg_amount <= 0:
+        detected_cadence = _detect_recurring_cadence(group)
+        if detected_cadence is None:
             continue
-        if any(abs(amount - avg_amount) / avg_amount > 0.05 for amount in amounts):
-            continue
-        gaps = [(group[index].expense_date - group[index - 1].expense_date).days for index in range(1, len(group))]
-        if not gaps or not all(20 <= gap <= 40 for gap in gaps):
-            continue
-        recurring_group = f"{merchant_key}:{currency}:{transaction_type}:{avg_amount:.2f}"
+        avg_amount = sum(float(item.amount) for item in group) / len(group)
+        recurring_group = f"{merchant_key}:{currency}:{transaction_type}:{detected_cadence}:{avg_amount:.2f}"
         for expense in group:
+            expense.cadence = detected_cadence
             expense.is_recurring = True
             expense.recurring_group = recurring_group
+
+    for expense in expenses:
+        if normalize_transaction_type(expense.transaction_type) != TRANSACTION_TYPE_DEBIT or expense.cadence != CADENCE_ONE_TIME:
+            expense.is_major_purchase = False
     await db.flush()
 
 
@@ -462,17 +525,20 @@ def apply_expense_filters(
     month: str | None = None,
     category_id: uuid.UUID | None = None,
     transaction_type: str | None = None,
+    cadence: str | None = None,
     review_only: bool = False,
     search: str | None = None,
 ):
     statement = statement.where(Expense.user_id == user_id)
-    if month:
+    if month and month not in {"all", "all_time"}:
         start = month_start_from_string(month)
         statement = statement.where(Expense.expense_date >= start, Expense.expense_date < next_month(start))
     if category_id:
         statement = statement.where(Expense.category_id == category_id)
     if transaction_type:
         statement = statement.where(Expense.transaction_type == normalize_transaction_type(transaction_type))
+    if cadence and cadence not in {"all", "auto"}:
+        statement = statement.where(Expense.cadence == normalize_cadence(cadence))
     if review_only:
         statement = statement.where((Expense.needs_review.is_(True)) | (Expense.category_id.is_(None)))
     if search:
