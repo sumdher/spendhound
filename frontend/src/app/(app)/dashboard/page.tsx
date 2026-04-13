@@ -5,7 +5,7 @@ import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Toolt
 import { getDashboardAnalytics, type DashboardAnalytics } from "@/lib/api";
 import { currentMonthString, formatCurrency, formatDate, formatSignedCurrency, monthLabel, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
 
-const COLORS = ["#60a5fa", "#34d399", "#f59e0b", "#f472b6", "#a78bfa", "#fb7185", "#38bdf8"];
+const COLORS = ["#34d399", "#22c55e", "#84cc16", "#f59e0b", "#fb7185", "#f97316", "#a3e635"];
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
@@ -100,11 +100,11 @@ export default function DashboardPage() {
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={data.top_merchants} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(110,231,183,0.12)" />
                     <XAxis dataKey="merchant" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
                     <YAxis tickFormatter={(value) => `${value}`} />
                     <Tooltip formatter={(value: number) => formatCurrency(value)} />
-                    <Bar dataKey="amount" fill="#60a5fa" radius={[8, 8, 0, 0]} />
+                    <Bar dataKey="amount" fill="#34d399" radius={[8, 8, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -195,13 +195,13 @@ export default function DashboardPage() {
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={data.monthly_trend}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(110,231,183,0.12)" />
                     <XAxis dataKey="month" />
                     <YAxis />
                     <Tooltip formatter={(value: number) => formatCurrency(value)} />
                     <Line type="monotone" dataKey="money_out" name="Money out" stroke="#f87171" strokeWidth={3} dot={{ r: 3 }} />
                     <Line type="monotone" dataKey="money_in" name="Money in" stroke="#34d399" strokeWidth={3} dot={{ r: 3 }} />
-                    <Line type="monotone" dataKey="net" name="Net" stroke="#60a5fa" strokeWidth={3} dot={{ r: 3 }} />
+                    <Line type="monotone" dataKey="net" name="Net" stroke="#86efac" strokeWidth={3} dot={{ r: 3 }} />
                   </LineChart>
                 </ResponsiveContainer>
               </div>

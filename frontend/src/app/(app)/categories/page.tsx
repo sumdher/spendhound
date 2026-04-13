@@ -6,7 +6,7 @@ import { createCategory, createMerchantRule, deleteCategory, deleteMerchantRule,
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [rules, setRules] = useState<MerchantRule[]>([]);
-  const [categoryForm, setCategoryForm] = useState({ name: "", color: "#60a5fa", description: "", transaction_type: "debit" });
+  const [categoryForm, setCategoryForm] = useState({ name: "", color: "#34d399", description: "", transaction_type: "debit" });
   const [ruleForm, setRuleForm] = useState({ merchant_pattern: "", category_id: "", pattern_type: "contains", priority: "100" });
 
   async function load() {
@@ -30,7 +30,7 @@ export default function CategoriesPage() {
         <form onSubmit={async (event) => {
           event.preventDefault();
           await createCategory({ name: categoryForm.name, color: categoryForm.color, description: categoryForm.description || null, transaction_type: categoryForm.transaction_type });
-          setCategoryForm({ name: "", color: "#60a5fa", description: "", transaction_type: "debit" });
+          setCategoryForm({ name: "", color: "#34d399", description: "", transaction_type: "debit" });
           await load();
         }} className="space-y-4 rounded-2xl border border-border bg-card p-6">
           <h2 className="text-xl font-semibold">Categories</h2>
