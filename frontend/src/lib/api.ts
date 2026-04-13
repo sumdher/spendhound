@@ -16,6 +16,7 @@ export interface Category {
   color: string;
   icon?: string | null;
   description?: string | null;
+  transaction_type: string;
   is_system: boolean;
   created_at: string;
   updated_at: string;
@@ -57,8 +58,9 @@ export interface Receipt {
   content_type?: string | null;
   file_size?: number | null;
   ocr_text?: string | null;
-  preview?: ReceiptPreview | null;
+  preview?: ReceiptPreview | StatementImportPreview | null;
   extraction_confidence?: number | null;
+  document_kind: string;
   extraction_status: string;
   needs_review: boolean;
   review_notes?: string | null;
@@ -67,21 +69,58 @@ export interface Receipt {
   finalized_at?: string | null;
 }
 
+export interface ReceiptPreviewItem {
+  id?: string;
+  description?: string;
+  quantity?: number | null;
+  unit_price?: number | null;
+  total?: number | null;
+  subcategory?: string | null;
+  subcategory_confidence?: number | null;
+}
+
 export interface ReceiptPreview {
   merchant?: string;
   amount?: number | null;
+  transaction_type?: string;
   currency?: string;
   expense_date?: string | null;
   description?: string | null;
   category_name?: string | null;
   notes?: string | null;
-  items?: Array<{
-    description?: string;
-    quantity?: number | null;
-    unit_price?: number | null;
-    total?: number | null;
-  }>;
+  items?: ReceiptPreviewItem[];
   confidence?: number;
+}
+
+export interface StatementImportEntry {
+  merchant?: string;
+  amount?: number | null;
+  transaction_type?: string;
+  currency?: string;
+  expense_date?: string | null;
+  description?: string | null;
+  category_name?: string | null;
+  notes?: string | null;
+  confidence?: number;
+  status?: "pending" | "finalized";
+  saved_expense_id?: string | null;
+}
+
+export interface StatementImportPreview {
+  summary?: string | null;
+  notes?: string | null;
+  confidence?: number | null;
+  entries: StatementImportEntry[];
+}
+
+export interface ExpenseItem {
+  id: string;
+  description: string;
+  quantity?: number | null;
+  unit_price?: number | null;
+  total?: number | null;
+  subcategory?: string | null;
+  subcategory_confidence?: number | null;
 }
 
 export interface Expense {
@@ -89,6 +128,8 @@ export interface Expense {
   merchant: string;
   description?: string | null;
   amount: number;
+  signed_amount: number;
+  transaction_type: string;
   currency: string;
   expense_date: string;
   source: string;
@@ -101,6 +142,10 @@ export interface Expense {
   category_name?: string | null;
   receipt_id?: string | null;
   receipt_filename?: string | null;
+  receipt_document_kind?: string | null;
+  receipt_preview?: ReceiptPreview | StatementImportPreview | null;
+  receipt_ocr_text?: string | null;
+  items?: ExpenseItem[];
   created_at: string;
   updated_at: string;
 }
@@ -114,7 +159,8 @@ export interface ReviewQueue {
   receipts: Array<{
     id: string;
     original_filename: string;
-    preview?: ReceiptPreview | null;
+    preview?: ReceiptPreview | StatementImportPreview | null;
+    document_kind?: string;
     needs_review: boolean;
     extraction_status: string;
     created_at: string;
@@ -126,22 +172,55 @@ export interface DashboardAnalytics {
   month: string;
   summary: {
     total_spend: number;
+    total_income: number;
+    money_in: number;
+    money_out: number;
+    net: number;
     transaction_count: number;
     average_transaction: number;
+    average_outflow: number;
+    average_inflow: number;
     review_count: number;
   };
   spend_by_category: { name: string; amount: number }[];
+  income_by_category: { name: string; amount: number }[];
   top_merchants: { merchant: string; amount: number }[];
-  monthly_trend: { month: string; amount: number }[];
+  top_income_sources: { merchant: string; amount: number }[];
+  monthly_trend: { month: string; amount: number; money_in: number; money_out: number; net: number }[];
+  recurring_transactions: Array<{
+    id: string;
+    merchant: string;
+    amount: number;
+    signed_amount: number;
+    transaction_type: string;
+    currency: string;
+    expense_date: string;
+    category_name: string;
+  }>;
   recurring_expenses: Array<{
     id: string;
     merchant: string;
     amount: number;
+    signed_amount: number;
+    transaction_type: string;
     currency: string;
     expense_date: string;
     category_name: string;
   }>;
   budgets: Budget[];
+  grocery_insights: {
+    item_count: number;
+    total_itemized_spend: number;
+    summary: string;
+    top_subcategories: Array<{ name: string; amount: number; item_count: number }>;
+    least_subcategories: Array<{ name: string; amount: number; item_count: number }>;
+    uncategorized_count: number;
+  };
+}
+
+export interface StatementFinalizeResponse {
+  expense: Expense;
+  statement: Receipt;
 }
 
 export interface AdminUser {
@@ -150,6 +229,7 @@ export interface AdminUser {
   name?: string | null;
   avatar_url?: string | null;
   status: string;
+  is_admin: boolean;
   expense_count: number;
   created_at: string;
 }
@@ -326,6 +406,21 @@ export async function uploadReceipt(file: File): Promise<Receipt> {
   if (llmConfig.apiKey) formData.append("api_key", llmConfig.apiKey);
   if (llmConfig.baseUrl) formData.append("base_url", llmConfig.baseUrl);
   return apiFetch<Receipt>("/api/receipts/upload", { method: "POST", body: formData });
+}
+
+export async function uploadStatement(file: File): Promise<Receipt> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const llmConfig = getLLMConfig();
+  if (llmConfig.provider) formData.append("provider", llmConfig.provider);
+  if (llmConfig.model) formData.append("model", llmConfig.model);
+  if (llmConfig.apiKey) formData.append("api_key", llmConfig.apiKey);
+  if (llmConfig.baseUrl) formData.append("base_url", llmConfig.baseUrl);
+  return apiFetch<Receipt>("/api/receipts/upload-statement", { method: "POST", body: formData });
+}
+
+export async function createExpenseFromStatementEntry(data: Record<string, unknown>): Promise<StatementFinalizeResponse> {
+  return apiFetch<StatementFinalizeResponse>("/api/expenses/from-statement-entry", { method: "POST", body: JSON.stringify(data) });
 }
 
 export async function getDashboardAnalytics(month?: string): Promise<DashboardAnalytics> {

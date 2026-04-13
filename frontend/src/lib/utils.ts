@@ -14,6 +14,21 @@ export function formatCurrency(amount: number | null | undefined, currency = "EU
   }).format(amount);
 }
 
+export function signedTransactionAmount(amount: number | null | undefined, transactionType: string | null | undefined) {
+  if (amount === null || amount === undefined) return null;
+  return transactionType === "credit" ? amount : -amount;
+}
+
+export function formatSignedCurrency(amount: number | null | undefined, transactionType: string | null | undefined, currency = "EUR") {
+  const signed = signedTransactionAmount(amount, transactionType);
+  if (signed === null) return "—";
+  return formatCurrency(signed, currency);
+}
+
+export function transactionTypeLabel(transactionType: string | null | undefined) {
+  return transactionType === "credit" ? "Money in" : "Money out";
+}
+
 export function formatDate(value: string | null | undefined) {
   if (!value) return "—";
   return new Date(value).toLocaleDateString("en-GB", {
@@ -34,6 +49,16 @@ export function monthLabel(month: string) {
 export function currentMonthString() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function shiftMonth(month: string, delta: number) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const shifted = new Date(year, monthNumber - 1 + delta, 1);
+  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function recentMonthOptions(count = 12, anchorMonth = currentMonthString()) {
+  return Array.from({ length: count }, (_, index) => shiftMonth(anchorMonth, -index));
 }
 
 export function triggerDownload(blob: Blob, filename: string) {

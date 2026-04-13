@@ -12,7 +12,7 @@ from app.database import Base
 
 
 class Category(Base):
-    """User-defined spending category."""
+    """User-defined transaction category."""
 
     __tablename__ = "categories"
     __table_args__ = (UniqueConstraint("user_id", "name", name="uq_categories_user_name"),)
@@ -23,6 +23,7 @@ class Category(Base):
     color: Mapped[str] = mapped_column(String(20), nullable=False, server_default="#60a5fa")
     icon: Mapped[str | None] = mapped_column(String(32), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    transaction_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="debit", index=True)
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

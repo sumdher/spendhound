@@ -9,16 +9,18 @@ import uuid
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any
 
 from fastapi import UploadFile
 from pydantic import BaseModel, Field
+import pdfplumber
 from pypdf import PdfReader
 import structlog
 
 from app.config import settings
 from app.services.llm.base import ImageInput, LLMConfig, Message
 from app.services.llm.factory import get_llm_provider
-from app.services.spendhound import resolve_category
+from app.services.spendhound import TRANSACTION_TYPE_CREDIT, TRANSACTION_TYPE_DEBIT, normalize_transaction_type, resolve_category
 
 
 logger = structlog.get_logger(__name__)
@@ -29,11 +31,14 @@ class ReceiptPreviewItemModel(BaseModel):
     quantity: float | None = Field(default=None)
     unit_price: float | None = Field(default=None)
     total: float | None = Field(default=None)
+    subcategory: str | None = Field(default=None)
+    subcategory_confidence: float | None = Field(default=None, ge=0, le=1)
 
 
 class ReceiptPreviewModel(BaseModel):
     merchant: str | None = Field(default=None)
     amount: float | None = Field(default=None)
+    transaction_type: str | None = Field(default=TRANSACTION_TYPE_DEBIT)
     currency: str | None = Field(default=settings.default_currency)
     expense_date: str | None = Field(default=None)
     description: str | None = Field(default=None)
@@ -41,6 +46,27 @@ class ReceiptPreviewModel(BaseModel):
     notes: str | None = Field(default=None)
     items: list[ReceiptPreviewItemModel] | None = Field(default_factory=list)
     confidence: float | None = Field(default=0.35, ge=0, le=1)
+
+
+class StatementPreviewEntryModel(BaseModel):
+    merchant: str | None = Field(default=None)
+    amount: float | None = Field(default=None)
+    transaction_type: str | None = Field(default=TRANSACTION_TYPE_DEBIT)
+    currency: str | None = Field(default=settings.default_currency)
+    expense_date: str | None = Field(default=None)
+    description: str | None = Field(default=None)
+    category_name: str | None = Field(default=None)
+    notes: str | None = Field(default=None)
+    confidence: float | None = Field(default=0.45, ge=0, le=1)
+    status: str | None = Field(default="pending")
+    saved_expense_id: str | None = Field(default=None)
+
+
+class StatementPreviewModel(BaseModel):
+    summary: str | None = Field(default=None)
+    notes: str | None = Field(default=None)
+    confidence: float | None = Field(default=0.45, ge=0, le=1)
+    entries: list[StatementPreviewEntryModel] = Field(default_factory=list)
 
 
 @dataclass
@@ -52,7 +78,7 @@ class StoredReceipt:
 
 @dataclass
 class ReceiptExtractionResult:
-    preview: ReceiptPreviewModel
+    preview: ReceiptPreviewModel | StatementPreviewModel
     extracted_text: str | None = None
     used_text_fallback: bool = False
 
@@ -74,6 +100,17 @@ async def extract_text_from_file(storage_path: str, content_type: str | None) ->
     if (content_type or "").startswith("text/"):
         return file_bytes.decode("utf-8", errors="ignore").strip()
     if path.suffix.lower() == ".pdf":
+        plumber_text: list[str] = []
+        try:
+            with pdfplumber.open(storage_path) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text(layout=True) or page.extract_text() or ""
+                    if page_text.strip():
+                        plumber_text.append(page_text)
+        except Exception:
+            plumber_text = []
+        if plumber_text:
+            return "\n\n".join(plumber_text).strip()
         try:
             reader = PdfReader(storage_path)
             return "\n".join((page.extract_text() or "") for page in reader.pages).strip()
@@ -108,6 +145,62 @@ def _normalize_items(items: list[ReceiptPreviewItemModel] | None) -> list[Receip
                 except (InvalidOperation, ValueError):
                     parsed = None
                 setattr(cleaned, field_name, parsed)
+        if cleaned.subcategory:
+            cleaned.subcategory = cleaned.subcategory.strip()[:120] or None
+        if cleaned.subcategory_confidence is not None:
+            cleaned.subcategory_confidence = min(max(cleaned.subcategory_confidence, 0.0), 1.0)
+        normalized.append(cleaned)
+    return normalized
+
+
+_CREDIT_DESCRIPTION_KEYWORDS = {
+    "salary",
+    "payroll",
+    "refund",
+    "reimbursement",
+    "interest",
+    "gift",
+    "transfer in",
+    "incoming transfer",
+    "cashback",
+    "dividend",
+    "bonus",
+    "deposit",
+}
+
+
+def _infer_transaction_type(description: str | None, amount: float | None) -> str:
+    normalized_description = re.sub(r"\s+", " ", (description or "").lower()).strip()
+    if any(keyword in normalized_description for keyword in _CREDIT_DESCRIPTION_KEYWORDS):
+        return TRANSACTION_TYPE_CREDIT
+    if amount is not None and amount < 0:
+        return TRANSACTION_TYPE_DEBIT
+    return TRANSACTION_TYPE_DEBIT
+
+
+def _normalize_statement_entries(entries: list[StatementPreviewEntryModel] | None) -> list[StatementPreviewEntryModel]:
+    normalized: list[StatementPreviewEntryModel] = []
+    for entry in (entries or [])[:200]:
+        cleaned = StatementPreviewEntryModel.model_validate(entry)
+        if cleaned.amount is not None:
+            try:
+                normalized_amount = float(Decimal(str(cleaned.amount)).quantize(Decimal("0.01")))
+            except (InvalidOperation, ValueError):
+                normalized_amount = None
+            cleaned.transaction_type = normalize_transaction_type(cleaned.transaction_type or _infer_transaction_type(cleaned.description, normalized_amount), default=TRANSACTION_TYPE_DEBIT)
+            cleaned.amount = abs(normalized_amount) if normalized_amount is not None else None
+        else:
+            cleaned.transaction_type = normalize_transaction_type(cleaned.transaction_type, default=TRANSACTION_TYPE_DEBIT)
+        cleaned.currency = _normalize_currency(cleaned.currency)
+        cleaned.expense_date = _parse_date_candidate(cleaned.expense_date)
+        cleaned.merchant = (cleaned.merchant or "").strip()[:255] or None
+        cleaned.description = (cleaned.description or "").strip()[:300] or None
+        cleaned.category_name = (cleaned.category_name or "").strip()[:120] or None
+        cleaned.notes = (cleaned.notes or "").strip()[:2000] or None
+        cleaned.status = cleaned.status if cleaned.status in {"pending", "finalized"} else "pending"
+        cleaned.confidence = min(max(cleaned.confidence if cleaned.confidence is not None else 0.45, 0.0), 1.0)
+        if cleaned.amount is None or not cleaned.merchant or cleaned.expense_date is None:
+            continue
         normalized.append(cleaned)
     return normalized
 
@@ -116,12 +209,35 @@ def _parse_date_candidate(value: str | None) -> str | None:
     if not value:
         return None
     candidate = value.strip().replace("/", "-")
+    if re.fullmatch(r"\d{2}-\d{2}-\d{2}", candidate):
+        day, month, year = candidate.split("-")
+        return f"20{year}-{month}-{day}"
     if re.fullmatch(r"\d{2}-\d{2}-\d{4}", candidate):
         day, month, year = candidate.split("-")
         return f"{year}-{month}-{day}"
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", candidate):
         return candidate
     return None
+
+
+def _parse_amount_candidate(value: str | None) -> float | None:
+    if not value:
+        return None
+    candidate = value.strip().replace(" ", "")
+    if "," in candidate and "." in candidate:
+        if candidate.rfind(",") > candidate.rfind("."):
+            candidate = candidate.replace(".", "").replace(",", ".")
+        else:
+            candidate = candidate.replace(",", "")
+    else:
+        candidate = candidate.replace(",", ".")
+    candidate = re.sub(r"[^0-9\.-]", "", candidate)
+    if not candidate:
+        return None
+    try:
+        return float(Decimal(candidate).quantize(Decimal("0.01")))
+    except (InvalidOperation, ValueError):
+        return None
 
 
 def _merchant_hint_from_filename(filename: str) -> str | None:
@@ -180,6 +296,7 @@ def _finalize_preview_model(model: ReceiptPreviewModel, *, filename: str | None 
             model.amount = None
     elif isinstance(defaults["amount"], float):
         model.amount = defaults["amount"]
+    model.transaction_type = normalize_transaction_type(model.transaction_type, default=TRANSACTION_TYPE_DEBIT)
     model.currency = _normalize_currency(model.currency)
     if model.merchant:
         model.merchant = model.merchant.strip()[:255]
@@ -195,6 +312,19 @@ def _finalize_preview_model(model: ReceiptPreviewModel, *, filename: str | None 
         model.notes = model.notes.strip()[:2000] or None
     model.confidence = min(max(model.confidence if model.confidence is not None else 0.35, 0.0), 1.0)
     model.items = _normalize_items(model.items)
+    return model
+
+
+def _finalize_statement_preview(model: StatementPreviewModel, *, text: str | None = None) -> StatementPreviewModel:
+    model.summary = (model.summary or "").strip()[:500] or None
+    model.notes = (model.notes or "").strip()[:2000] or None
+    model.confidence = min(max(model.confidence if model.confidence is not None else 0.45, 0.0), 1.0)
+    model.entries = _normalize_statement_entries(model.entries)
+    if model.summary is None and model.entries:
+        merchants = ", ".join(entry.merchant or "Unknown" for entry in model.entries[:3])
+        model.summary = f"Imported {len(model.entries)} candidate expenses from statement text, including {merchants}."
+    if model.notes is None:
+        model.notes = "Bank statement import extracted multiple candidate expenses that require review before save."
     return model
 
 
@@ -277,6 +407,7 @@ def fallback_preview_from_text(text: str, filename: str) -> ReceiptPreviewModel:
     return _finalize_preview_model(ReceiptPreviewModel(
         merchant=defaults["merchant"] if isinstance(defaults["merchant"], str) else None,
         amount=defaults["amount"] if isinstance(defaults["amount"], float) else None,
+        transaction_type=TRANSACTION_TYPE_DEBIT,
         expense_date=defaults["expense_date"] if isinstance(defaults["expense_date"], str) else None,
         description=defaults["description"] if isinstance(defaults["description"], str) else None,
         notes="Fallback text extraction used after multimodal receipt extraction was unavailable or failed.",
@@ -284,19 +415,69 @@ def fallback_preview_from_text(text: str, filename: str) -> ReceiptPreviewModel:
     ), filename=filename, context_text=text)
 
 
+def _merchant_from_statement_description(description: str) -> str | None:
+    normalized = re.sub(r"\s+", " ", description).strip(" -")
+    normalized = re.sub(r"\b(?:card|visa|pos|debit|purchase|payment|transaction|auth|ref)\b", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\s+", " ", normalized).strip(" -")
+    if not normalized:
+        return None
+    return normalized.title()[:255]
+
+
+def fallback_statement_preview_from_text(text: str, filename: str) -> StatementPreviewModel:
+    entries: list[StatementPreviewEntryModel] = []
+    pattern = re.compile(
+        r"(?P<date>\d{2}[/-]\d{2}[/-](?:\d{2}|\d{4})|\d{4}-\d{2}-\d{2})\s+(?P<description>.+?)\s+(?P<amount>-?[\d\.,]+)\s*$"
+    )
+    for line in text.splitlines():
+        candidate = line.strip()
+        match = pattern.search(candidate)
+        if not match:
+            continue
+        amount = _parse_amount_candidate(match.group("amount"))
+        description = match.group("description").strip()
+        expense_date = _parse_date_candidate(match.group("date"))
+        merchant = _merchant_from_statement_description(description)
+        if amount is None or expense_date is None or merchant is None:
+            continue
+        entries.append(
+            StatementPreviewEntryModel(
+                merchant=merchant,
+                amount=abs(amount),
+                transaction_type=normalize_transaction_type(_infer_transaction_type(description, amount), default=TRANSACTION_TYPE_DEBIT),
+                currency=settings.default_currency,
+                expense_date=expense_date,
+                description=description[:300],
+                notes="Fallback statement parsing used line-based PDF text extraction.",
+                confidence=0.58,
+                status="pending",
+            )
+        )
+    return _finalize_statement_preview(
+        StatementPreviewModel(
+            summary=f"Parsed {len(entries)} statement lines from {filename}." if entries else None,
+            notes="Statement import used a local text parser because structured extraction was unavailable or returned invalid data.",
+            confidence=0.58 if entries else 0.2,
+            entries=entries,
+        ),
+        text=text,
+    )
+
+
 def _receipt_prompt(filename: str) -> str:
     return (
         "Read this receipt image directly and return strict JSON only. "
         "Return exactly one minified JSON object and no surrounding prose, markdown, or code fences. "
-        "Infer the best possible structured expense draft from the receipt itself. "
+        "Infer the best possible structured transaction draft from the receipt itself. "
         "Use null only when the value is genuinely not visible or inferable from the receipt. "
         "Return exactly one JSON object with keys: "
-        "merchant, amount, currency, expense_date, description, category_name, notes, items, confidence. "
+        "merchant, amount, transaction_type, currency, expense_date, description, category_name, notes, items, confidence. "
         "The items value must be an array of objects with keys: description, quantity, unit_price, total. "
         "Use JSON numbers for amount, quantity, unit_price, total, and confidence. "
         "Use double-quoted JSON strings. "
         "Set expense_date to ISO format YYYY-MM-DD when possible. "
         "Set currency to an ISO-style currency code when possible. "
+        "Use transaction_type='credit' only when the document clearly represents money coming in, such as a refund or reimbursement; otherwise use 'debit'. "
         "Confidence must be a number between 0 and 1 reflecting extraction certainty. "
         f"Filename: {filename}"
     )
@@ -335,7 +516,8 @@ async def llm_receipt_preview_from_image(
                 Message(
                     role="system",
                     content=(
-                        "You extract receipt fields from images into validated JSON for an expense draft. "
+                        "You extract receipt fields from images into validated JSON for a transaction draft. "
+                        "The JSON may represent either a debit expense or a credit refund, but default to debit when unsure. "
                         "Never return prose, markdown, or code fences. Return JSON only."
                     ),
                 ),
@@ -384,7 +566,7 @@ async def llm_receipt_preview(text: str, filename: str, llm_config: LLMConfig | 
                 Message(
                     role="system",
                     content=(
-                        "You extract expense receipt fields into strict JSON only. Return one object with keys: merchant, amount, currency, expense_date, description, category_name, notes, items, confidence. Use null where unknown."
+                        "You extract receipt transaction fields into strict JSON only. Return one object with keys: merchant, amount, transaction_type, currency, expense_date, description, category_name, notes, items, confidence. Use null where unknown and default transaction_type to debit when unsure."
                     ),
                 ),
                 Message(
@@ -413,6 +595,61 @@ async def llm_receipt_preview(text: str, filename: str, llm_config: LLMConfig | 
     except Exception as exc:
         logger.warning(
             "receipt_extraction.text_llm_failed",
+            filename=filename,
+            provider=_effective_provider_name(llm_config),
+            model=_effective_model_name(llm_config),
+            error=str(exc),
+        )
+        return None
+
+
+def _statement_prompt(filename: str, text: str) -> str:
+    return (
+        "Extract bank statement transactions into strict JSON only. "
+        "Return exactly one JSON object with keys: summary, notes, confidence, entries. "
+        "The entries value must be an array of objects with keys: merchant, amount, transaction_type, currency, expense_date, description, category_name, notes, confidence, status, saved_expense_id. "
+        "Use status='pending' and saved_expense_id=null for every extracted entry. "
+        "Include both money-out debits and money-in credits such as salary, gifts, refunds, reimbursements, transfer-ins, and interest when they appear as real account activity. "
+        "Use positive JSON numbers for amounts, set transaction_type to either 'debit' or 'credit', and use ISO dates when possible. "
+        f"Filename: {filename}\n\nStatement text:\n{text[:16000]}"
+    )
+
+
+async def llm_statement_preview(text: str, filename: str, llm_config: LLMConfig | None) -> StatementPreviewModel | None:
+    if not text.strip():
+        return None
+    try:
+        provider = get_llm_provider(llm_config)
+        request_config = _receipt_llm_config(llm_config)
+        response = await provider.complete(
+            [
+                Message(
+                    role="system",
+                    content=(
+                        "You extract bank statement transactions into strict JSON only. "
+                        "Represent both debit spend and credit income transactions with a transaction_type field. "
+                        "Return a single valid JSON object and no prose or markdown."
+                    ),
+                ),
+                Message(role="user", content=_statement_prompt(filename, text)),
+            ],
+            request_config,
+        )
+        payload = _extract_json_object(response)
+        if payload is None:
+            logger.warning(
+                "receipt_extraction.statement_json_parse_failed",
+                filename=filename,
+                provider=_effective_provider_name(request_config),
+                model=_effective_model_name(request_config),
+                response_preview=_response_preview(response),
+            )
+            return None
+        model = StatementPreviewModel.model_validate(payload)
+        return _finalize_statement_preview(model, text=text)
+    except Exception as exc:
+        logger.warning(
+            "receipt_extraction.statement_llm_failed",
             filename=filename,
             provider=_effective_provider_name(llm_config),
             model=_effective_model_name(llm_config),
@@ -451,12 +688,47 @@ async def build_receipt_preview(
             )
             preview = fallback_preview_from_text(extracted_text, filename)
     if preview.category_name is None and preview.merchant:
-        category = await resolve_category(db, user_id, merchant=preview.merchant)
+        category = await resolve_category(db, user_id, merchant=preview.merchant, transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT)
         if category is not None:
             preview.category_name = category.name
             preview.confidence = max(preview.confidence, 0.72)
     preview = _finalize_preview_model(preview, filename=filename, context_text=extracted_text)
     return ReceiptExtractionResult(preview=preview, extracted_text=extracted_text, used_text_fallback=used_text_fallback)
+
+
+async def build_statement_preview(
+    db,
+    user_id: uuid.UUID,
+    *,
+    storage_path: str,
+    content_type: str | None,
+    filename: str,
+    llm_config: LLMConfig | None,
+) -> ReceiptExtractionResult:
+    extracted_text = await extract_text_from_file(storage_path, content_type)
+    preview = await llm_statement_preview(extracted_text, filename, llm_config)
+    if preview is None:
+        logger.info("receipt_extraction.using_statement_fallback", filename=filename, content_type=content_type)
+        preview = fallback_statement_preview_from_text(extracted_text, filename)
+    resolved_entries: list[dict[str, Any]] = []
+    for entry in preview.entries:
+        payload = entry.model_dump()
+        if payload.get("category_name") is None and payload.get("merchant"):
+            category = await resolve_category(db, user_id, merchant=payload["merchant"], transaction_type=payload.get("transaction_type") or TRANSACTION_TYPE_DEBIT)
+            if category is not None:
+                payload["category_name"] = category.name
+                payload["confidence"] = max(float(payload.get("confidence") or 0.45), 0.72)
+        resolved_entries.append(payload)
+    preview = _finalize_statement_preview(
+        StatementPreviewModel(
+            summary=preview.summary,
+            notes=preview.notes,
+            confidence=preview.confidence,
+            entries=resolved_entries,
+        ),
+        text=extracted_text,
+    )
+    return ReceiptExtractionResult(preview=preview, extracted_text=extracted_text, used_text_fallback=True)
 
 
 def create_llm_config(*, provider: str | None, model: str | None, api_key: str | None, base_url: str | None) -> LLMConfig | None:

@@ -39,7 +39,10 @@ class Settings(BaseSettings):
     nebius_model: str = Field(default="", description="Nebius model name")
     nebius_base_url: str = Field(default="", description="Nebius base URL")
 
-    admin_email: str = Field(default="", description="Admin email")
+    admin_email: str = Field(
+        default="srsudhir31@gmail.com",
+        description="Admin email used for admin authorization and access approval",
+    )
     app_url: str = Field(default="http://localhost:3000", description="Public frontend URL")
     resend_api_key: str = Field(default="", description="Resend API key")
     resend_from_email: str = Field(default="", description="Approval email sender")

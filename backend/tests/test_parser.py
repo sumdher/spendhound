@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.receipt_extraction import _extract_json_object, fallback_preview_from_text, llm_receipt_preview, llm_receipt_preview_from_image
+from app.services.receipt_extraction import _extract_json_object, extract_text_from_file, fallback_preview_from_text, fallback_statement_preview_from_text, llm_receipt_preview, llm_receipt_preview_from_image
 from app.services.llm.base import ImageInput, LLMConfig, Message
 from app.services.llm.ollama import OllamaProvider
 
@@ -35,6 +35,36 @@ def test_fallback_preview_from_text_uses_filename_for_missing_merchant():
     preview = fallback_preview_from_text("Total EUR 8.50\n2026-04-11", "cafe-roma_2026-04-11.png")
     assert preview.merchant == "Cafe Roma"
     assert preview.expense_date == "2026-04-11"
+
+
+def test_fallback_statement_preview_from_text_parses_multiple_entries():
+    preview = fallback_statement_preview_from_text(
+        "12/04/2026 CARREFOUR MARKET -45,67\n13/04/2026 FARMACIA CENTRALE -12,30",
+        "statement.pdf",
+    )
+    assert len(preview.entries) == 2
+    assert preview.entries[0].merchant == "Carrefour Market"
+    assert preview.entries[0].amount == pytest.approx(45.67)
+    assert preview.entries[0].expense_date == "2026-04-12"
+
+
+@pytest.mark.asyncio
+async def test_extract_text_from_pdf_prefers_pdfplumber(tmp_path):
+    pdf_path = tmp_path / "statement.pdf"
+    pdf_path.write_bytes(b"fake-pdf")
+
+    fake_page = MagicMock()
+    fake_page.extract_text.side_effect = ["Line one", "Line one"]
+    fake_pdf = MagicMock()
+    fake_pdf.pages = [fake_page]
+    fake_context = MagicMock()
+    fake_context.__enter__.return_value = fake_pdf
+    fake_context.__exit__.return_value = False
+
+    with patch("app.services.receipt_extraction.pdfplumber.open", return_value=fake_context):
+        text = await extract_text_from_file(str(pdf_path), "application/pdf")
+
+    assert "Line one" in text
 
 
 @pytest.mark.asyncio

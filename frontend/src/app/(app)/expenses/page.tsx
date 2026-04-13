@@ -1,25 +1,42 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { deleteExpense, exportExpenses, listCategories, listExpenses, type Category, type Expense } from "@/lib/api";
-import { currentMonthString, formatCurrency, formatDate, triggerDownload } from "@/lib/utils";
+import { currentMonthString, formatCurrency, formatDate, formatSignedCurrency, monthLabel, recentMonthOptions, shiftMonth, transactionTypeLabel, triggerDownload } from "@/lib/utils";
 
 export default function ExpensesPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [month, setMonth] = useState(currentMonthString());
   const [search, setSearch] = useState("");
   const [categoryId, setCategoryId] = useState("");
+  const [transactionType, setTransactionType] = useState("");
   const [reviewOnly, setReviewOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const month = searchParams.get("month") || currentMonthString();
+  const recentMonths = useMemo(() => recentMonthOptions(18, month), [month]);
+
+  const updateMonth = useCallback((nextMonth: string) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (nextMonth === currentMonthString()) {
+      params.delete("month");
+    } else {
+      params.set("month", nextMonth);
+    }
+    const query = params.toString();
+    router.replace(query ? `/expenses?${query}` : "/expenses");
+  }, [router, searchParams]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const [expenseData, categoryData] = await Promise.all([
-        listExpenses({ month, search, category_id: categoryId || undefined, review_only: reviewOnly || undefined }),
+        listExpenses({ month, search, category_id: categoryId || undefined, transaction_type: transactionType || undefined, review_only: reviewOnly || undefined }),
         listCategories(),
       ]);
       setExpenses(expenseData.items);
@@ -30,13 +47,17 @@ export default function ExpensesPage() {
     } finally {
       setLoading(false);
     }
-  }, [month, search, categoryId, reviewOnly]);
+  }, [month, search, categoryId, transactionType, reviewOnly]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  const total = useMemo(() => expenses.reduce((sum, item) => sum + item.amount, 0), [expenses]);
+  const totals = useMemo(() => {
+    const moneyIn = expenses.filter((item) => item.transaction_type === "credit").reduce((sum, item) => sum + item.amount, 0);
+    const moneyOut = expenses.filter((item) => item.transaction_type !== "credit").reduce((sum, item) => sum + item.amount, 0);
+    return { moneyIn, moneyOut, net: moneyIn - moneyOut };
+  }, [expenses]);
 
   async function handleDelete(id: string) {
     if (!window.confirm("Delete this expense?")) return;
@@ -46,31 +67,49 @@ export default function ExpensesPage() {
 
   async function handleExport(format: "json" | "csv") {
     const blob = await exportExpenses(format, month);
-    triggerDownload(blob, `spendhound-expenses-${month}.${format === "json" ? "json" : "csv"}`);
+    triggerDownload(blob, `spendhound-transactions-${month}.${format === "json" ? "json" : "csv"}`);
   }
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Expenses</h1>
-          <p className="text-sm text-muted-foreground">Track manual and receipt-based expenses in one place.</p>
+          <h1 className="text-3xl font-bold">Transactions</h1>
+          <p className="text-sm text-muted-foreground">Track money out and money in together, including expenses, salary, refunds, gifts, and transfers.</p>
         </div>
         <div className="flex gap-2">
           <button onClick={() => handleExport("csv")} className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-accent">Export CSV</button>
           <button onClick={() => handleExport("json")} className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-accent">Export JSON</button>
-          <Link href="/expenses/new" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Add expense</Link>
+          <Link href="/expenses/new" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Add transaction</Link>
         </div>
       </div>
 
-      <div className="grid gap-3 rounded-2xl border border-border bg-card p-4 md:grid-cols-5">
-        <label className="text-sm md:col-span-1">
+      <div className="grid gap-3 rounded-2xl border border-border bg-card p-4 md:grid-cols-6">
+        <div className="text-sm md:col-span-2">
           <span className="mb-1 block text-muted-foreground">Month</span>
-          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="w-full rounded-lg border border-border bg-background px-3 py-2" />
-        </label>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <div className="inline-flex items-center rounded-lg border border-border bg-background">
+              <button type="button" onClick={() => updateMonth(shiftMonth(month, -1))} className="px-3 py-2 text-sm hover:bg-accent">←</button>
+              <div className="min-w-36 border-x border-border px-3 py-2 text-center font-medium">{monthLabel(month)}</div>
+              <button type="button" onClick={() => updateMonth(shiftMonth(month, 1))} className="px-3 py-2 text-sm hover:bg-accent">→</button>
+            </div>
+            <select value={month} onChange={(e) => updateMonth(e.target.value)} className="rounded-lg border border-border bg-background px-3 py-2">
+              {recentMonths.map((option) => <option key={option} value={option}>{monthLabel(option)}</option>)}
+            </select>
+            <button type="button" onClick={() => updateMonth(currentMonthString())} className="rounded-lg border border-border bg-background px-3 py-2 text-sm hover:bg-accent">This month</button>
+          </div>
+        </div>
         <label className="text-sm md:col-span-2">
           <span className="mb-1 block text-muted-foreground">Search</span>
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Merchant or description" className="w-full rounded-lg border border-border bg-background px-3 py-2" />
+        </label>
+        <label className="text-sm md:col-span-1">
+          <span className="mb-1 block text-muted-foreground">Type</span>
+          <select value={transactionType} onChange={(e) => setTransactionType(e.target.value)} className="w-full rounded-lg border border-border bg-background px-3 py-2">
+            <option value="">All transaction types</option>
+            <option value="debit">Money out</option>
+            <option value="credit">Money in</option>
+          </select>
         </label>
         <label className="text-sm md:col-span-1">
           <span className="mb-1 block text-muted-foreground">Category</span>
@@ -86,22 +125,36 @@ export default function ExpensesPage() {
       </div>
 
       <div className="rounded-2xl border border-border bg-card p-4">
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <div className="text-sm text-muted-foreground">Visible total</div>
-            <div className="text-2xl font-semibold">{formatCurrency(total)}</div>
+        <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border border-border bg-background px-4 py-3">
+              <div className="text-sm text-muted-foreground">Money out</div>
+              <div className="text-2xl font-semibold text-red-400">{formatCurrency(totals.moneyOut)}</div>
+            </div>
+            <div className="rounded-xl border border-border bg-background px-4 py-3">
+              <div className="text-sm text-muted-foreground">Money in</div>
+              <div className="text-2xl font-semibold text-emerald-400">{formatCurrency(totals.moneyIn)}</div>
+            </div>
+            <div className="rounded-xl border border-border bg-background px-4 py-3">
+              <div className="text-sm text-muted-foreground">Net</div>
+              <div className={`text-2xl font-semibold ${totals.net >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatCurrency(totals.net)}</div>
+            </div>
           </div>
-          <Link href="/expenses/new?tab=upload-receipt" className="text-sm text-primary underline-offset-4 hover:underline">Open receipt upload in Add expense</Link>
+          <div className="text-right">
+            <div className="text-sm text-muted-foreground">Click any transaction to inspect items, receipt data, and import metadata.</div>
+            <Link href="/expenses/new?tab=upload-receipt" className="text-sm text-primary underline-offset-4 hover:underline">Open receipt or statement import</Link>
+          </div>
         </div>
 
         {error ? <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div> : null}
-        {loading ? <div className="py-20 text-center text-muted-foreground">Loading expenses…</div> : expenses.length === 0 ? <div className="py-20 text-center text-muted-foreground">No expenses found for the current filters.</div> : (
+        {loading ? <div className="py-20 text-center text-muted-foreground">Loading transactions…</div> : expenses.length === 0 ? <div className="py-20 text-center text-muted-foreground">No transactions found for the current filters.</div> : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="border-b border-border text-left text-muted-foreground">
                 <tr>
                   <th className="py-3 pr-4">Date</th>
                   <th className="py-3 pr-4">Merchant</th>
+                  <th className="py-3 pr-4">Type</th>
                   <th className="py-3 pr-4">Category</th>
                   <th className="py-3 pr-4">Source</th>
                   <th className="py-3 pr-4">Amount</th>
@@ -113,18 +166,24 @@ export default function ExpensesPage() {
                 {expenses.map((expense) => (
                   <tr key={expense.id} className="border-b border-border/50">
                     <td className="py-3 pr-4">{formatDate(expense.expense_date)}</td>
-                    <td className="py-3 pr-4">
-                      <div className="font-medium">{expense.merchant}</div>
-                      <div className="text-xs text-muted-foreground">{expense.description || expense.receipt_filename || "—"}</div>
+                     <td className="py-3 pr-4">
+                      <Link href={`/expenses/${expense.id}?month=${month}`} className="block rounded-lg p-1 -m-1 hover:bg-accent">
+                        <div className="font-medium">{expense.merchant}</div>
+                        <div className="text-xs text-muted-foreground">{expense.description || expense.receipt_filename || "—"}</div>
+                      </Link>
                     </td>
+                    <td className="py-3 pr-4"><span className={`rounded-full px-2 py-1 text-xs ${expense.transaction_type === "credit" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"}`}>{transactionTypeLabel(expense.transaction_type)}</span></td>
                     <td className="py-3 pr-4">{expense.category_name ?? "Uncategorized"}</td>
                     <td className="py-3 pr-4 capitalize">{expense.source}</td>
-                    <td className="py-3 pr-4 font-medium">{formatCurrency(expense.amount, expense.currency)}</td>
+                    <td className={`py-3 pr-4 font-medium ${expense.transaction_type === "credit" ? "text-emerald-400" : "text-red-400"}`}>{formatSignedCurrency(expense.amount, expense.transaction_type, expense.currency)}</td>
                     <td className="py-3 pr-4">
                       {expense.needs_review ? <span className="rounded-full bg-yellow-500/15 px-2 py-1 text-xs text-yellow-400">Needs review</span> : expense.is_recurring ? <span className="rounded-full bg-blue-500/15 px-2 py-1 text-xs text-blue-400">Recurring</span> : <span className="rounded-full bg-green-500/15 px-2 py-1 text-xs text-green-400">Tracked</span>}
                     </td>
                     <td className="py-3 pr-0 text-right">
-                      <button onClick={() => handleDelete(expense.id)} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">Delete</button>
+                      <div className="flex justify-end gap-2">
+                        <Link href={`/expenses/${expense.id}?month=${month}`} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">View</Link>
+                        <button onClick={() => handleDelete(expense.id)} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">Delete</button>
+                      </div>
                     </td>
                   </tr>
                 ))}

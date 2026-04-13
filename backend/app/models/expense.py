@@ -24,6 +24,7 @@ class Expense(Base):
     merchant: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     amount: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    transaction_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="debit", index=True)
     currency: Mapped[str] = mapped_column(String(3), nullable=False, server_default="EUR")
     expense_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     source: Mapped[str] = mapped_column(String(30), nullable=False, server_default="manual")
@@ -38,3 +39,4 @@ class Expense(Base):
     user: Mapped["User"] = relationship("User", back_populates="expenses")
     category: Mapped["Category | None"] = relationship("Category", back_populates="expenses")
     receipt: Mapped["Receipt | None"] = relationship("Receipt", back_populates="expenses")
+    items: Mapped[list["ExpenseItem"]] = relationship("ExpenseItem", back_populates="expense", cascade="all, delete-orphan")

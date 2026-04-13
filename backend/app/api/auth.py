@@ -5,10 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.admin import create_action_token
+from app.api.admin import create_action_token, is_admin_email
 from app.config import settings
 from app.database import get_db
 from app.middleware.auth import create_access_token, get_any_user, get_current_user
@@ -42,22 +42,23 @@ async def google_auth(body: GoogleTokenRequest, db: AsyncSession = Depends(get_d
     if not email:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google token missing email claim")
 
-    configured_admin = (settings.admin_email or "").strip().lower()
     normalized_email = email.strip().lower()
-    result = await db.execute(select(User).where(User.email == email))
+    result = await db.execute(select(User).where(func.lower(User.email) == normalized_email))
     user = result.scalar_one_or_none()
     is_new_user = user is None
 
     if is_new_user:
-        is_admin = bool(configured_admin and normalized_email == configured_admin)
-        initial_status = "approved" if (is_admin or not configured_admin) else "pending"
-        user = User(email=email, name=id_info.get("name"), avatar_url=id_info.get("picture"), status=initial_status)
+        initial_status = "approved" if (is_admin_email(normalized_email) or not (settings.admin_email or "").strip()) else "pending"
+        user = User(email=normalized_email, name=id_info.get("name"), avatar_url=id_info.get("picture"), status=initial_status)
         db.add(user)
         await db.flush()
         logger.info("New user created", email=email, status=initial_status)
     else:
+        user.email = normalized_email
         user.name = id_info.get("name", user.name)
         user.avatar_url = id_info.get("picture", user.avatar_url)
+        if is_admin_email(normalized_email):
+            user.status = "approved"
 
     await ensure_default_categories(db, user.id)
     await db.commit()
@@ -71,7 +72,7 @@ async def google_auth(body: GoogleTokenRequest, db: AsyncSession = Depends(get_d
         await send_approval_request_email(user_email=user.email, user_name=user.name, approve_url=approve_url, reject_url=reject_url)
 
     token = create_access_token(user.id, user.email)
-    is_admin = bool(configured_admin and normalized_email == configured_admin)
+    is_admin = is_admin_email(normalized_email)
     return AuthResponse(access_token=token, user={"id": str(user.id), "email": user.email, "name": user.name, "avatar_url": user.avatar_url, "status": user.status, "is_admin": is_admin})
 
 
@@ -82,6 +83,4 @@ async def get_me(current_user: User = Depends(get_current_user)) -> dict:
 
 @router.get("/status")
 async def get_status(current_user: User = Depends(get_any_user)) -> dict:
-    configured_admin = (settings.admin_email or "").strip().lower()
-    current_email = (current_user.email or "").strip().lower()
-    return {"status": current_user.status, "is_admin": current_email == configured_admin if configured_admin else False}
+    return {"status": current_user.status, "is_admin": is_admin_email(current_user.email)}
