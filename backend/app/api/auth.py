@@ -13,6 +13,7 @@ from app.config import settings
 from app.database import get_db
 from app.middleware.auth import create_access_token, get_any_user, get_current_user
 from app.models.user import User
+from app.schemas.user import UserResponse, UserUpdateRequest
 from app.services.email import send_approval_request_email
 from app.services.spendhound import ensure_default_categories
 
@@ -28,6 +29,18 @@ class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: dict
+
+
+def serialize_user_profile(user: User) -> UserResponse:
+    return UserResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        avatar_url=user.avatar_url,
+        status=user.status,
+        automatic_monthly_reports=user.automatic_monthly_reports,
+        created_at=user.created_at,
+    )
 
 
 @router.post("/google", response_model=AuthResponse)
@@ -73,12 +86,35 @@ async def google_auth(body: GoogleTokenRequest, db: AsyncSession = Depends(get_d
 
     token = create_access_token(user.id, user.email)
     is_admin = is_admin_email(normalized_email)
-    return AuthResponse(access_token=token, user={"id": str(user.id), "email": user.email, "name": user.name, "avatar_url": user.avatar_url, "status": user.status, "is_admin": is_admin})
+    return AuthResponse(
+        access_token=token,
+        user={
+            "id": str(user.id),
+            "email": user.email,
+            "name": user.name,
+            "avatar_url": user.avatar_url,
+            "status": user.status,
+            "automatic_monthly_reports": user.automatic_monthly_reports,
+            "is_admin": is_admin,
+        },
+    )
 
 
-@router.get("/me")
-async def get_me(current_user: User = Depends(get_current_user)) -> dict:
-    return {"id": str(current_user.id), "email": current_user.email, "name": current_user.name, "avatar_url": current_user.avatar_url, "status": current_user.status, "created_at": current_user.created_at.isoformat()}
+@router.get("/me", response_model=UserResponse)
+async def get_me(current_user: User = Depends(get_current_user)) -> UserResponse:
+    return serialize_user_profile(current_user)
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_me(
+    body: UserUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    current_user.automatic_monthly_reports = body.automatic_monthly_reports
+    await db.commit()
+    await db.refresh(current_user)
+    return serialize_user_profile(current_user)
 
 
 @router.get("/status")

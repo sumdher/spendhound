@@ -3,8 +3,16 @@
 
 # ── Base stage ────────────────────────────────────────────────────────────────
 FROM node:20-alpine AS base
-RUN apk add --no-cache libc6-compat
+RUN apk add --no-cache \
+    ca-certificates \
+    chromium \
+    freetype \
+    harfbuzz \
+    libc6-compat \
+    nss \
+    ttf-freefont
 WORKDIR /app
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser
 
 # ── Dependencies stage ────────────────────────────────────────────────────────
 FROM base AS deps

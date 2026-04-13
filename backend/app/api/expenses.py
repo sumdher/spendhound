@@ -20,6 +20,7 @@ from app.models.category import Category
 from app.models.expense import Expense
 from app.models.receipt import Receipt
 from app.models.user import User
+from app.services.report_exports import build_expense_export_payload
 from app.services.spendhound import CADENCE_ONE_TIME, TRANSACTION_TYPE_DEBIT, apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_cadence, normalize_money, normalize_transaction_type, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_receipt
 
 router = APIRouter()
@@ -140,10 +141,8 @@ async def review_queue(current_user: User = Depends(get_current_user), db: Async
 
 @router.get("/export")
 async def export_expenses(format: str = Query(default="json"), month: str | None = Query(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    statement = apply_expense_filters(select(Expense, Category.name, Receipt.original_filename).outerjoin(Category, Category.id == Expense.category_id).outerjoin(Receipt, Receipt.id == Expense.receipt_id), user_id=current_user.id, month=month).order_by(Expense.expense_date.desc(), Expense.created_at.desc())
-    result = await db.execute(statement)
-    items = [serialize_expense(expense, category_name=category_name, receipt_filename=receipt_filename) for expense, category_name, receipt_filename in result.all()]
-    exported_at = datetime.now(timezone.utc).isoformat()
+    export_payload = await build_expense_export_payload(db, user_id=current_user.id, month=month)
+    items = export_payload["items"]
 
     if format == "csv":
         output = io.StringIO()
@@ -153,7 +152,7 @@ async def export_expenses(format: str = Query(default="json"), month: str | None
         writer.writerows({key: item.get(key) for key in fieldnames} for item in items)
         return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=spendhound-expenses.csv"})
 
-    return JSONResponse({"exported_at": exported_at, "total": len(items), "items": items})
+    return JSONResponse(export_payload)
 
 
 @router.post("")

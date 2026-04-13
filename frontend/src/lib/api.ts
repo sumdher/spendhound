@@ -331,6 +331,36 @@ export interface AdminUser {
   created_at: string;
 }
 
+export interface UserProfile {
+  id: string;
+  email: string;
+  name?: string | null;
+  avatar_url?: string | null;
+  status: string;
+  is_admin: boolean;
+  automatic_monthly_reports: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface UpdateUserProfileRequest {
+  automatic_monthly_reports: boolean;
+}
+
+export interface MonthlyReportSendRequest {
+  month: string;
+}
+
+export interface MonthlyReportSendResponse {
+  delivery_id?: string;
+  status?: string;
+  recipient?: string;
+  sent_at?: string | null;
+  message?: string;
+  detail?: string;
+  [key: string]: unknown;
+}
+
 let sessionPromise: ReturnType<typeof getSession> | null = null;
 let sessionTimestamp = 0;
 const SESSION_CACHE_MS = 5_000;
@@ -675,6 +705,24 @@ export async function createExpenseFromStatementEntry(data: Record<string, unkno
 export async function getDashboardAnalytics(month?: string): Promise<DashboardAnalytics> {
   const query = month ? `?month=${encodeURIComponent(month)}` : "";
   return apiFetch<DashboardAnalytics>(`/api/analytics/dashboard${query}`);
+}
+
+export async function getCurrentUserProfile(): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/api/auth/me");
+}
+
+export async function updateCurrentUserProfile(data: UpdateUserProfileRequest): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/api/auth/me", {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function sendMonthlyReportEmail(data: MonthlyReportSendRequest): Promise<MonthlyReportSendResponse> {
+  return apiFetch<MonthlyReportSendResponse>("/api/monthly-reports/send", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }
 
 export async function listAllUsers(): Promise<AdminUser[]> {
