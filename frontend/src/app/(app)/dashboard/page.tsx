@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell, Line, LineChart } from "recharts";
-import { getDashboardAnalytics, type DashboardAnalytics } from "@/lib/api";
+import { getDashboardAnalytics, sendMonthlyReportEmail, type DashboardAnalytics } from "@/lib/api";
+import { DASHBOARD_CHART_COLORS, getDashboardSummaryStats } from "@/lib/dashboard-report";
 import { currentMonthString, formatCurrency, formatDate, formatSignedCurrency, monthLabel, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
-
-const COLORS = ["#34d399", "#22c55e", "#84cc16", "#f59e0b", "#fb7185", "#f97316", "#a3e635"];
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
@@ -21,9 +20,14 @@ export default function DashboardPage() {
   const [data, setData] = useState<DashboardAnalytics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [emailPending, setEmailPending] = useState(false);
+  const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
+    setEmailSuccess(null);
+    setEmailError(null);
     getDashboardAnalytics(month)
       .then((value) => {
         setData(value);
@@ -33,6 +37,23 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, [month]);
 
+  async function handleSendMonthlyEmail() {
+    setEmailPending(true);
+    setEmailSuccess(null);
+    setEmailError(null);
+
+    try {
+      const response = await sendMonthlyReportEmail({ month });
+      const detail = typeof response.detail === "string" ? response.detail : null;
+      const message = typeof response.message === "string" ? response.message : null;
+      setEmailSuccess(detail ?? message ?? `Monthly digest for ${monthLabel(month)} sent successfully.`);
+    } catch (err) {
+      setEmailError(err instanceof Error ? err.message : "Failed to send monthly digest email.");
+    } finally {
+      setEmailPending(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -40,13 +61,28 @@ export default function DashboardPage() {
           <h1 className="text-3xl font-bold">Dashboard</h1>
           <p className="text-sm text-muted-foreground">Monthly visibility into cashflow, spending, income, budgets, and recurring transactions.</p>
         </div>
-        <label className="text-sm">
-          <span className="mb-1 block text-muted-foreground">Month</span>
-          <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="rounded-lg border border-border bg-card px-3 py-2" />
-        </label>
+        <div className="flex flex-col gap-3 md:items-end">
+          <label className="text-sm">
+            <span className="mb-1 block text-muted-foreground">Month</span>
+            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="rounded-lg border border-border bg-card px-3 py-2" />
+          </label>
+          <div className="flex flex-col gap-2 md:items-end">
+            <button
+              type="button"
+              onClick={handleSendMonthlyEmail}
+              disabled={emailPending}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {emailPending ? "Sending digest..." : "Email me charts + data"}
+            </button>
+            <p className="text-xs text-muted-foreground">Immediately sends the selected month&apos;s digest email.</p>
+          </div>
+        </div>
       </div>
 
       {error ? <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div> : null}
+      {emailError ? <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{emailError}</div> : null}
+      {emailSuccess ? <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-400">{emailSuccess}</div> : null}
 
       {loading || !data ? (
         <div className="grid gap-4 md:grid-cols-5">
@@ -55,11 +91,7 @@ export default function DashboardPage() {
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-5">
-            <StatCard label={`Money out · ${monthLabel(data.month)}`} value={formatCurrency(data.summary.money_out)} />
-            <StatCard label="Money in" value={formatCurrency(data.summary.money_in)} />
-            <StatCard label="Net" value={formatCurrency(data.summary.net)} />
-            <StatCard label="Transactions" value={String(data.summary.transaction_count)} />
-            <StatCard label="Needs review" value={String(data.summary.review_count)} />
+            {getDashboardSummaryStats(data).map((item) => <StatCard key={item.label} label={item.label} value={item.value} />)}
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
@@ -74,7 +106,7 @@ export default function DashboardPage() {
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie data={data.spend_by_category} dataKey="amount" nameKey="name" innerRadius={70} outerRadius={100}>
-                          {data.spend_by_category.map((item, index) => <Cell key={item.name} fill={COLORS[index % COLORS.length]} />)}
+                          {data.spend_by_category.map((item, index) => <Cell key={item.name} fill={DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length]} />)}
                         </Pie>
                         <Tooltip formatter={(value: number) => formatCurrency(value)} />
                       </PieChart>
@@ -83,7 +115,7 @@ export default function DashboardPage() {
                   <div className="space-y-2">
                     {data.spend_by_category.map((item, index) => (
                       <div key={item.name} className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-sm">
-                        <div className="flex items-center gap-2"><span className="h-3 w-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />{item.name}</div>
+                        <div className="flex items-center gap-2"><span className="h-3 w-3 rounded-full" style={{ backgroundColor: DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length] }} />{item.name}</div>
                         <span>{formatCurrency(item.amount)}</span>
                       </div>
                     ))}
@@ -121,7 +153,7 @@ export default function DashboardPage() {
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie data={data.income_by_category} dataKey="amount" nameKey="name" innerRadius={70} outerRadius={100}>
-                          {data.income_by_category.map((item, index) => <Cell key={item.name} fill={COLORS[index % COLORS.length]} />)}
+                          {data.income_by_category.map((item, index) => <Cell key={item.name} fill={DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length]} />)}
                         </Pie>
                         <Tooltip formatter={(value: number) => formatCurrency(value)} />
                       </PieChart>
@@ -130,7 +162,7 @@ export default function DashboardPage() {
                   <div className="space-y-2">
                     {data.income_by_category.map((item, index) => (
                       <div key={item.name} className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-sm">
-                        <div className="flex items-center gap-2"><span className="h-3 w-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />{item.name}</div>
+                        <div className="flex items-center gap-2"><span className="h-3 w-3 rounded-full" style={{ backgroundColor: DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length] }} />{item.name}</div>
                         <span>{formatCurrency(item.amount)}</span>
                       </div>
                     ))}

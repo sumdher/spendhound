@@ -2,7 +2,7 @@
 
 # added by sudheer
 .secrets_pette
-.commands
+.commands*
 deploy/cloudflared/config.yaml
 plans
 

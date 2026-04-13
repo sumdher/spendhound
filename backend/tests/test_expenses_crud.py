@@ -453,6 +453,47 @@ async def test_dashboard_analytics_derives_grocery_subcategories_for_existing_bl
     assert payload["grocery_insights"]["uncategorized_count"] == 0
 
 
+async def test_dashboard_grocery_insights_scale_item_totals_to_approved_expense_amount(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+    grocery_category = Category(user_id=test_user.id, name="Groceries", color="#34d399", transaction_type="debit")
+    db_session.add(grocery_category)
+    await db_session.flush()
+
+    expense = Expense(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        merchant="Fresh Mart",
+        amount=normalize_money(10.00),
+        transaction_type="debit",
+        currency="EUR",
+        expense_date=date(2026, 4, 13),
+        category_id=grocery_category.id,
+        source="receipt",
+        confidence=0.96,
+        needs_review=False,
+    )
+    db_session.add(expense)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            ExpenseItem(expense_id=expense.id, description="Bananas", quantity=1, unit_price=4.0, total_price=normalize_money(4.0)),
+            ExpenseItem(expense_id=expense.id, description="Pasta", quantity=1, unit_price=8.0, total_price=normalize_money(8.0)),
+        ]
+    )
+    await db_session.commit()
+
+    response = await client.get("/api/analytics/dashboard?month=2026-04", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    grocery_insights = payload["grocery_insights"]
+    top_subcategories = {item["name"]: item["amount"] for item in grocery_insights["top_subcategories"]}
+
+    assert payload["summary"]["money_out"] == 10.0
+    assert grocery_insights["total_itemized_spend"] == 10.0
+    assert top_subcategories["Pantry"] == 6.67
+    assert top_subcategories["Fruit"] == 3.33
+
+
 async def test_dashboard_analytics_separates_money_in_and_out(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
     grocery_category = Category(user_id=test_user.id, name="Groceries", color="#34d399", transaction_type="debit")
     salary_category = Category(user_id=test_user.id, name="Salary", color="#10b981", transaction_type="credit")

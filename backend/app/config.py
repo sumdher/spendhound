@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     app_url: str = Field(default="http://localhost:3000", description="Public frontend URL")
     resend_api_key: str = Field(default="", description="Resend API key")
     resend_from_email: str = Field(default="", description="Approval email sender")
+    monthly_reports_enabled: bool = Field(default=False, description="Enable monthly report delivery job")
+    monthly_reports_timezone: str = Field(default="UTC", description="IANA timezone used to compute the reporting month")
+    monthly_reports_frontend_pdf_url: str = Field(default="", description="Internal frontend endpoint used to render monthly report PDFs")
+    monthly_reports_frontend_token: str = Field(default="", description="Shared secret token sent to the internal frontend PDF endpoint")
+    monthly_reports_frontend_token_header: str = Field(default="X-SpendHound-Internal-Token", description="Header name used for monthly report frontend authentication")
+    monthly_reports_frontend_timeout_seconds: int = Field(default=60, description="Timeout for internal frontend monthly report PDF requests")
 
     debug: bool = Field(default=False, description="Enable debug mode")
     cors_origins: list[str] = Field(

@@ -10,6 +10,80 @@ export interface LLMConfig {
   baseUrl?: string;
 }
 
+export interface ChatMessage {
+  id: string;
+  session_id: string;
+  role: "user" | "assistant" | string;
+  content: string;
+  client_id: string;
+  parent_client_id?: string | null;
+  provider?: string | null;
+  model?: string | null;
+  token_count?: number | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  summary?: string | null;
+  token_count: number;
+  max_tokens: number;
+  message_count: number;
+  last_message_preview?: string | null;
+  last_message_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatHistory {
+  session: ChatSession;
+  messages: ChatMessage[];
+}
+
+export interface ChatStreamRequest {
+  message: string;
+  clientId?: string;
+  parentClientId?: string | null;
+  assistantClientId?: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface ChatSummarizeRequest {
+  sessionId?: string;
+  prompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+export interface ChatSSEMetaEvent {
+  mode?: "chat" | "summary";
+  session?: ChatSession;
+  session_id?: string | null;
+  request_message?: {
+    id?: string;
+    client_id?: string;
+    parent_client_id?: string | null;
+  };
+  assistant_client_id?: string;
+  provider?: string;
+  model?: string;
+}
+
+export interface ChatSSEDoneEvent {
+  ok?: boolean;
+  session?: ChatSession;
+  message?: ChatMessage;
+  summary?: string;
+}
+
+export interface ChatSSEErrorEvent {
+  error?: string;
+}
+
 export interface Category {
   id: string;
   name: string;
@@ -257,6 +331,36 @@ export interface AdminUser {
   created_at: string;
 }
 
+export interface UserProfile {
+  id: string;
+  email: string;
+  name?: string | null;
+  avatar_url?: string | null;
+  status: string;
+  is_admin: boolean;
+  automatic_monthly_reports: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface UpdateUserProfileRequest {
+  automatic_monthly_reports: boolean;
+}
+
+export interface MonthlyReportSendRequest {
+  month: string;
+}
+
+export interface MonthlyReportSendResponse {
+  delivery_id?: string;
+  status?: string;
+  recipient?: string;
+  sent_at?: string | null;
+  message?: string;
+  detail?: string;
+  [key: string]: unknown;
+}
+
 let sessionPromise: ReturnType<typeof getSession> | null = null;
 let sessionTimestamp = 0;
 const SESSION_CACHE_MS = 5_000;
@@ -324,8 +428,160 @@ export async function apiDownload(path: string, options: RequestInit = {}): Prom
   return response.blob();
 }
 
+async function proxyStream(body: Record<string, unknown>): Promise<Response> {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok || !response.body) {
+    const error = await response.json().catch(async () => ({ detail: await response.text().catch(() => response.statusText) }));
+    throw new Error((error as { detail?: string }).detail ?? `HTTP ${response.status}`);
+  }
+
+  return response;
+}
+
+function getStreamConfig() {
+  const llmConfig = getLLMConfig();
+  return {
+    provider: llmConfig.provider,
+    model: llmConfig.model,
+    apiKey: llmConfig.apiKey,
+    baseUrl: llmConfig.baseUrl,
+  };
+}
+
+export async function consumeSSE(
+  response: Response,
+  handlers: {
+    onMeta?: (data: ChatSSEMetaEvent) => void;
+    onToken?: (data: { text?: string; token?: string }) => void;
+    onError?: (data: ChatSSEErrorEvent) => void;
+    onDone?: (data: ChatSSEDoneEvent) => void;
+    onEvent?: (event: string, data: unknown) => void;
+  }
+): Promise<void> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Streaming response body is unavailable");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const dispatchBlock = (block: string) => {
+    const lines = block.split(/\r?\n/);
+    let eventName = "message";
+    const dataLines: string[] = [];
+
+    for (const line of lines) {
+      if (!line || line.startsWith(":")) continue;
+      if (line.startsWith("event:")) {
+        eventName = line.slice(6).trim() || "message";
+        continue;
+      }
+      if (line.startsWith("data:")) {
+        dataLines.push(line.slice(5).trim());
+      }
+    }
+
+    if (!dataLines.length) return;
+
+    const raw = dataLines.join("\n");
+    const parsed: unknown = (() => {
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
+    })();
+
+    handlers.onEvent?.(eventName, parsed);
+
+    if (eventName === "meta") handlers.onMeta?.(parsed as ChatSSEMetaEvent);
+    if (eventName === "token") handlers.onToken?.(parsed as { text?: string; token?: string });
+    if (eventName === "error") handlers.onError?.(parsed as ChatSSEErrorEvent);
+    if (eventName === "done") handlers.onDone?.(parsed as ChatSSEDoneEvent);
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+
+    let boundaryIndex = buffer.indexOf("\n\n");
+    while (boundaryIndex >= 0) {
+      const block = buffer.slice(0, boundaryIndex).trim();
+      buffer = buffer.slice(boundaryIndex + 2);
+      if (block) dispatchBlock(block);
+      boundaryIndex = buffer.indexOf("\n\n");
+    }
+
+    if (done) break;
+  }
+
+  const trailing = buffer.trim();
+  if (trailing) dispatchBlock(trailing);
+}
+
 export async function listCategories(): Promise<Category[]> {
   return apiFetch<Category[]>("/api/categories");
+}
+
+export async function listChatSessions(): Promise<ChatSession[]> {
+  return apiFetch<ChatSession[]>("/api/chat/sessions");
+}
+
+export async function createChatSession(title?: string): Promise<ChatSession> {
+  return apiFetch<ChatSession>("/api/chat/sessions", {
+    method: "POST",
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function renameChatSession(sessionId: string, title: string): Promise<ChatSession> {
+  return apiFetch<ChatSession>(`/api/chat/sessions/${sessionId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  return apiFetch<void>(`/api/chat/sessions/${sessionId}`, { method: "DELETE" });
+}
+
+export async function getChatHistory(sessionId: string): Promise<ChatHistory> {
+  return apiFetch<ChatHistory>(`/api/chat/sessions/${sessionId}/history`);
+}
+
+export async function clearChatHistory(sessionId: string): Promise<ChatHistory> {
+  return apiFetch<ChatHistory>(`/api/chat/sessions/${sessionId}/history`, { method: "DELETE" });
+}
+
+export async function streamChatSession(sessionId: string, request: ChatStreamRequest): Promise<Response> {
+  return proxyStream({
+    mode: "chat",
+    sessionId,
+    message: request.message,
+    clientId: request.clientId,
+    parentClientId: request.parentClientId,
+    assistantClientId: request.assistantClientId,
+    temperature: request.temperature,
+    maxTokens: request.maxTokens,
+    ...getStreamConfig(),
+  });
+}
+
+export async function streamChatSummary(request: ChatSummarizeRequest): Promise<Response> {
+  return proxyStream({
+    mode: "summary",
+    sessionId: request.sessionId,
+    prompt: request.prompt,
+    temperature: request.temperature,
+    maxTokens: request.maxTokens,
+    ...getStreamConfig(),
+  });
 }
 
 export async function createCategory(data: Partial<Category> & { name: string }): Promise<Category> {
@@ -449,6 +705,24 @@ export async function createExpenseFromStatementEntry(data: Record<string, unkno
 export async function getDashboardAnalytics(month?: string): Promise<DashboardAnalytics> {
   const query = month ? `?month=${encodeURIComponent(month)}` : "";
   return apiFetch<DashboardAnalytics>(`/api/analytics/dashboard${query}`);
+}
+
+export async function getCurrentUserProfile(): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/api/auth/me");
+}
+
+export async function updateCurrentUserProfile(data: UpdateUserProfileRequest): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/api/auth/me", {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function sendMonthlyReportEmail(data: MonthlyReportSendRequest): Promise<MonthlyReportSendResponse> {
+  return apiFetch<MonthlyReportSendResponse>("/api/monthly-reports/send", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
 }
 
 export async function listAllUsers(): Promise<AdminUser[]> {

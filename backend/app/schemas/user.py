@@ -20,4 +20,12 @@ class UserResponse(BaseModel):
     email: str
     name: Optional[str] = None
     avatar_url: Optional[str] = None
+    status: str
+    automatic_monthly_reports: bool = True
     created_at: datetime
+
+
+class UserUpdateRequest(BaseModel):
+    """Authenticated user profile updates supported by the API."""
+
+    automatic_monthly_reports: bool
