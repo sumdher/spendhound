@@ -6,7 +6,7 @@ SpendHound is a full-stack expense-tracking MVP built with FastAPI, Next.js, Pos
 
 - Google auth with approval flow
 - Manual expense entry and editing
-- Receipt upload with preview-before-save extraction
+- Receipt upload inside Add expense with preview-before-save extraction
 - Editable categories and merchant rules
 - Monthly dashboard analytics
 - Budget versus actual tracking
@@ -19,7 +19,7 @@ SpendHound is a full-stack expense-tracking MVP built with FastAPI, Next.js, Pos
 - Backend: FastAPI + SQLAlchemy + Alembic
 - Frontend: Next.js App Router + NextAuth + Recharts
 - Database: PostgreSQL
-- Optional extraction assist: Ollama or another configured LLM provider
+- Optional multimodal receipt extraction via Ollama or another configured LLM provider
 
 ## Exact local run path
 
@@ -106,12 +106,12 @@ For non-Docker runs set these frontend values:
 
 ## Receipt extraction flow
 
-1. Upload a receipt on the receipts page
+1. Open Add expense and switch to the Upload receipt tab
 2. SpendHound stores receipt metadata and file contents under `storage/receipts`
-3. It extracts local text where possible
-4. It optionally asks the configured LLM for structured JSON
+3. For receipt images, it sends the image directly to the configured multimodal LLM as the primary extraction path
+4. If direct image extraction is unavailable or fails, it falls back to extracted text for PDFs, text files, or secondary robustness
 5. The JSON is validated before any database write
-6. The user reviews and edits the draft
+6. The user reviews and edits the draft inside Add expense
 7. Only the reviewed payload creates an expense
 
 ## Running tests
@@ -130,7 +130,7 @@ pytest tests/test_expenses_crud.py tests/test_parser.py
 - `/dashboard`
 - `/expenses`
 - `/expenses/new`
-- `/receipts`
+- `/receipts` → redirects to `/expenses/new?tab=upload-receipt`
 - `/budgets`
 - `/categories`
 - `/settings`
@@ -138,6 +138,7 @@ pytest tests/test_expenses_crud.py tests/test_parser.py
 
 ## Notes
 
-- Local fallback extraction works without an LLM
+- Configure a multimodal-capable model for `LLM_PROVIDER` and the matching provider model settings so receipt images can be read directly
+- `RECEIPT_MULTIMODAL_MAX_BYTES` controls the largest image sent to the multimodal model
 - LLM credentials are stored in the browser for receipt uploads only
 - Receipt files are stored under `storage/receipts`

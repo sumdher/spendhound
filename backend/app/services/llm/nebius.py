@@ -40,7 +40,23 @@ class NebiusProvider(BaseLLMProvider):
         return (config.model if config else None) or settings.nebius_model
 
     def _build_messages(self, messages: list[Message]) -> list[dict]:
-        return [{"role": m.role, "content": m.content} for m in messages]
+        built_messages: list[dict] = []
+        for message in messages:
+            if message.images:
+                content: list[dict] = []
+                if message.content:
+                    content.append({"type": "text", "text": message.content})
+                content.extend(
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{image.media_type};base64,{image.data}"},
+                    }
+                    for image in message.images
+                )
+                built_messages.append({"role": message.role, "content": content})
+            else:
+                built_messages.append({"role": message.role, "content": message.content})
+        return built_messages
 
     async def complete(self, messages: list[Message], config: LLMConfig | None = None) -> str:
         """Send messages to Nebius and return the full completion string."""

@@ -91,7 +91,7 @@ export default function ExpensesPage() {
             <div className="text-sm text-muted-foreground">Visible total</div>
             <div className="text-2xl font-semibold">{formatCurrency(total)}</div>
           </div>
-          <Link href="/receipts" className="text-sm text-primary underline-offset-4 hover:underline">Open receipt review queue</Link>
+          <Link href="/expenses/new?tab=upload-receipt" className="text-sm text-primary underline-offset-4 hover:underline">Open receipt upload in Add expense</Link>
         </div>
 
         {error ? <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div> : null}

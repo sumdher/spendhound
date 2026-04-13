@@ -10,11 +10,20 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class ImageInput:
+    """A single image attachment for multimodal chat requests."""
+
+    media_type: str
+    data: str
+
+
+@dataclass
 class Message:
     """A chat message with role and content."""
 
     role: str  # "system" | "user" | "assistant"
     content: str
+    images: list[ImageInput] = field(default_factory=list)
 
 
 @dataclass
