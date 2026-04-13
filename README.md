@@ -53,6 +53,29 @@ Optional values:
 - `OLLAMA_URL` or other LLM provider settings for receipt extraction assist
 - root `.env` values only if you use `docker-compose.prod.yml` or the optional Cloudflare tunnel service
 
+### Approval email setup for new-user access requests
+
+Approval emails are only sent when a **new non-admin user** signs in and is created with `pending` status.
+
+Set these values in [`backend/.env`](backend/.env):
+
+- `ADMIN_EMAIL=<the inbox that should receive approval requests>`
+- `RESEND_API_KEY=<your Resend API key>`
+- `APP_URL=<the public frontend URL used in approval links>`
+- `RESEND_FROM_EMAIL=<a sender allowed by your Resend account/domain>`
+
+Examples:
+
+- Docker Compose locally: `APP_URL=http://localhost:3001`
+- Local frontend dev (`npm run dev`): `APP_URL=http://localhost:3000`
+
+If approval emails are not arriving, the most likely causes in the current code are:
+
+- `RESEND_API_KEY` is blank, so the backend logs a warning and skips sending
+- `ADMIN_EMAIL` still points to the default admin address, so the email is sent to the wrong inbox
+- `RESEND_FROM_EMAIL` is not valid for your Resend setup, so Resend rejects delivery
+- you updated the wrong env file; the backend must receive these values from [`backend/.env`](backend/.env)
+
 ### 2. Start the app
 
 From `/home/zorino/repos/spendhound/spendhound_roo/spendhound`:

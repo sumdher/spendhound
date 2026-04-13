@@ -56,6 +56,7 @@ export default function AdminPage() {
               <tbody>
                 {users.map((user) => {
                   const isSelf = user.email === session.user?.email;
+                  const isAdminUser = user.is_admin;
                   const statusLabel = `${user.status.charAt(0).toUpperCase()}${user.status.slice(1)}`;
                   return (
                     <tr key={user.id} className="border-b border-border/50">
@@ -64,11 +65,15 @@ export default function AdminPage() {
                       <td className="py-3 pr-4">{user.expense_count}</td>
                       <td className="py-3 pr-4 text-muted-foreground">{formatDate(user.created_at)}</td>
                       <td className="py-3 text-right">
-                        <div className="flex justify-end gap-2">
-                          <button disabled={isSelf || user.status === "approved"} onClick={() => updateUserStatus(user.id, "approved").then(() => setUsers((prev) => prev.map((item) => item.id === user.id ? { ...item, status: "approved" } : item)))} className={`rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50 ${ACTION_BUTTON_STYLES.approve}`}>Approve</button>
-                          <button disabled={isSelf || user.status === "rejected"} onClick={() => updateUserStatus(user.id, "rejected").then(() => setUsers((prev) => prev.map((item) => item.id === user.id ? { ...item, status: "rejected" } : item)))} className={`rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50 ${ACTION_BUTTON_STYLES.reject}`}>Reject</button>
-                          <button disabled={isSelf} onClick={() => { if (window.confirm(`Delete ${user.email} and all data?`)) deleteUser(user.id).then(() => setUsers((prev) => prev.filter((item) => item.id !== user.id))); }} className={`rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50 ${ACTION_BUTTON_STYLES.delete}`}>Delete</button>
-                        </div>
+                        {isAdminUser ? (
+                          <span className="inline-flex rounded-full border border-primary/30 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">Admin</span>
+                        ) : (
+                          <div className="flex justify-end gap-2">
+                            <button disabled={isSelf || user.status === "approved"} onClick={() => updateUserStatus(user.id, "approved").then(() => setUsers((prev) => prev.map((item) => item.id === user.id ? { ...item, status: "approved" } : item)))} className={`rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50 ${ACTION_BUTTON_STYLES.approve}`}>Approve</button>
+                            <button disabled={isSelf || user.status === "rejected"} onClick={() => updateUserStatus(user.id, "rejected").then(() => setUsers((prev) => prev.map((item) => item.id === user.id ? { ...item, status: "rejected" } : item)))} className={`rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50 ${ACTION_BUTTON_STYLES.reject}`}>Reject</button>
+                            <button disabled={isSelf} onClick={() => { if (window.confirm(`Delete ${user.email} and all data?`)) deleteUser(user.id).then(() => setUsers((prev) => prev.filter((item) => item.id !== user.id))); }} className={`rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50 ${ACTION_BUTTON_STYLES.delete}`}>Delete</button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );

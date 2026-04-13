@@ -17,7 +17,7 @@ from app.models.budget import Budget
 from app.models.category import Category
 from app.models.expense import Expense
 from app.models.user import User
-from app.services.spendhound import month_start_from_string, next_month, serialize_budget
+from app.services.spendhound import TRANSACTION_TYPE_DEBIT, month_start_from_string, next_month, serialize_budget
 
 router = APIRouter()
 
@@ -55,7 +55,12 @@ async def list_budgets(month: str | None = Query(default=None), current_user: Us
     expenses = await db.execute(
         select(Expense, Category.name)
         .outerjoin(Category, Category.id == Expense.category_id)
-        .where(Expense.user_id == current_user.id, Expense.expense_date >= month_value, Expense.expense_date < month_end)
+        .where(
+            Expense.user_id == current_user.id,
+            Expense.transaction_type == TRANSACTION_TYPE_DEBIT,
+            Expense.expense_date >= month_value,
+            Expense.expense_date < month_end,
+        )
     )
     actuals: dict[str | None, float] = {}
     overall = 0.0

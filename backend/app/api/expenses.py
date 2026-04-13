@@ -20,7 +20,7 @@ from app.models.category import Category
 from app.models.expense import Expense
 from app.models.receipt import Receipt
 from app.models.user import User
-from app.services.spendhound import apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_money, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_receipt
+from app.services.spendhound import TRANSACTION_TYPE_DEBIT, apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_money, normalize_transaction_type, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_receipt
 
 router = APIRouter()
 
@@ -50,6 +50,7 @@ class ExpenseCreate(BaseModel):
     merchant: str
     description: str | None = None
     amount: float
+    transaction_type: str = TRANSACTION_TYPE_DEBIT
     currency: str = "EUR"
     expense_date: str
     category_id: uuid.UUID | None = None
@@ -61,6 +62,7 @@ class ExpenseUpdate(BaseModel):
     merchant: str | None = None
     description: str | None = None
     amount: float | None = None
+    transaction_type: str | None = None
     currency: str | None = None
     expense_date: str | None = None
     category_id: uuid.UUID | None = None
@@ -81,13 +83,13 @@ class StatementExpenseCreate(ExpenseCreate):
 
 
 @router.get("")
-async def list_expenses(month: str | None = Query(default=None), category_id: uuid.UUID | None = Query(default=None), review_only: bool = Query(default=False), search: str | None = Query(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+async def list_expenses(month: str | None = Query(default=None), category_id: uuid.UUID | None = Query(default=None), transaction_type: str | None = Query(default=None), review_only: bool = Query(default=False), search: str | None = Query(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
     statement = select(Expense, Category.name, Receipt.original_filename).outerjoin(Category, Category.id == Expense.category_id).outerjoin(Receipt, Receipt.id == Expense.receipt_id)
-    statement = apply_expense_filters(statement, user_id=current_user.id, month=month, category_id=category_id, review_only=review_only, search=search).order_by(Expense.expense_date.desc(), Expense.created_at.desc())
+    statement = apply_expense_filters(statement, user_id=current_user.id, month=month, category_id=category_id, transaction_type=transaction_type, review_only=review_only, search=search).order_by(Expense.expense_date.desc(), Expense.created_at.desc())
     result = await db.execute(statement)
     items = [serialize_expense(expense, category_name=category_name, receipt_filename=receipt_filename) for expense, category_name, receipt_filename in result.all()]
 
-    count_statement = apply_expense_filters(select(func.count(Expense.id)), user_id=current_user.id, month=month, category_id=category_id, review_only=review_only, search=search)
+    count_statement = apply_expense_filters(select(func.count(Expense.id)), user_id=current_user.id, month=month, category_id=category_id, transaction_type=transaction_type, review_only=review_only, search=search)
     total = (await db.execute(count_statement)).scalar_one()
     return {"items": items, "total": int(total)}
 
@@ -128,7 +130,7 @@ async def export_expenses(format: str = Query(default="json"), month: str | None
 
     if format == "csv":
         output = io.StringIO()
-        fieldnames = ["id", "expense_date", "merchant", "description", "amount", "currency", "category_name", "source", "needs_review", "is_recurring", "receipt_filename", "notes"]
+        fieldnames = ["id", "expense_date", "merchant", "description", "amount", "signed_amount", "transaction_type", "currency", "category_name", "source", "needs_review", "is_recurring", "receipt_filename", "notes"]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows({key: item.get(key) for key in fieldnames} for item in items)
@@ -140,12 +142,14 @@ async def export_expenses(format: str = Query(default="json"), month: str | None
 @router.post("")
 async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
     await ensure_default_categories(db, current_user.id)
-    category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant)
+    transaction_type = normalize_transaction_type(body.transaction_type)
+    category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
     expense = Expense(
         user_id=current_user.id,
         merchant=body.merchant.strip(),
         description=body.description,
         amount=normalize_money(body.amount),
+        transaction_type=transaction_type,
         currency=body.currency,
         expense_date=datetime.fromisoformat(body.expense_date).date(),
         category_id=category.id if category else None,
@@ -183,13 +187,15 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
     if receipt.extraction_status == "finalized":
         raise HTTPException(status_code=409, detail="Receipt has already been finalized")
 
-    category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant)
+    transaction_type = normalize_transaction_type(body.transaction_type)
+    category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
     confidence = body.confidence if body.confidence is not None else receipt.extraction_confidence or 0.5
     expense = Expense(
         user_id=current_user.id,
         merchant=body.merchant.strip(),
         description=body.description,
         amount=normalize_money(body.amount),
+        transaction_type=transaction_type,
         currency=body.currency,
         expense_date=datetime.fromisoformat(body.expense_date).date(),
         category_id=category.id if category else None,
@@ -203,6 +209,7 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
     receipt.preview_data = {
         "merchant": body.merchant,
         "amount": body.amount,
+        "transaction_type": transaction_type,
         "currency": body.currency,
         "expense_date": body.expense_date,
         "description": body.description,
@@ -247,13 +254,15 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
                 }
         raise HTTPException(status_code=409, detail="Statement entry has already been finalized")
 
-    category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant)
+    transaction_type = normalize_transaction_type(body.transaction_type)
+    category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
     confidence = body.confidence if body.confidence is not None else float(entry.get("confidence") or receipt.extraction_confidence or 0.5)
     expense = Expense(
         user_id=current_user.id,
         merchant=body.merchant.strip(),
         description=body.description,
         amount=normalize_money(body.amount),
+        transaction_type=transaction_type,
         currency=body.currency,
         expense_date=datetime.fromisoformat(body.expense_date).date(),
         category_id=category.id if category else None,
@@ -270,6 +279,7 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
         {
             "merchant": body.merchant,
             "amount": body.amount,
+            "transaction_type": transaction_type,
             "currency": body.currency,
             "expense_date": body.expense_date,
             "description": body.description,
@@ -330,18 +340,21 @@ async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_use
         raise HTTPException(status_code=404, detail="Expense not found")
 
     data = body.model_dump(exclude_unset=True)
-    if {"category_id", "category_name", "merchant"} & set(data):
+    next_transaction_type = normalize_transaction_type(data.get("transaction_type"), default=expense.transaction_type)
+    if {"category_id", "category_name", "merchant", "transaction_type"} & set(data):
         category_id = data.get("category_id") if "category_id" in data else None
         category_name = data.get("category_name") if "category_name" in data else None
         merchant = data.get("merchant", expense.merchant)
         if "category_id" in data or "category_name" in data:
-            category = await resolve_category(db, current_user.id, category_id=category_id, category_name=category_name, merchant=merchant)
+            category = await resolve_category(db, current_user.id, category_id=category_id, category_name=category_name, merchant=merchant, transaction_type=next_transaction_type)
         else:
-            category = await resolve_category(db, current_user.id, category_id=expense.category_id, merchant=merchant)
+            category = await resolve_category(db, current_user.id, category_id=expense.category_id, merchant=merchant, transaction_type=next_transaction_type)
         expense.category_id = category.id if category else None
     for field, value in data.items():
         if field == "amount" and value is not None:
             expense.amount = normalize_money(value)
+        elif field == "transaction_type" and value is not None:
+            expense.transaction_type = normalize_transaction_type(value)
         elif field == "expense_date" and value is not None:
             expense.expense_date = datetime.fromisoformat(value).date()
         elif field not in {"category_id", "category_name"}:

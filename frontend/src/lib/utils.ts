@@ -14,6 +14,21 @@ export function formatCurrency(amount: number | null | undefined, currency = "EU
   }).format(amount);
 }
 
+export function signedTransactionAmount(amount: number | null | undefined, transactionType: string | null | undefined) {
+  if (amount === null || amount === undefined) return null;
+  return transactionType === "credit" ? amount : -amount;
+}
+
+export function formatSignedCurrency(amount: number | null | undefined, transactionType: string | null | undefined, currency = "EUR") {
+  const signed = signedTransactionAmount(amount, transactionType);
+  if (signed === null) return "—";
+  return formatCurrency(signed, currency);
+}
+
+export function transactionTypeLabel(transactionType: string | null | undefined) {
+  return transactionType === "credit" ? "Money in" : "Money out";
+}
+
 export function formatDate(value: string | null | undefined) {
   if (!value) return "—";
   return new Date(value).toLocaleDateString("en-GB", {

@@ -54,6 +54,30 @@ async def test_create_list_update_delete_expense(client: AsyncClient, auth_heade
     assert delete_response.status_code == 204
 
 
+async def test_create_credit_transaction_and_filter_by_type(client: AsyncClient, auth_headers: dict):
+    payload = {
+        "merchant": "ACME Payroll",
+        "amount": 3500.00,
+        "transaction_type": "credit",
+        "currency": "EUR",
+        "expense_date": "2026-04-10",
+        "category_name": "Salary",
+        "description": "Monthly salary",
+    }
+    create_response = await client.post("/api/expenses", json=payload, headers=auth_headers)
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["transaction_type"] == "credit"
+    assert created["category_name"] == "Salary"
+    assert created["signed_amount"] == 3500.0
+
+    credit_list_response = await client.get("/api/expenses?month=2026-04&transaction_type=credit", headers=auth_headers)
+    assert credit_list_response.status_code == 200
+    credit_listing = credit_list_response.json()
+    assert any(item["id"] == created["id"] for item in credit_listing["items"])
+    assert all(item["transaction_type"] == "credit" for item in credit_listing["items"])
+
+
 async def test_review_queue_and_export(client: AsyncClient, auth_headers: dict):
     await client.post(
         "/api/expenses",
@@ -212,6 +236,63 @@ async def test_create_expense_from_statement_entry_updates_queue(client: AsyncCl
     assert payload["statement"]["preview"]["entries"][1]["status"] == "pending"
 
 
+async def test_create_credit_transaction_from_statement_entry(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+    statement = Receipt(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        original_filename="statement-income.pdf",
+        stored_filename="statement-income.pdf",
+        content_type="application/pdf",
+        storage_path="receipts/test-user/statement-income.pdf",
+        preview_data={
+            "summary": "Parsed 1 statement entry.",
+            "confidence": 0.86,
+            "entries": [
+                {
+                    "merchant": "ACME Payroll",
+                    "amount": 3200.00,
+                    "transaction_type": "credit",
+                    "currency": "EUR",
+                    "expense_date": "2026-04-15",
+                    "description": "MONTHLY SALARY",
+                    "category_name": "Salary",
+                    "confidence": 0.93,
+                    "status": "pending",
+                    "saved_expense_id": None,
+                }
+            ],
+        },
+        extraction_confidence=0.86,
+        document_kind="statement",
+        extraction_status="review",
+        needs_review=True,
+    )
+    db_session.add(statement)
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/expenses/from-statement-entry",
+        json={
+            "receipt_id": str(statement.id),
+            "entry_index": 0,
+            "merchant": "ACME Payroll",
+            "description": "Salary payment",
+            "amount": 3200.00,
+            "transaction_type": "credit",
+            "currency": "EUR",
+            "expense_date": "2026-04-15",
+            "category_name": "Salary",
+            "confidence": 0.93,
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["expense"]["transaction_type"] == "credit"
+    assert payload["expense"]["signed_amount"] == 3200.0
+    assert payload["expense"]["category_name"] == "Salary"
+
+
 async def test_replace_expense_items_replaces_rows_without_relationship_assignment(db_session: AsyncSession, test_user):
     expense = Expense(
         id=uuid.uuid4(),
@@ -340,6 +421,55 @@ async def test_dashboard_analytics_derives_grocery_subcategories_for_existing_bl
     assert "Cleaning Products" in grouped_names
     assert "Pantry" in grouped_names
     assert payload["grocery_insights"]["uncategorized_count"] == 0
+
+
+async def test_dashboard_analytics_separates_money_in_and_out(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+    grocery_category = Category(user_id=test_user.id, name="Groceries", color="#34d399", transaction_type="debit")
+    salary_category = Category(user_id=test_user.id, name="Salary", color="#10b981", transaction_type="credit")
+    db_session.add_all([grocery_category, salary_category])
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            Expense(
+                id=uuid.uuid4(),
+                user_id=test_user.id,
+                merchant="Fresh Mart",
+                amount=normalize_money(40.00),
+                transaction_type="debit",
+                currency="EUR",
+                expense_date=date(2026, 4, 12),
+                category_id=grocery_category.id,
+                source="manual",
+                confidence=1.0,
+                needs_review=False,
+            ),
+            Expense(
+                id=uuid.uuid4(),
+                user_id=test_user.id,
+                merchant="ACME Payroll",
+                amount=normalize_money(3000.00),
+                transaction_type="credit",
+                currency="EUR",
+                expense_date=date(2026, 4, 15),
+                category_id=salary_category.id,
+                source="statement",
+                confidence=0.97,
+                needs_review=False,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    response = await client.get("/api/analytics/dashboard?month=2026-04", headers=auth_headers)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["money_out"] == 40.0
+    assert payload["summary"]["money_in"] == 3000.0
+    assert payload["summary"]["net"] == 2960.0
+    assert payload["spend_by_category"][0]["name"] == "Groceries"
+    assert payload["income_by_category"][0]["name"] == "Salary"
 
 
 async def test_create_expense_from_receipt_is_idempotent_for_repeated_submission(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):

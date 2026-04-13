@@ -6,7 +6,7 @@ import { createCategory, createMerchantRule, deleteCategory, deleteMerchantRule,
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [rules, setRules] = useState<MerchantRule[]>([]);
-  const [categoryForm, setCategoryForm] = useState({ name: "", color: "#60a5fa", description: "" });
+  const [categoryForm, setCategoryForm] = useState({ name: "", color: "#60a5fa", description: "", transaction_type: "debit" });
   const [ruleForm, setRuleForm] = useState({ merchant_pattern: "", category_id: "", pattern_type: "contains", priority: "100" });
 
   async function load() {
@@ -23,27 +23,28 @@ export default function CategoriesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Categories & rules</h1>
-        <p className="text-sm text-muted-foreground">Create custom categories and define merchant matching rules for automatic categorisation.</p>
+        <p className="text-sm text-muted-foreground">Create money-out and money-in categories, then define merchant rules for automatic categorisation.</p>
       </div>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <form onSubmit={async (event) => {
           event.preventDefault();
-          await createCategory({ name: categoryForm.name, color: categoryForm.color, description: categoryForm.description || null });
-          setCategoryForm({ name: "", color: "#60a5fa", description: "" });
+          await createCategory({ name: categoryForm.name, color: categoryForm.color, description: categoryForm.description || null, transaction_type: categoryForm.transaction_type });
+          setCategoryForm({ name: "", color: "#60a5fa", description: "", transaction_type: "debit" });
           await load();
         }} className="space-y-4 rounded-2xl border border-border bg-card p-6">
           <h2 className="text-xl font-semibold">Categories</h2>
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-3">
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">Name</span><input required value={categoryForm.name} onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">Color</span><input type="color" value={categoryForm.color} onChange={(e) => setCategoryForm({ ...categoryForm, color: e.target.value })} className="h-11 w-full rounded-lg border border-border bg-background px-2 py-2" /></label>
+            <label className="text-sm"><span className="mb-1 block text-muted-foreground">Type</span><select value={categoryForm.transaction_type} onChange={(e) => setCategoryForm({ ...categoryForm, transaction_type: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2"><option value="debit">Money out</option><option value="credit">Money in</option></select></label>
           </div>
           <label className="text-sm"><span className="mb-1 block text-muted-foreground">Description</span><input value={categoryForm.description} onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
           <button className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Add category</button>
           <div className="space-y-2 border-t border-border pt-4">
             {categories.map((category) => (
               <div key={category.id} className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
-                <div className="flex items-center gap-3"><span className="h-4 w-4 rounded-full" style={{ backgroundColor: category.color }} /><div><div className="font-medium">{category.name}</div><div className="text-xs text-muted-foreground">{category.description || (category.is_system ? "Default category" : "Custom category")}</div></div></div>
+                <div className="flex items-center gap-3"><span className="h-4 w-4 rounded-full" style={{ backgroundColor: category.color }} /><div><div className="font-medium">{category.name}</div><div className="text-xs text-muted-foreground">{category.description || (category.is_system ? "Default category" : "Custom category")} · {category.transaction_type === "credit" ? "Money in" : "Money out"}</div></div></div>
                 <button onClick={() => deleteCategory(category.id).then(load)} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">Delete</button>
               </div>
             ))}
@@ -59,7 +60,7 @@ export default function CategoriesPage() {
           <h2 className="text-xl font-semibold">Merchant rules</h2>
           <label className="text-sm"><span className="mb-1 block text-muted-foreground">Match text or regex</span><input required value={ruleForm.merchant_pattern} onChange={(e) => setRuleForm({ ...ruleForm, merchant_pattern: e.target.value })} placeholder="e.g. spotify" className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
           <div className="grid gap-4 md:grid-cols-3">
-            <label className="text-sm"><span className="mb-1 block text-muted-foreground">Category</span><select value={ruleForm.category_id} onChange={(e) => setRuleForm({ ...ruleForm, category_id: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2"><option value="">Uncategorized</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+            <label className="text-sm"><span className="mb-1 block text-muted-foreground">Category</span><select value={ruleForm.category_id} onChange={(e) => setRuleForm({ ...ruleForm, category_id: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2"><option value="">Uncategorized</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name} ({category.transaction_type === "credit" ? "Money in" : "Money out"})</option>)}</select></label>
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">Type</span><select value={ruleForm.pattern_type} onChange={(e) => setRuleForm({ ...ruleForm, pattern_type: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2"><option value="contains">Contains</option><option value="regex">Regex</option></select></label>
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">Priority</span><input type="number" value={ruleForm.priority} onChange={(e) => setRuleForm({ ...ruleForm, priority: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
           </div>

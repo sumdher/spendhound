@@ -22,17 +22,27 @@ from app.models.receipt import Receipt
 
 logger = structlog.get_logger(__name__)
 
-DEFAULT_CATEGORIES: list[tuple[str, str, str]] = [
-    ("Groceries", "#34d399", "shopping-cart"),
-    ("Dining", "#f59e0b", "utensils-crossed"),
-    ("Transport", "#60a5fa", "car"),
-    ("Bills", "#f87171", "receipt-text"),
-    ("Housing", "#a78bfa", "home"),
-    ("Health", "#fb7185", "heart-pulse"),
-    ("Entertainment", "#f472b6", "film"),
-    ("Shopping", "#22c55e", "store"),
-    ("Travel", "#38bdf8", "plane"),
-    ("Other", "#94a3b8", "circle-help"),
+TRANSACTION_TYPE_DEBIT = "debit"
+TRANSACTION_TYPE_CREDIT = "credit"
+
+DEFAULT_CATEGORIES: list[tuple[str, str, str, str]] = [
+    ("Groceries", "#34d399", "shopping-cart", TRANSACTION_TYPE_DEBIT),
+    ("Dining", "#f59e0b", "utensils-crossed", TRANSACTION_TYPE_DEBIT),
+    ("Transport", "#60a5fa", "car", TRANSACTION_TYPE_DEBIT),
+    ("Bills", "#f87171", "receipt-text", TRANSACTION_TYPE_DEBIT),
+    ("Housing", "#a78bfa", "home", TRANSACTION_TYPE_DEBIT),
+    ("Health", "#fb7185", "heart-pulse", TRANSACTION_TYPE_DEBIT),
+    ("Entertainment", "#f472b6", "film", TRANSACTION_TYPE_DEBIT),
+    ("Shopping", "#22c55e", "store", TRANSACTION_TYPE_DEBIT),
+    ("Travel", "#38bdf8", "plane", TRANSACTION_TYPE_DEBIT),
+    ("Other", "#94a3b8", "circle-help", TRANSACTION_TYPE_DEBIT),
+    ("Salary", "#10b981", "badge-euro", TRANSACTION_TYPE_CREDIT),
+    ("Gift", "#ec4899", "gift", TRANSACTION_TYPE_CREDIT),
+    ("Refund", "#22c55e", "rotate-ccw", TRANSACTION_TYPE_CREDIT),
+    ("Reimbursement", "#14b8a6", "wallet", TRANSACTION_TYPE_CREDIT),
+    ("Transfer", "#6366f1", "arrow-right-left", TRANSACTION_TYPE_CREDIT),
+    ("Interest", "#06b6d4", "landmark", TRANSACTION_TYPE_CREDIT),
+    ("Other Income", "#84cc16", "circle-dollar-sign", TRANSACTION_TYPE_CREDIT),
 ]
 
 GROCERY_SUBCATEGORY_RULES: list[tuple[re.Pattern[str], str]] = [
@@ -80,6 +90,26 @@ def is_grocery_category_name(category_name: str | None) -> bool:
     return bool(category_name and "groc" in category_name.lower())
 
 
+def normalize_transaction_type(value: str | None, default: str = TRANSACTION_TYPE_DEBIT) -> str:
+    normalized = (value or default).strip().lower().replace("-", "_").replace(" ", "_")
+    mapping = {
+        "debit": TRANSACTION_TYPE_DEBIT,
+        "expense": TRANSACTION_TYPE_DEBIT,
+        "money_out": TRANSACTION_TYPE_DEBIT,
+        "outflow": TRANSACTION_TYPE_DEBIT,
+        "credit": TRANSACTION_TYPE_CREDIT,
+        "income": TRANSACTION_TYPE_CREDIT,
+        "money_in": TRANSACTION_TYPE_CREDIT,
+        "inflow": TRANSACTION_TYPE_CREDIT,
+    }
+    return mapping.get(normalized, default)
+
+
+def signed_amount(value: Decimal | float, transaction_type: str) -> float:
+    amount = float(value)
+    return round(amount if normalize_transaction_type(transaction_type) == TRANSACTION_TYPE_CREDIT else -amount, 2)
+
+
 def derive_grocery_subcategory(description: str | None) -> tuple[str, float]:
     normalized = normalize_grocery_description(description)
     if not normalized:
@@ -104,26 +134,39 @@ async def expense_category_name(db: AsyncSession, expense: Expense, category_nam
 async def ensure_default_categories(db: AsyncSession, user_id: uuid.UUID) -> None:
     result = await db.execute(select(Category.name).where(Category.user_id == user_id))
     existing = {name.lower() for name in result.scalars().all()}
-    for name, color, icon in DEFAULT_CATEGORIES:
+    for name, color, icon, transaction_type in DEFAULT_CATEGORIES:
         if name.lower() not in existing:
-            db.add(Category(user_id=user_id, name=name, color=color, icon=icon, is_system=True))
+            db.add(Category(user_id=user_id, name=name, color=color, icon=icon, transaction_type=transaction_type, is_system=True))
     await db.flush()
 
 
-async def get_category_by_name(db: AsyncSession, user_id: uuid.UUID, name: str | None) -> Category | None:
+async def get_category_by_name(db: AsyncSession, user_id: uuid.UUID, name: str | None, *, transaction_type: str | None = None) -> Category | None:
     if not name:
         return None
-    result = await db.execute(select(Category).where(Category.user_id == user_id, Category.name.ilike(name.strip())))
+    statement = select(Category).where(Category.user_id == user_id, Category.name.ilike(name.strip()))
+    if transaction_type:
+        statement = statement.where(Category.transaction_type == normalize_transaction_type(transaction_type))
+    result = await db.execute(statement)
     return result.scalar_one_or_none()
 
 
-async def get_or_create_category(db: AsyncSession, user_id: uuid.UUID, name: str | None, *, color: str = "#94a3b8") -> Category | None:
+async def get_or_create_category(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    name: str | None,
+    *,
+    transaction_type: str = TRANSACTION_TYPE_DEBIT,
+    color: str = "#94a3b8",
+) -> Category | None:
     if not name or not name.strip():
         return None
-    category = await get_category_by_name(db, user_id, name)
+    category = await get_category_by_name(db, user_id, name, transaction_type=transaction_type)
     if category:
         return category
-    category = Category(user_id=user_id, name=name.strip(), color=color)
+    existing_category = await get_category_by_name(db, user_id, name)
+    if existing_category is not None:
+        return None
+    category = Category(user_id=user_id, name=name.strip(), color=color, transaction_type=normalize_transaction_type(transaction_type))
     db.add(category)
     await db.flush()
     return category
@@ -142,9 +185,10 @@ def matches_rule(merchant: str, rule: MerchantRule) -> bool:
     return pattern in merchant_value
 
 
-async def find_matching_category(db: AsyncSession, user_id: uuid.UUID, merchant: str | None) -> Category | None:
+async def find_matching_category(db: AsyncSession, user_id: uuid.UUID, merchant: str | None, *, transaction_type: str | None = None) -> Category | None:
     if not merchant:
         return None
+    normalized_type = normalize_transaction_type(transaction_type) if transaction_type else None
     result = await db.execute(
         select(MerchantRule)
         .where(MerchantRule.user_id == user_id, MerchantRule.is_active.is_(True))
@@ -156,22 +200,31 @@ async def find_matching_category(db: AsyncSession, user_id: uuid.UUID, merchant:
         if matches_rule(merchant, rule):
             category_result = await db.execute(select(Category).where(Category.id == rule.category_id, Category.user_id == user_id))
             category = category_result.scalar_one_or_none()
-            if category is not None:
+            if category is not None and (normalized_type is None or category.transaction_type == normalized_type):
                 return category
     return None
 
 
-async def resolve_category(db: AsyncSession, user_id: uuid.UUID, *, category_id: uuid.UUID | None = None, category_name: str | None = None, merchant: str | None = None) -> Category | None:
+async def resolve_category(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    category_id: uuid.UUID | None = None,
+    category_name: str | None = None,
+    merchant: str | None = None,
+    transaction_type: str = TRANSACTION_TYPE_DEBIT,
+) -> Category | None:
+    normalized_type = normalize_transaction_type(transaction_type)
     if category_id:
         result = await db.execute(select(Category).where(Category.id == category_id, Category.user_id == user_id))
         category = result.scalar_one_or_none()
-        if category is not None:
+        if category is not None and category.transaction_type == normalized_type:
             return category
     if category_name:
-        category = await get_or_create_category(db, user_id, category_name)
+        category = await get_or_create_category(db, user_id, category_name, transaction_type=normalized_type)
         if category is not None:
             return category
-    return await find_matching_category(db, user_id, merchant)
+    return await find_matching_category(db, user_id, merchant, transaction_type=normalized_type)
 
 
 def normalize_money(value: Decimal | float | str) -> Decimal:
@@ -194,6 +247,7 @@ def serialize_category(category: Category) -> dict:
         "color": category.color,
         "icon": category.icon,
         "description": category.description,
+        "transaction_type": category.transaction_type,
         "is_system": category.is_system,
         "created_at": category.created_at.isoformat(),
         "updated_at": category.updated_at.isoformat(),
@@ -282,6 +336,8 @@ def serialize_expense(
         "merchant": expense.merchant,
         "description": expense.description,
         "amount": float(expense.amount),
+        "signed_amount": signed_amount(expense.amount, expense.transaction_type),
+        "transaction_type": expense.transaction_type,
         "currency": expense.currency,
         "expense_date": expense.expense_date.isoformat(),
         "source": expense.source,
@@ -375,12 +431,12 @@ async def recompute_recurring_expenses(db: AsyncSession, user_id: uuid.UUID) -> 
         expense.is_recurring = False
         expense.recurring_group = None
 
-    grouped: dict[tuple[str, str], list[Expense]] = defaultdict(list)
+    grouped: dict[tuple[str, str, str], list[Expense]] = defaultdict(list)
     for expense in expenses:
         merchant_key = re.sub(r"[^a-z0-9]+", " ", expense.merchant.lower()).strip()
-        grouped[(merchant_key, expense.currency)].append(expense)
+        grouped[(merchant_key, expense.currency, expense.transaction_type)].append(expense)
 
-    for (merchant_key, currency), group in grouped.items():
+    for (merchant_key, currency, transaction_type), group in grouped.items():
         if len(group) < 2 or not merchant_key:
             continue
         amounts = [float(item.amount) for item in group]
@@ -392,20 +448,31 @@ async def recompute_recurring_expenses(db: AsyncSession, user_id: uuid.UUID) -> 
         gaps = [(group[index].expense_date - group[index - 1].expense_date).days for index in range(1, len(group))]
         if not gaps or not all(20 <= gap <= 40 for gap in gaps):
             continue
-        recurring_group = f"{merchant_key}:{currency}:{avg_amount:.2f}"
+        recurring_group = f"{merchant_key}:{currency}:{transaction_type}:{avg_amount:.2f}"
         for expense in group:
             expense.is_recurring = True
             expense.recurring_group = recurring_group
     await db.flush()
 
 
-def apply_expense_filters(statement, *, user_id: uuid.UUID, month: str | None = None, category_id: uuid.UUID | None = None, review_only: bool = False, search: str | None = None):
+def apply_expense_filters(
+    statement,
+    *,
+    user_id: uuid.UUID,
+    month: str | None = None,
+    category_id: uuid.UUID | None = None,
+    transaction_type: str | None = None,
+    review_only: bool = False,
+    search: str | None = None,
+):
     statement = statement.where(Expense.user_id == user_id)
     if month:
         start = month_start_from_string(month)
         statement = statement.where(Expense.expense_date >= start, Expense.expense_date < next_month(start))
     if category_id:
         statement = statement.where(Expense.category_id == category_id)
+    if transaction_type:
+        statement = statement.where(Expense.transaction_type == normalize_transaction_type(transaction_type))
     if review_only:
         statement = statement.where((Expense.needs_review.is_(True)) | (Expense.category_id.is_(None)))
     if search:

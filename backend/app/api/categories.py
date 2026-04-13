@@ -13,7 +13,7 @@ from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.models.category import Category, MerchantRule
 from app.models.user import User
-from app.services.spendhound import ensure_default_categories, serialize_category, serialize_rule
+from app.services.spendhound import TRANSACTION_TYPE_DEBIT, ensure_default_categories, normalize_transaction_type, serialize_category, serialize_rule
 
 router = APIRouter()
 
@@ -23,6 +23,7 @@ class CategoryCreate(BaseModel):
     color: str = "#60a5fa"
     icon: str | None = None
     description: str | None = None
+    transaction_type: str = TRANSACTION_TYPE_DEBIT
 
 
 class CategoryUpdate(BaseModel):
@@ -30,6 +31,7 @@ class CategoryUpdate(BaseModel):
     color: str | None = None
     icon: str | None = None
     description: str | None = None
+    transaction_type: str | None = None
 
 
 class MerchantRuleCreate(BaseModel):
@@ -63,7 +65,15 @@ async def create_category(body: CategoryCreate, current_user: User = Depends(get
     existing = await db.execute(select(Category).where(Category.user_id == current_user.id, Category.name.ilike(body.name.strip())))
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=400, detail="Category already exists")
-    category = Category(user_id=current_user.id, name=body.name.strip(), color=body.color, icon=body.icon, description=body.description, is_system=False)
+    category = Category(
+        user_id=current_user.id,
+        name=body.name.strip(),
+        color=body.color,
+        icon=body.icon,
+        description=body.description,
+        transaction_type=normalize_transaction_type(body.transaction_type),
+        is_system=False,
+    )
     db.add(category)
     await db.flush()
     await db.refresh(category)
@@ -77,6 +87,8 @@ async def update_category(category_id: uuid.UUID, body: CategoryUpdate, current_
     if category is None:
         raise HTTPException(status_code=404, detail="Category not found")
     for field, value in body.model_dump(exclude_unset=True).items():
+        if field == "transaction_type" and value is not None:
+            value = normalize_transaction_type(value)
         setattr(category, field, value)
     await db.flush()
     return serialize_category(category)

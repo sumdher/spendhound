@@ -16,6 +16,7 @@ export interface Category {
   color: string;
   icon?: string | null;
   description?: string | null;
+  transaction_type: string;
   is_system: boolean;
   created_at: string;
   updated_at: string;
@@ -81,6 +82,7 @@ export interface ReceiptPreviewItem {
 export interface ReceiptPreview {
   merchant?: string;
   amount?: number | null;
+  transaction_type?: string;
   currency?: string;
   expense_date?: string | null;
   description?: string | null;
@@ -93,6 +95,7 @@ export interface ReceiptPreview {
 export interface StatementImportEntry {
   merchant?: string;
   amount?: number | null;
+  transaction_type?: string;
   currency?: string;
   expense_date?: string | null;
   description?: string | null;
@@ -125,6 +128,8 @@ export interface Expense {
   merchant: string;
   description?: string | null;
   amount: number;
+  signed_amount: number;
+  transaction_type: string;
   currency: string;
   expense_date: string;
   source: string;
@@ -167,17 +172,37 @@ export interface DashboardAnalytics {
   month: string;
   summary: {
     total_spend: number;
+    total_income: number;
+    money_in: number;
+    money_out: number;
+    net: number;
     transaction_count: number;
     average_transaction: number;
+    average_outflow: number;
+    average_inflow: number;
     review_count: number;
   };
   spend_by_category: { name: string; amount: number }[];
+  income_by_category: { name: string; amount: number }[];
   top_merchants: { merchant: string; amount: number }[];
-  monthly_trend: { month: string; amount: number }[];
+  top_income_sources: { merchant: string; amount: number }[];
+  monthly_trend: { month: string; amount: number; money_in: number; money_out: number; net: number }[];
+  recurring_transactions: Array<{
+    id: string;
+    merchant: string;
+    amount: number;
+    signed_amount: number;
+    transaction_type: string;
+    currency: string;
+    expense_date: string;
+    category_name: string;
+  }>;
   recurring_expenses: Array<{
     id: string;
     merchant: string;
     amount: number;
+    signed_amount: number;
+    transaction_type: string;
     currency: string;
     expense_date: string;
     category_name: string;
@@ -204,6 +229,7 @@ export interface AdminUser {
   name?: string | null;
   avatar_url?: string | null;
   status: string;
+  is_admin: boolean;
   expense_count: number;
   created_at: string;
 }

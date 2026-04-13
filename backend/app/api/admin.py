@@ -115,6 +115,7 @@ class AdminUserResponse(BaseModel):
     name: str | None
     avatar_url: str | None
     status: str
+    is_admin: bool
     expense_count: int
     created_at: str
 
@@ -127,7 +128,7 @@ class UpdateStatusRequest(BaseModel):
 async def list_users(_admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)) -> list[AdminUserResponse]:
     counts_q = select(Expense.user_id, func.count(Expense.id).label("expense_count")).group_by(Expense.user_id).subquery()
     result = await db.execute(select(User, func.coalesce(counts_q.c.expense_count, 0).label("expense_count")).outerjoin(counts_q, User.id == counts_q.c.user_id).order_by(User.created_at.desc()))
-    return [AdminUserResponse(id=str(user.id), email=user.email, name=user.name, avatar_url=user.avatar_url, status=user.status, expense_count=int(count), created_at=user.created_at.isoformat()) for user, count in result.all()]
+    return [AdminUserResponse(id=str(user.id), email=user.email, name=user.name, avatar_url=user.avatar_url, status=user.status, is_admin=is_admin_email(user.email), expense_count=int(count), created_at=user.created_at.isoformat()) for user, count in result.all()]
 
 
 @router.patch("/panel/users/{user_id}/status")

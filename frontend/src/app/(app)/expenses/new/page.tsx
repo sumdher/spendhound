@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createExpense, createExpenseFromReceipt, createExpenseFromStatementEntry, listCategories, uploadReceipt, uploadStatement, type Category, type Receipt, type ReceiptPreview, type StatementImportEntry, type StatementImportPreview } from "@/lib/api";
-import { currentMonthString, formatCurrency } from "@/lib/utils";
+import { currentMonthString, formatCurrency, formatSignedCurrency, transactionTypeLabel } from "@/lib/utils";
 
 type ExpenseFormState = {
   merchant: string;
   description: string;
   amount: string;
+  transaction_type: string;
   currency: string;
   expense_date: string;
   category_id: string;
@@ -29,6 +30,7 @@ function createEmptyExpenseForm(): ExpenseFormState {
     merchant: "",
     description: "",
     amount: "",
+    transaction_type: "debit",
     currency: "EUR",
     expense_date: `${currentMonthString()}-01`,
     category_id: "",
@@ -61,6 +63,35 @@ function isReceiptPreview(preview: Receipt["preview"] | null | undefined): previ
 
 function findNextPendingIndex(entries: StatementImportEntry[]) {
   return entries.findIndex((entry) => entry.status !== "finalized");
+}
+
+function filteredCategories(categories: Category[], transactionType: string) {
+  return categories.filter((category) => category.transaction_type === transactionType);
+}
+
+function TransactionTypeSelector({ value, onChange, disabled = false }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
+  return (
+    <div className="space-y-2">
+      <div className="text-sm text-muted-foreground">Transaction type</div>
+      <div className="grid grid-cols-2 gap-2">
+        {[
+          { value: "debit", label: "Money out", description: "Expenses, bills, purchases" },
+          { value: "credit", label: "Money in", description: "Salary, gifts, refunds" },
+        ].map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+            className={`rounded-xl border px-4 py-3 text-left disabled:cursor-not-allowed disabled:opacity-60 ${value === option.value ? "border-primary bg-primary/5" : "border-border bg-background hover:bg-accent"}`}
+          >
+            <div className="font-medium">{option.label}</div>
+            <div className="text-xs text-muted-foreground">{option.description}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function NewExpensePage() {
@@ -98,6 +129,7 @@ export default function NewExpensePage() {
     setReceiptDraft({
       merchant: preview.merchant ?? "",
       amount: preview.amount != null ? String(preview.amount) : "",
+      transaction_type: preview.transaction_type ?? "debit",
       currency: preview.currency ?? "EUR",
       expense_date: preview.expense_date ?? new Date().toISOString().slice(0, 10),
       description: preview.description ?? "",
@@ -118,6 +150,7 @@ export default function NewExpensePage() {
     setStatementDraft({
       merchant: currentStatementEntry.merchant ?? "",
       amount: currentStatementEntry.amount != null ? String(currentStatementEntry.amount) : "",
+      transaction_type: currentStatementEntry.transaction_type ?? "debit",
       currency: currentStatementEntry.currency ?? "EUR",
       expense_date: currentStatementEntry.expense_date ?? new Date().toISOString().slice(0, 10),
       description: currentStatementEntry.description ?? "",
@@ -148,6 +181,7 @@ export default function NewExpensePage() {
         merchant: manualForm.merchant,
         description: manualForm.description || null,
         amount: Number(manualForm.amount),
+        transaction_type: manualForm.transaction_type,
         currency: manualForm.currency,
         expense_date: manualForm.expense_date,
         category_id: manualForm.category_id || null,
@@ -193,6 +227,7 @@ export default function NewExpensePage() {
         merchant: receiptDraft.merchant,
         description: receiptDraft.description || null,
         amount: Number(receiptDraft.amount),
+        transaction_type: receiptDraft.transaction_type,
         currency: receiptDraft.currency,
         expense_date: receiptDraft.expense_date,
         category_id: receiptDraft.category_id || null,
@@ -222,6 +257,7 @@ export default function NewExpensePage() {
         merchant: statementDraft.merchant,
         description: statementDraft.description || null,
         amount: Number(statementDraft.amount),
+        transaction_type: statementDraft.transaction_type,
         currency: statementDraft.currency,
         expense_date: statementDraft.expense_date,
         category_id: statementDraft.category_id || null,
@@ -249,8 +285,8 @@ export default function NewExpensePage() {
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div>
-        <h1 className="text-3xl font-bold">Add expense</h1>
-        <p className="text-sm text-muted-foreground">Choose manual entry or upload a receipt for direct multimodal extraction with review before save.</p>
+        <h1 className="text-3xl font-bold">Add transaction</h1>
+        <p className="text-sm text-muted-foreground">Add money out or money in manually, or review imported receipt and statement drafts before anything is saved.</p>
       </div>
       <div className="flex gap-2 border-b border-border">
         <button type="button" onClick={() => setTab(MANUAL_TAB)} className={`rounded-t-xl px-4 py-2 text-sm font-medium ${activeTab === MANUAL_TAB ? "bg-card text-foreground" : "text-muted-foreground hover:text-foreground"}`}>Manual</button>
@@ -261,8 +297,9 @@ export default function NewExpensePage() {
       {activeTab === MANUAL_TAB ? (
         <form onSubmit={handleManualSubmit} className="space-y-4 rounded-2xl border border-border bg-card p-6">
           {manualError ? <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{manualError}</div> : null}
+          <TransactionTypeSelector value={manualForm.transaction_type} onChange={(transaction_type) => setManualForm({ ...manualForm, transaction_type, category_id: "", category_name: "" })} />
           <div className="grid gap-4 md:grid-cols-2">
-            <label className="text-sm"><span className="mb-1 block text-muted-foreground">Merchant</span><input required value={manualForm.merchant} onChange={(e) => setManualForm({ ...manualForm, merchant: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
+            <label className="text-sm"><span className="mb-1 block text-muted-foreground">{manualForm.transaction_type === "credit" ? "Source / payer" : "Merchant"}</span><input required value={manualForm.merchant} onChange={(e) => setManualForm({ ...manualForm, merchant: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">Amount</span><input required type="number" step="0.01" value={manualForm.amount} onChange={(e) => setManualForm({ ...manualForm, amount: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">Date</span><input required type="date" value={manualForm.expense_date} onChange={(e) => setManualForm({ ...manualForm, expense_date: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">Currency</span><input value={manualForm.currency} onChange={(e) => setManualForm({ ...manualForm, currency: e.target.value.toUpperCase() })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
@@ -273,7 +310,7 @@ export default function NewExpensePage() {
               <span className="mb-1 block text-muted-foreground">Category</span>
               <select value={manualForm.category_id} onChange={(e) => setManualForm({ ...manualForm, category_id: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2">
                 <option value="">Use rule or custom name</option>
-                {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                {filteredCategories(categories, manualForm.transaction_type).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
               </select>
             </label>
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">Custom category name</span><input value={manualForm.category_name} onChange={(e) => setManualForm({ ...manualForm, category_name: e.target.value })} disabled={!!manualForm.category_id} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:opacity-50" /></label>
@@ -281,7 +318,7 @@ export default function NewExpensePage() {
           <label className="text-sm"><span className="mb-1 block text-muted-foreground">Notes</span><textarea value={manualForm.notes} onChange={(e) => setManualForm({ ...manualForm, notes: e.target.value })} rows={4} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => router.push("/expenses")} className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-accent">Cancel</button>
-            <button disabled={submitting} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60">{submitting ? "Saving…" : "Save expense"}</button>
+            <button disabled={submitting} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60">{submitting ? "Saving…" : "Save transaction"}</button>
           </div>
         </form>
       ) : activeTab === RECEIPT_TAB ? (
@@ -289,7 +326,7 @@ export default function NewExpensePage() {
           <div className="space-y-4">
             <div className="rounded-2xl border border-border bg-card p-4">
               <h2 className="text-xl font-semibold">Upload receipt</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Images stay on the direct multimodal extraction path. PDFs use robust local PDF text extraction first, then structured review before anything is saved.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Receipt import stays expense-focused by default, but you can switch the reviewed draft to money in if the document is clearly a refund or reimbursement.</p>
               <label className="mt-4 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm hover:bg-accent">
                 <input type="file" accept="image/*,.pdf" className="hidden" onChange={handleUpload} />
                 {uploading ? "Uploading…" : "Choose a receipt image or PDF"}
@@ -334,16 +371,18 @@ export default function NewExpensePage() {
               <div className="space-y-5">
                 <div className="flex flex-col gap-2 border-b border-border pb-4 md:flex-row md:items-center md:justify-between">
                   <div>
-                    <h2 className="text-xl font-semibold">Review extracted expense</h2>
-                    <p className="text-sm text-muted-foreground">Validate the draft before approval. The reviewed payload, not raw model output, is what becomes an expense.</p>
+                    <h2 className="text-xl font-semibold">Review extracted transaction</h2>
+                    <p className="text-sm text-muted-foreground">Validate the draft before approval. The reviewed payload, not raw model output, is what becomes the saved transaction.</p>
                   </div>
                   <div className="rounded-full bg-secondary px-3 py-1 text-sm">{selectedReceipt.original_filename}</div>
                 </div>
 
                 {finalizingReceipt ? <div className="rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary">Saving approved receipt… Please wait.</div> : null}
 
+                <TransactionTypeSelector value={receiptDraft.transaction_type} onChange={(transaction_type) => setReceiptDraft({ ...receiptDraft, transaction_type, category_id: "", category_name: "" })} disabled={finalizingReceipt} />
+
                 <div className="grid gap-4 md:grid-cols-2">
-                  <label className="text-sm"><span className="mb-1 block text-muted-foreground">Merchant</span><input value={receiptDraft.merchant} onChange={(e) => setReceiptDraft({ ...receiptDraft, merchant: e.target.value })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
+                  <label className="text-sm"><span className="mb-1 block text-muted-foreground">{receiptDraft.transaction_type === "credit" ? "Source / payer" : "Merchant"}</span><input value={receiptDraft.merchant} onChange={(e) => setReceiptDraft({ ...receiptDraft, merchant: e.target.value })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Amount</span><input type="number" step="0.01" value={receiptDraft.amount} onChange={(e) => setReceiptDraft({ ...receiptDraft, amount: e.target.value })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Date</span><input type="date" value={receiptDraft.expense_date} onChange={(e) => setReceiptDraft({ ...receiptDraft, expense_date: e.target.value })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Currency</span><input value={receiptDraft.currency} onChange={(e) => setReceiptDraft({ ...receiptDraft, currency: e.target.value.toUpperCase() })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
@@ -355,7 +394,7 @@ export default function NewExpensePage() {
                     <span className="mb-1 block text-muted-foreground">Category</span>
                     <select value={receiptDraft.category_id} onChange={(e) => setReceiptDraft({ ...receiptDraft, category_id: e.target.value })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60">
                       <option value="">Use custom or extracted category</option>
-                      {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                      {filteredCategories(categories, receiptDraft.transaction_type).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
                     </select>
                   </label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Custom category name</span><input value={receiptDraft.category_name} onChange={(e) => setReceiptDraft({ ...receiptDraft, category_name: e.target.value })} disabled={finalizingReceipt || !!receiptDraft.category_id} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
@@ -371,8 +410,8 @@ export default function NewExpensePage() {
                 ) : null}
 
                 <div className="flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">Estimated amount: {receiptDraft.amount ? formatCurrency(Number(receiptDraft.amount), receiptDraft.currency) : "—"}</div>
-                  <button type="button" onClick={handleReceiptFinalize} disabled={finalizingReceipt || !receiptDraft.merchant || !receiptDraft.amount || !receiptDraft.expense_date} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">{finalizingReceipt ? "Saving expense…" : "Approve and save expense"}</button>
+                  <div className="text-sm text-muted-foreground">Estimated amount: {receiptDraft.amount ? formatSignedCurrency(Number(receiptDraft.amount), receiptDraft.transaction_type, receiptDraft.currency) : "—"}</div>
+                  <button type="button" onClick={handleReceiptFinalize} disabled={finalizingReceipt || !receiptDraft.merchant || !receiptDraft.amount || !receiptDraft.expense_date} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">{finalizingReceipt ? "Saving transaction…" : "Approve and save transaction"}</button>
                 </div>
               </div>
             )}
@@ -383,7 +422,7 @@ export default function NewExpensePage() {
           <div className="space-y-4">
             <div className="rounded-2xl border border-border bg-card p-4">
               <h2 className="text-xl font-semibold">Import bank statement PDF</h2>
-              <p className="mt-1 text-sm text-muted-foreground">Upload a statement PDF, extract multiple candidate expenses, then review and approve them one-by-one before save. Grocery item lines stay empty for statement imports.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Upload a statement PDF, extract both debit and credit transactions, then review and approve them one by one before save. Grocery item lines stay empty for statement imports.</p>
               <label className="mt-4 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm hover:bg-accent">
                 <input
                   type="file"
@@ -401,7 +440,7 @@ export default function NewExpensePage() {
                       const entries = receipt.preview && isStatementPreview(receipt.preview) ? receipt.preview.entries : [];
                       const nextIndex = Math.max(findNextPendingIndex(entries), 0);
                       setStatementIndex(nextIndex);
-                      setStatementSuccess(`Imported ${entries.length} candidate expenses from ${receipt.original_filename}. Review each one before saving.`);
+                      setStatementSuccess(`Imported ${entries.length} candidate transactions from ${receipt.original_filename}. Review each one before saving.`);
                       setTab(STATEMENT_TAB);
                     } catch (err) {
                       setStatementError(err instanceof Error ? err.message : "Statement upload failed");
@@ -441,7 +480,7 @@ export default function NewExpensePage() {
                         <div className="font-medium">{entry.merchant || `Entry ${index + 1}`}</div>
                         <span className={`rounded-full px-2 py-1 text-[11px] ${entry.status === "finalized" ? "bg-green-500/15 text-green-400" : "bg-yellow-500/15 text-yellow-400"}`}>{entry.status === "finalized" ? "Saved" : "Pending"}</span>
                       </div>
-                      <div className="mt-1 text-xs text-muted-foreground">{entry.expense_date || "Unknown date"} · {entry.amount != null ? formatCurrency(entry.amount, entry.currency) : "Unknown amount"}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{entry.expense_date || "Unknown date"} · {entry.amount != null ? formatSignedCurrency(entry.amount, entry.transaction_type, entry.currency) : "Unknown amount"} · {transactionTypeLabel(entry.transaction_type)}</div>
                     </button>
                   ))}
                 </div>
@@ -452,12 +491,12 @@ export default function NewExpensePage() {
           <div className="rounded-2xl border border-border bg-card p-6">
             {statementError ? <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{statementError}</div> : null}
             {statementSuccess ? <div className="mb-4 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-400">{statementSuccess}</div> : null}
-            {!selectedStatement || !currentStatementEntry ? <div className="py-20 text-center text-muted-foreground">Upload a statement PDF to start the multi-expense review queue.</div> : (
+            {!selectedStatement || !currentStatementEntry ? <div className="py-20 text-center text-muted-foreground">Upload a statement PDF to start the multi-transaction review queue.</div> : (
               <div className="space-y-5">
                 <div className="flex flex-col gap-2 border-b border-border pb-4 md:flex-row md:items-center md:justify-between">
                   <div>
                     <h2 className="text-xl font-semibold">Review statement entry {statementIndex + 1} of {statementEntries.length}</h2>
-                    <p className="text-sm text-muted-foreground">Each approved entry becomes one expense. Item-level fields are intentionally left empty for statement imports.</p>
+                    <p className="text-sm text-muted-foreground">Each approved entry becomes one transaction. Item-level fields are intentionally left empty for statement imports.</p>
                   </div>
                   <div className="rounded-full bg-secondary px-3 py-1 text-sm">{selectedStatement.original_filename}</div>
                 </div>
@@ -468,8 +507,10 @@ export default function NewExpensePage() {
 
                 {finalizingStatement ? <div className="rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary">Saving approved statement entry… Please wait.</div> : null}
 
+                <TransactionTypeSelector value={statementDraft.transaction_type} onChange={(transaction_type) => setStatementDraft({ ...statementDraft, transaction_type, category_id: "", category_name: "" })} disabled={finalizingStatement} />
+
                 <div className="grid gap-4 md:grid-cols-2">
-                  <label className="text-sm"><span className="mb-1 block text-muted-foreground">Merchant</span><input value={statementDraft.merchant} onChange={(e) => setStatementDraft({ ...statementDraft, merchant: e.target.value })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
+                  <label className="text-sm"><span className="mb-1 block text-muted-foreground">{statementDraft.transaction_type === "credit" ? "Source / payer" : "Merchant"}</span><input value={statementDraft.merchant} onChange={(e) => setStatementDraft({ ...statementDraft, merchant: e.target.value })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Amount</span><input type="number" step="0.01" value={statementDraft.amount} onChange={(e) => setStatementDraft({ ...statementDraft, amount: e.target.value })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Date</span><input type="date" value={statementDraft.expense_date} onChange={(e) => setStatementDraft({ ...statementDraft, expense_date: e.target.value })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Currency</span><input value={statementDraft.currency} onChange={(e) => setStatementDraft({ ...statementDraft, currency: e.target.value.toUpperCase() })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
@@ -481,7 +522,7 @@ export default function NewExpensePage() {
                     <span className="mb-1 block text-muted-foreground">Category</span>
                     <select value={statementDraft.category_id} onChange={(e) => setStatementDraft({ ...statementDraft, category_id: e.target.value })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60">
                       <option value="">Use custom or extracted category</option>
-                      {categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
+                      {filteredCategories(categories, statementDraft.transaction_type).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
                     </select>
                   </label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Custom category name</span><input value={statementDraft.category_name} onChange={(e) => setStatementDraft({ ...statementDraft, category_name: e.target.value })} disabled={finalizingStatement || !!statementDraft.category_id} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
@@ -504,7 +545,7 @@ export default function NewExpensePage() {
                     disabled={finalizingStatement || !statementDraft.merchant || !statementDraft.amount || !statementDraft.expense_date || currentStatementEntry.status === "finalized"}
                     className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {finalizingStatement ? "Saving entry…" : currentStatementEntry.status === "finalized" ? "Already saved" : "Approve and save entry"}
+                    {finalizingStatement ? "Saving entry…" : currentStatementEntry.status === "finalized" ? "Already saved" : "Approve and save transaction"}
                   </button>
                 </div>
               </div>
