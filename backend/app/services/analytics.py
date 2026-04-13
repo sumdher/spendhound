@@ -21,7 +21,7 @@ logger = structlog.get_logger(__name__)
 
 async def _build_grocery_insights(db: AsyncSession, user_id: uuid.UUID, selected_month: date, month_end: date) -> dict:
     result = await db.execute(
-        select(ExpenseItem)
+        select(ExpenseItem, Expense.amount)
         .join(Expense, Expense.id == ExpenseItem.expense_id)
         .outerjoin(Category, Category.id == Expense.category_id)
         .where(
@@ -32,8 +32,8 @@ async def _build_grocery_insights(db: AsyncSession, user_id: uuid.UUID, selected
             func.lower(Category.name).like("%groc%"),
         )
     )
-    grocery_items = result.scalars().all()
-    if not grocery_items:
+    grocery_item_rows = result.all()
+    if not grocery_item_rows:
         return {
             "item_count": 0,
             "total_itemized_spend": 0.0,
@@ -47,23 +47,35 @@ async def _build_grocery_insights(db: AsyncSession, user_id: uuid.UUID, selected
     counts: dict[str, int] = defaultdict(int)
     total_itemized_spend = 0.0
     derived_subcategory_count = 0
+    approved_totals_by_expense: dict[uuid.UUID, float] = {}
+    items_by_expense: dict[uuid.UUID, list[tuple[ExpenseItem, float]]] = defaultdict(list)
 
-    for item in grocery_items:
-        amount = float(item.total_price) if item.total_price is not None else float(item.unit_price or 0) * float(item.quantity or 0)
-        total_itemized_spend += amount
-        label = item.subcategory
-        if not label:
-            label, _ = derive_grocery_subcategory(item.description)
-            derived_subcategory_count += 1
-        totals[label] += amount
-        counts[label] += 1
+    for item, expense_amount in grocery_item_rows:
+        raw_amount = float(item.total_price) if item.total_price is not None else float(item.unit_price or 0) * float(item.quantity or 0)
+        approved_totals_by_expense[item.expense_id] = float(expense_amount)
+        items_by_expense[item.expense_id].append((item, raw_amount))
+
+    for expense_id, expense_items in items_by_expense.items():
+        approved_total = approved_totals_by_expense[expense_id]
+        raw_total = sum(amount for _, amount in expense_items)
+        scale = min(1.0, approved_total / raw_total) if raw_total > 0 else 1.0
+
+        for item, amount in expense_items:
+            adjusted_amount = amount * scale
+            total_itemized_spend += adjusted_amount
+            label = item.subcategory
+            if not label:
+                label, _ = derive_grocery_subcategory(item.description)
+                derived_subcategory_count += 1
+            totals[label] += adjusted_amount
+            counts[label] += 1
 
     if derived_subcategory_count:
         logger.info(
             "analytics.grocery_subcategories.derived_for_dashboard",
             user_id=str(user_id),
             derived_subcategory_count=derived_subcategory_count,
-            grocery_item_count=len(grocery_items),
+            grocery_item_count=len(grocery_item_rows),
         )
 
     ordered = sorted(totals.items(), key=lambda candidate: candidate[1], reverse=True)
@@ -85,7 +97,7 @@ async def _build_grocery_insights(db: AsyncSession, user_id: uuid.UUID, selected
         )
     )
     return {
-        "item_count": len(grocery_items),
+        "item_count": len(grocery_item_rows),
         "total_itemized_spend": round(total_itemized_spend, 2),
         "summary": summary,
         "top_subcategories": top_subcategories,

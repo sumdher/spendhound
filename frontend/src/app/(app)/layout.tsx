@@ -1,9 +1,9 @@
 "use client";
 
 import Image from "next/image";
+import { useSession } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { useSession } from "next-auth/react";
 import { Sidebar } from "@/components/sidebar";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -11,15 +11,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const isChatRoute = pathname === "/chat";
 
   useEffect(() => {
-    if (status === "unauthenticated") router.replace("/login");
-    if (status === "authenticated" && session?.userStatus !== "approved") router.replace("/pending");
+    if (status === "unauthenticated") {
+      router.replace("/login");
+    } else if (status === "authenticated" && session?.userStatus !== "approved") {
+      router.replace("/pending");
+    }
   }, [router, session, status]);
-
-  useEffect(() => {
-    setSidebarOpen(false);
-  }, [pathname]);
 
   if (status === "loading") {
     return (
@@ -32,15 +32,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (!session || session.userStatus !== "approved") return null;
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-dvh overflow-hidden bg-background">
       <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-      <div className="flex h-screen min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex h-14 items-center gap-3 border-b border-border bg-card px-4 lg:hidden">
-          <button onClick={() => setSidebarOpen(true)} className="rounded-md p-1.5 hover:bg-accent">☰</button>
-          <Image src="/icon.svg" alt="SpendHound" width={22} height={22} unoptimized />
-          <span className="font-semibold">SpendHound</span>
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 lg:hidden">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            aria-label="Open menu"
+          >
+            <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+          <Image src="/icon.svg" alt="SpendHound" width={24} height={24} unoptimized />
+          <span className="text-base font-bold tracking-tight">SpendHound</span>
         </header>
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
+
+        <main className={isChatRoute ? "flex-1 min-h-0 overflow-hidden" : "flex-1 overflow-y-auto"}>
+          <div className={isChatRoute ? "h-full min-h-0" : "p-4 md:p-6"}>{children}</div>
+        </main>
       </div>
     </div>
   );
