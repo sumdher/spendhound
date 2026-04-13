@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { signOut, useSession } from "next-auth/react";
 import Image from "next/image";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 const NAV_ITEMS = [
@@ -18,6 +19,8 @@ const NAV_ITEMS = [
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const pathname = usePathname();
   const { data: session } = useSession();
+  const [confirmingSignOut, setConfirmingSignOut] = useState(false);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const avatarUrl = session?.user?.image || session?.user?.avatar_url;
   const initials = (session?.user?.name || session?.user?.email || "SH")
     .split(/\s+/)
@@ -25,6 +28,25 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
     .slice(0, 2)
     .map((chunk) => chunk[0]?.toUpperCase() || "")
     .join("");
+
+  const handleSignOutClick = () => {
+    setConfirmingSignOut(true);
+  };
+
+  const handleSignOutCancel = () => {
+    if (isSigningOut) return;
+    setConfirmingSignOut(false);
+  };
+
+  const handleSignOutConfirm = async () => {
+    try {
+      setIsSigningOut(true);
+      await signOut({ callbackUrl: "/login" });
+    } finally {
+      setIsSigningOut(false);
+      setConfirmingSignOut(false);
+    }
+  };
 
   return (
     <>
@@ -43,7 +65,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       >
         <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border px-4">
           <Link href="/dashboard" className="flex items-center gap-3" onClick={onClose}>
-            <Image src="/icon.svg" alt="SpendHound" width={30} height={30} unoptimized />
+            <Image src="/icon.svg?v=2" alt="SpendHound" width={30} height={30} unoptimized />
             <div>
               <div className="text-lg font-semibold">SpendHound</div>
               <div className="text-xs text-muted-foreground">Personal expense tracker</div>
@@ -81,7 +103,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               )}
             >
               <span>🛡️</span>
-              <span>Admin</span>
+              <span>Admin Panel</span>
             </Link>
           ) : null}
         </nav>
@@ -98,9 +120,34 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               <div className="truncate text-xs text-muted-foreground">{session?.user?.email}</div>
             </div>
           </div>
+          {confirmingSignOut ? (
+            <div className="mb-3 rounded-xl border border-border bg-background p-3 shadow-sm">
+              <p className="text-sm font-medium text-foreground">Sign out of SpendHound?</p>
+              <p className="mt-1 text-xs text-muted-foreground">You&apos;ll need to sign in again to access your dashboard.</p>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={handleSignOutCancel}
+                  disabled={isSigningOut}
+                  className="w-full rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Stay signed in
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSignOutConfirm}
+                  disabled={isSigningOut}
+                  className="w-full rounded-lg bg-destructive px-3 py-2 text-sm font-medium text-destructive-foreground transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSigningOut ? "Signing out..." : "Yes, sign out"}
+                </button>
+              </div>
+            </div>
+          ) : null}
           <button
-            onClick={() => signOut({ callbackUrl: "/login" })}
-            className="w-full rounded-lg border border-border bg-secondary px-3 py-2 text-sm font-medium hover:bg-accent"
+            type="button"
+            onClick={handleSignOutClick}
+            className="w-full rounded-lg border border-border bg-secondary px-3 py-2 text-sm font-medium transition-colors hover:bg-accent"
           >
             Sign out
           </button>
