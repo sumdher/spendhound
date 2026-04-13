@@ -1,0 +1,1 @@
+"""SpendHound backend application package."""

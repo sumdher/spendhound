@@ -1,0 +1,16 @@
+# Named Cloudflare Tunnel configuration for production.
+# Authentication is provided by `CLOUDFLARE_TUNNEL_TOKEN` in the root `.env`.
+
+tunnel: <your-tunnel-uuid>
+
+ingress:
+  - hostname: app.example.com
+    service: http://frontend:3000
+
+  # Optional direct API hostname. Remove this block if the backend should only
+  # be reachable through the frontend.
+  # - hostname: api.example.com
+  #   service: http://backend:8000
+
+  # Required catch-all rule.
+  - service: http_status:404
