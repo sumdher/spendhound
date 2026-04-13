@@ -1,0 +1,19 @@
+[Unit]
+Description=SpendHound PostgreSQL backup
+Documentation=https://github.com/sumdher/spendhound
+Wants=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/opt/spendhound
+ExecStart=/usr/bin/env bash /opt/spendhound/deploy/backup/spendhound-db-backup.sh
+
+# Optional overrides for non-default deployments can be added here or via a drop-in:
+# Environment=SPENDHOUND_BACKUP_DIR=/var/backups/spendhound
+# Environment=SPENDHOUND_BACKUP_RETENTION_DAYS=14
+# Environment=SPENDHOUND_BACKUP_COMPOSE_FILE=/opt/spendhound/docker-compose.prod.yml
+# Environment=SPENDHOUND_BACKUP_PROJECT_DIR=/opt/spendhound
+# Environment=SPENDHOUND_BACKUP_SERVICE_NAME=db

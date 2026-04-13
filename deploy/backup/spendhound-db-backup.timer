@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SpendHound PostgreSQL backup daily
+
+[Timer]
+OnCalendar=*-*-* 03:15:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=spendhound-db-backup.service
+
+[Install]
+WantedBy=timers.target

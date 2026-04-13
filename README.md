@@ -127,6 +127,46 @@ For non-Docker runs set these frontend values:
 - `NEXT_PUBLIC_API_URL=http://localhost:8000`
 - `INTERNAL_API_URL=http://localhost:8000`
 
+## Production PostgreSQL backups
+
+SpendHound now includes a host-side systemd backup setup under [`deploy/backup`](deploy/backup) for the production PostgreSQL container defined in [`docker-compose.prod.yml`](docker-compose.prod.yml:1).
+
+Files added:
+
+- [`deploy/backup/spendhound-db-backup.sh`](deploy/backup/spendhound-db-backup.sh)
+- [`deploy/backup/spendhound-db-backup.service`](deploy/backup/spendhound-db-backup.service)
+- [`deploy/backup/spendhound-db-backup.timer`](deploy/backup/spendhound-db-backup.timer)
+- [`deploy/backup/install-spendhound-db-backup.sh`](deploy/backup/install-spendhound-db-backup.sh)
+
+The backup job:
+
+- runs with `set -Eeuo pipefail` and `umask 077`
+- locks with `flock` to prevent overlapping runs
+- dumps the running `db` container from [`docker-compose.prod.yml`](docker-compose.prod.yml:1)
+- writes to a temporary compressed archive first, validates it with `pg_restore --list`, writes a SHA-256 checksum, then atomically renames both files into place
+- prunes old backup and checksum files from `/var/backups/spendhound` after the configured retention period
+
+Default schedule:
+
+- daily at `03:15 UTC` with up to `15m` randomized delay
+- `Persistent=true`, so missed runs execute after the host comes back up
+
+Run these commands from `/home/zorino/repos/spendhound/spendhound_roo/spendhound` on the production host:
+
+```bash
+sudo bash ./deploy/backup/install-spendhound-db-backup.sh
+sudo systemctl start spendhound-db-backup.service
+sudo systemctl status spendhound-db-backup.timer --no-pager
+sudo systemctl list-timers spendhound-db-backup.timer
+sudo journalctl -u spendhound-db-backup.service -n 50 --no-pager
+```
+
+Notes:
+
+- the installer copies the unit files into `/etc/systemd/system`, writes a drop-in override pointing at this repository checkout, enables the timer, and starts or restarts it
+- backups are stored in `/var/backups/spendhound`
+- the host must have `systemd`, Docker with the Compose v2 plugin, and a running healthy `db` service from [`docker-compose.prod.yml`](docker-compose.prod.yml:1)
+
 ## Receipt extraction flow
 
 1. Open Add expense and switch to the Upload receipt tab
