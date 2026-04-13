@@ -1,0 +1,16 @@
+You have 5 boxes labeled A, B, C, D, and E. Each contains a different number of coins.
+
+Constraints:
+- A has more coins than B but fewer than C.
+- D has fewer coins than A.
+- E has more coins than C.
+- The total number of coins is 100.
+- No box contains fewer than 5 coins.
+- All values are integers.
+- The difference between the largest and smallest box is exactly 40.
+- B + D = 30
+
+Question:
+What are the exact number of coins in each box?
+
+Explain your reasoning step by step, and verify all constraints at the end.
