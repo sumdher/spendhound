@@ -20,9 +20,22 @@ from app.models.category import Category
 from app.models.expense import Expense
 from app.models.receipt import Receipt
 from app.models.user import User
-from app.services.spendhound import TRANSACTION_TYPE_DEBIT, apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_money, normalize_transaction_type, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_receipt
+from app.services.spendhound import CADENCE_ONE_TIME, TRANSACTION_TYPE_DEBIT, apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_cadence, normalize_money, normalize_transaction_type, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_receipt
 
 router = APIRouter()
+
+
+def _parse_cadence_override(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip().lower().replace("-", "_").replace(" ", "_")
+    if cleaned in {"", "auto", "automatic", "detect", "detected"}:
+        return None
+    return normalize_cadence(value)
+
+
+def _normalize_major_purchase(value: bool | None, *, transaction_type: str) -> bool:
+    return bool(value) and normalize_transaction_type(transaction_type) == TRANSACTION_TYPE_DEBIT
 
 
 async def _get_existing_receipt_expense(db: AsyncSession, *, user_id: uuid.UUID, receipt_id: uuid.UUID, source: str = "receipt") -> tuple[Expense, str | None] | None:
@@ -56,6 +69,8 @@ class ExpenseCreate(BaseModel):
     category_id: uuid.UUID | None = None
     category_name: str | None = None
     notes: str | None = None
+    cadence: str | None = None
+    is_major_purchase: bool = False
 
 
 class ExpenseUpdate(BaseModel):
@@ -69,6 +84,8 @@ class ExpenseUpdate(BaseModel):
     category_name: str | None = None
     notes: str | None = None
     needs_review: bool | None = None
+    cadence: str | None = None
+    is_major_purchase: bool | None = None
 
 
 class ReceiptExpenseCreate(ExpenseCreate):
@@ -83,13 +100,13 @@ class StatementExpenseCreate(ExpenseCreate):
 
 
 @router.get("")
-async def list_expenses(month: str | None = Query(default=None), category_id: uuid.UUID | None = Query(default=None), transaction_type: str | None = Query(default=None), review_only: bool = Query(default=False), search: str | None = Query(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+async def list_expenses(month: str | None = Query(default=None), category_id: uuid.UUID | None = Query(default=None), transaction_type: str | None = Query(default=None), cadence: str | None = Query(default=None), review_only: bool = Query(default=False), search: str | None = Query(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
     statement = select(Expense, Category.name, Receipt.original_filename).outerjoin(Category, Category.id == Expense.category_id).outerjoin(Receipt, Receipt.id == Expense.receipt_id)
-    statement = apply_expense_filters(statement, user_id=current_user.id, month=month, category_id=category_id, transaction_type=transaction_type, review_only=review_only, search=search).order_by(Expense.expense_date.desc(), Expense.created_at.desc())
+    statement = apply_expense_filters(statement, user_id=current_user.id, month=month, category_id=category_id, transaction_type=transaction_type, cadence=cadence, review_only=review_only, search=search).order_by(Expense.expense_date.desc(), Expense.created_at.desc())
     result = await db.execute(statement)
     items = [serialize_expense(expense, category_name=category_name, receipt_filename=receipt_filename) for expense, category_name, receipt_filename in result.all()]
 
-    count_statement = apply_expense_filters(select(func.count(Expense.id)), user_id=current_user.id, month=month, category_id=category_id, transaction_type=transaction_type, review_only=review_only, search=search)
+    count_statement = apply_expense_filters(select(func.count(Expense.id)), user_id=current_user.id, month=month, category_id=category_id, transaction_type=transaction_type, cadence=cadence, review_only=review_only, search=search)
     total = (await db.execute(count_statement)).scalar_one()
     return {"items": items, "total": int(total)}
 
@@ -130,7 +147,7 @@ async def export_expenses(format: str = Query(default="json"), month: str | None
 
     if format == "csv":
         output = io.StringIO()
-        fieldnames = ["id", "expense_date", "merchant", "description", "amount", "signed_amount", "transaction_type", "currency", "category_name", "source", "needs_review", "is_recurring", "receipt_filename", "notes"]
+        fieldnames = ["id", "expense_date", "merchant", "description", "amount", "signed_amount", "transaction_type", "currency", "cadence", "cadence_override", "is_major_purchase", "category_name", "source", "needs_review", "is_recurring", "receipt_filename", "notes"]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows({key: item.get(key) for key in fieldnames} for item in items)
@@ -143,6 +160,7 @@ async def export_expenses(format: str = Query(default="json"), month: str | None
 async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
     await ensure_default_categories(db, current_user.id)
     transaction_type = normalize_transaction_type(body.transaction_type)
+    cadence_override = _parse_cadence_override(body.cadence)
     category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
     expense = Expense(
         user_id=current_user.id,
@@ -157,6 +175,9 @@ async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_c
         source="manual",
         confidence=1.0,
         needs_review=expense_requires_review(category, 1.0, "manual"),
+        cadence=cadence_override or CADENCE_ONE_TIME,
+        cadence_override=cadence_override,
+        is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
     )
     db.add(expense)
     await db.flush()
@@ -188,6 +209,7 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
         raise HTTPException(status_code=409, detail="Receipt has already been finalized")
 
     transaction_type = normalize_transaction_type(body.transaction_type)
+    cadence_override = _parse_cadence_override(body.cadence)
     category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
     confidence = body.confidence if body.confidence is not None else receipt.extraction_confidence or 0.5
     expense = Expense(
@@ -204,6 +226,9 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
         source="receipt",
         confidence=confidence,
         needs_review=expense_requires_review(category, confidence, "receipt"),
+        cadence=cadence_override or CADENCE_ONE_TIME,
+        cadence_override=cadence_override,
+        is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
     )
     db.add(expense)
     receipt.preview_data = {
@@ -215,6 +240,8 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
         "description": body.description,
         "category_name": category.name if category else body.category_name,
         "notes": body.notes,
+        "cadence": cadence_override or CADENCE_ONE_TIME,
+        "is_major_purchase": _normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
         "items": (receipt.preview_data or {}).get("items", []),
         "confidence": confidence,
     }
@@ -255,6 +282,7 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
         raise HTTPException(status_code=409, detail="Statement entry has already been finalized")
 
     transaction_type = normalize_transaction_type(body.transaction_type)
+    cadence_override = _parse_cadence_override(body.cadence)
     category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
     confidence = body.confidence if body.confidence is not None else float(entry.get("confidence") or receipt.extraction_confidence or 0.5)
     expense = Expense(
@@ -271,6 +299,9 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
         source="statement",
         confidence=confidence,
         needs_review=expense_requires_review(category, confidence, "statement"),
+        cadence=cadence_override or CADENCE_ONE_TIME,
+        cadence_override=cadence_override,
+        is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
     )
     db.add(expense)
     await db.flush()
@@ -285,6 +316,8 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
             "description": body.description,
             "category_name": category.name if category else body.category_name,
             "notes": body.notes,
+            "cadence": cadence_override or CADENCE_ONE_TIME,
+            "is_major_purchase": _normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
             "confidence": confidence,
             "status": "finalized",
             "saved_expense_id": str(expense.id),
@@ -298,6 +331,7 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
     receipt.needs_review = has_pending or expense.needs_review
     receipt.finalized_at = None if has_pending else datetime.now(timezone.utc)
     await db.flush()
+    await db.refresh(receipt)
     await recompute_recurring_expenses(db, current_user.id)
     await db.refresh(expense)
     return {
@@ -341,6 +375,8 @@ async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_use
 
     data = body.model_dump(exclude_unset=True)
     next_transaction_type = normalize_transaction_type(data.get("transaction_type"), default=expense.transaction_type)
+    if "cadence" in data:
+        expense.cadence_override = _parse_cadence_override(data.get("cadence"))
     if {"category_id", "category_name", "merchant", "transaction_type"} & set(data):
         category_id = data.get("category_id") if "category_id" in data else None
         category_name = data.get("category_name") if "category_name" in data else None
@@ -357,6 +393,10 @@ async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_use
             expense.transaction_type = normalize_transaction_type(value)
         elif field == "expense_date" and value is not None:
             expense.expense_date = datetime.fromisoformat(value).date()
+        elif field == "is_major_purchase":
+            expense.is_major_purchase = _normalize_major_purchase(value, transaction_type=next_transaction_type)
+        elif field == "cadence":
+            continue
         elif field not in {"category_id", "category_name"}:
             setattr(expense, field, value)
 

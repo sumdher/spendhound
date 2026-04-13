@@ -37,11 +37,11 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       />
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-50 flex h-screen w-72 flex-col border-r border-border bg-card transition-transform duration-300 lg:static lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-50 flex h-[100dvh] w-72 flex-col overflow-y-auto border-r border-border bg-card transition-transform duration-300 lg:static lg:h-screen lg:translate-x-0 lg:overflow-hidden",
           open ? "translate-x-0" : "-translate-x-full"
         )}
       >
-        <div className="flex h-16 items-center gap-3 border-b border-border px-4">
+        <div className="flex h-16 shrink-0 items-center gap-3 border-b border-border px-4">
           <Link href="/dashboard" className="flex items-center gap-3" onClick={onClose}>
             <Image src="/icon.svg" alt="SpendHound" width={30} height={30} unoptimized />
             <div>
@@ -52,7 +52,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           <button onClick={onClose} className="ml-auto rounded-md p-1 hover:bg-accent lg:hidden">✕</button>
         </div>
 
-        <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+        <nav className="space-y-1 p-3 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
           {NAV_ITEMS.map((item) => {
             const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
             return (
@@ -86,7 +86,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           ) : null}
         </nav>
 
-        <div className="border-t border-border p-4">
+        <div className="mt-auto shrink-0 border-t border-border p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
           <div className="mb-4 flex items-center gap-3 rounded-xl border border-border bg-background p-3">
             {avatarUrl ? (
               <img src={avatarUrl} alt={session?.user?.name || session?.user?.email || "Profile photo"} className="h-11 w-11 rounded-full object-cover" referrerPolicy="no-referrer" />

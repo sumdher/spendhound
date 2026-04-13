@@ -3,13 +3,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createExpense, createExpenseFromReceipt, createExpenseFromStatementEntry, listCategories, uploadReceipt, uploadStatement, type Category, type Receipt, type ReceiptPreview, type StatementImportEntry, type StatementImportPreview } from "@/lib/api";
-import { currentMonthString, formatCurrency, formatSignedCurrency, transactionTypeLabel } from "@/lib/utils";
+import { currentMonthString, formatCurrency, formatSignedCurrency, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
 
 type ExpenseFormState = {
   merchant: string;
   description: string;
   amount: string;
   transaction_type: string;
+  cadence: string;
+  is_major_purchase: boolean;
   currency: string;
   expense_date: string;
   category_id: string;
@@ -31,6 +33,8 @@ function createEmptyExpenseForm(): ExpenseFormState {
     description: "",
     amount: "",
     transaction_type: "debit",
+    cadence: "one_time",
+    is_major_purchase: false,
     currency: "EUR",
     expense_date: `${currentMonthString()}-01`,
     category_id: "",
@@ -94,6 +98,44 @@ function TransactionTypeSelector({ value, onChange, disabled = false }: { value:
   );
 }
 
+function CadenceSelector({ value, onChange, disabled = false }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
+  return (
+    <div className="space-y-2">
+      <div className="text-sm text-muted-foreground">Transaction cadence</div>
+      <div className="grid gap-2 md:grid-cols-3">
+        {[
+          { value: "one_time", label: "One-time / irregular", description: "Occasional spending, large purchases, ad-hoc income" },
+          { value: "monthly", label: "Recurring monthly", description: "Subscriptions, rent, salary, utilities" },
+          { value: "yearly", label: "Recurring yearly", description: "Insurance, annual renewals, yearly fees" },
+        ].map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            disabled={disabled}
+            onClick={() => onChange(option.value)}
+            className={`rounded-xl border px-4 py-3 text-left disabled:cursor-not-allowed disabled:opacity-60 ${value === option.value ? "border-primary bg-primary/5" : "border-border bg-background hover:bg-accent"}`}
+          >
+            <div className="font-medium">{option.label}</div>
+            <div className="text-xs text-muted-foreground">{option.description}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MajorPurchaseToggle({ checked, onChange, disabled = false }: { checked: boolean; onChange: (value: boolean) => void; disabled?: boolean }) {
+  return (
+    <label className="flex items-start gap-3 rounded-xl border border-border bg-background px-4 py-3 text-sm">
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} disabled={disabled} className="mt-0.5" />
+      <span>
+        <span className="block font-medium">Mark as major one-time purchase</span>
+        <span className="text-xs text-muted-foreground">Use this for larger irregular purchases such as a phone, watch, laptop, appliance, or other meaningful one-off buy.</span>
+      </span>
+    </label>
+  );
+}
+
 export default function NewExpensePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -130,6 +172,8 @@ export default function NewExpensePage() {
       merchant: preview.merchant ?? "",
       amount: preview.amount != null ? String(preview.amount) : "",
       transaction_type: preview.transaction_type ?? "debit",
+      cadence: preview.cadence ?? "one_time",
+      is_major_purchase: preview.is_major_purchase ?? false,
       currency: preview.currency ?? "EUR",
       expense_date: preview.expense_date ?? new Date().toISOString().slice(0, 10),
       description: preview.description ?? "",
@@ -151,6 +195,8 @@ export default function NewExpensePage() {
       merchant: currentStatementEntry.merchant ?? "",
       amount: currentStatementEntry.amount != null ? String(currentStatementEntry.amount) : "",
       transaction_type: currentStatementEntry.transaction_type ?? "debit",
+      cadence: currentStatementEntry.cadence ?? "one_time",
+      is_major_purchase: currentStatementEntry.is_major_purchase ?? false,
       currency: currentStatementEntry.currency ?? "EUR",
       expense_date: currentStatementEntry.expense_date ?? new Date().toISOString().slice(0, 10),
       description: currentStatementEntry.description ?? "",
@@ -182,6 +228,8 @@ export default function NewExpensePage() {
         description: manualForm.description || null,
         amount: Number(manualForm.amount),
         transaction_type: manualForm.transaction_type,
+        cadence: manualForm.cadence,
+        is_major_purchase: manualForm.is_major_purchase,
         currency: manualForm.currency,
         expense_date: manualForm.expense_date,
         category_id: manualForm.category_id || null,
@@ -228,6 +276,8 @@ export default function NewExpensePage() {
         description: receiptDraft.description || null,
         amount: Number(receiptDraft.amount),
         transaction_type: receiptDraft.transaction_type,
+        cadence: receiptDraft.cadence,
+        is_major_purchase: receiptDraft.is_major_purchase,
         currency: receiptDraft.currency,
         expense_date: receiptDraft.expense_date,
         category_id: receiptDraft.category_id || null,
@@ -258,6 +308,8 @@ export default function NewExpensePage() {
         description: statementDraft.description || null,
         amount: Number(statementDraft.amount),
         transaction_type: statementDraft.transaction_type,
+        cadence: statementDraft.cadence,
+        is_major_purchase: statementDraft.is_major_purchase,
         currency: statementDraft.currency,
         expense_date: statementDraft.expense_date,
         category_id: statementDraft.category_id || null,
@@ -298,6 +350,8 @@ export default function NewExpensePage() {
         <form onSubmit={handleManualSubmit} className="space-y-4 rounded-2xl border border-border bg-card p-6">
           {manualError ? <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{manualError}</div> : null}
           <TransactionTypeSelector value={manualForm.transaction_type} onChange={(transaction_type) => setManualForm({ ...manualForm, transaction_type, category_id: "", category_name: "" })} />
+          <CadenceSelector value={manualForm.cadence} onChange={(cadence) => setManualForm({ ...manualForm, cadence, is_major_purchase: cadence === "one_time" ? manualForm.is_major_purchase : false })} />
+          {manualForm.transaction_type === "debit" && manualForm.cadence === "one_time" ? <MajorPurchaseToggle checked={manualForm.is_major_purchase} onChange={(is_major_purchase) => setManualForm({ ...manualForm, is_major_purchase })} /> : null}
           <div className="grid gap-4 md:grid-cols-2">
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">{manualForm.transaction_type === "credit" ? "Source / payer" : "Merchant"}</span><input required value={manualForm.merchant} onChange={(e) => setManualForm({ ...manualForm, merchant: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">Amount</span><input required type="number" step="0.01" value={manualForm.amount} onChange={(e) => setManualForm({ ...manualForm, amount: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
@@ -380,6 +434,8 @@ export default function NewExpensePage() {
                 {finalizingReceipt ? <div className="rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary">Saving approved receipt… Please wait.</div> : null}
 
                 <TransactionTypeSelector value={receiptDraft.transaction_type} onChange={(transaction_type) => setReceiptDraft({ ...receiptDraft, transaction_type, category_id: "", category_name: "" })} disabled={finalizingReceipt} />
+                <CadenceSelector value={receiptDraft.cadence} onChange={(cadence) => setReceiptDraft({ ...receiptDraft, cadence, is_major_purchase: cadence === "one_time" ? receiptDraft.is_major_purchase : false })} disabled={finalizingReceipt} />
+                {receiptDraft.transaction_type === "debit" && receiptDraft.cadence === "one_time" ? <MajorPurchaseToggle checked={receiptDraft.is_major_purchase} onChange={(is_major_purchase) => setReceiptDraft({ ...receiptDraft, is_major_purchase })} disabled={finalizingReceipt} /> : null}
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">{receiptDraft.transaction_type === "credit" ? "Source / payer" : "Merchant"}</span><input value={receiptDraft.merchant} onChange={(e) => setReceiptDraft({ ...receiptDraft, merchant: e.target.value })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
@@ -409,8 +465,8 @@ export default function NewExpensePage() {
                   </div>
                 ) : null}
 
-                <div className="flex items-center justify-between">
-                  <div className="text-sm text-muted-foreground">Estimated amount: {receiptDraft.amount ? formatSignedCurrency(Number(receiptDraft.amount), receiptDraft.transaction_type, receiptDraft.currency) : "—"}</div>
+                <div className="flex items-center justify-between gap-4">
+                  <div className="text-sm text-muted-foreground">Estimated amount: {receiptDraft.amount ? formatSignedCurrency(Number(receiptDraft.amount), receiptDraft.transaction_type, receiptDraft.currency) : "—"} · {transactionCadenceLabel(receiptDraft.cadence)}</div>
                   <button type="button" onClick={handleReceiptFinalize} disabled={finalizingReceipt || !receiptDraft.merchant || !receiptDraft.amount || !receiptDraft.expense_date} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50">{finalizingReceipt ? "Saving transaction…" : "Approve and save transaction"}</button>
                 </div>
               </div>
@@ -480,7 +536,7 @@ export default function NewExpensePage() {
                         <div className="font-medium">{entry.merchant || `Entry ${index + 1}`}</div>
                         <span className={`rounded-full px-2 py-1 text-[11px] ${entry.status === "finalized" ? "bg-green-500/15 text-green-400" : "bg-yellow-500/15 text-yellow-400"}`}>{entry.status === "finalized" ? "Saved" : "Pending"}</span>
                       </div>
-                      <div className="mt-1 text-xs text-muted-foreground">{entry.expense_date || "Unknown date"} · {entry.amount != null ? formatSignedCurrency(entry.amount, entry.transaction_type, entry.currency) : "Unknown amount"} · {transactionTypeLabel(entry.transaction_type)}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">{entry.expense_date || "Unknown date"} · {entry.amount != null ? formatSignedCurrency(entry.amount, entry.transaction_type, entry.currency) : "Unknown amount"} · {transactionTypeLabel(entry.transaction_type)} · {transactionCadenceLabel(entry.cadence)}</div>
                     </button>
                   ))}
                 </div>
@@ -508,6 +564,8 @@ export default function NewExpensePage() {
                 {finalizingStatement ? <div className="rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary">Saving approved statement entry… Please wait.</div> : null}
 
                 <TransactionTypeSelector value={statementDraft.transaction_type} onChange={(transaction_type) => setStatementDraft({ ...statementDraft, transaction_type, category_id: "", category_name: "" })} disabled={finalizingStatement} />
+                <CadenceSelector value={statementDraft.cadence} onChange={(cadence) => setStatementDraft({ ...statementDraft, cadence, is_major_purchase: cadence === "one_time" ? statementDraft.is_major_purchase : false })} disabled={finalizingStatement} />
+                {statementDraft.transaction_type === "debit" && statementDraft.cadence === "one_time" ? <MajorPurchaseToggle checked={statementDraft.is_major_purchase} onChange={(is_major_purchase) => setStatementDraft({ ...statementDraft, is_major_purchase })} disabled={finalizingStatement} /> : null}
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">{statementDraft.transaction_type === "credit" ? "Source / payer" : "Merchant"}</span><input value={statementDraft.merchant} onChange={(e) => setStatementDraft({ ...statementDraft, merchant: e.target.value })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
@@ -538,7 +596,7 @@ export default function NewExpensePage() {
                 ) : null}
 
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm text-muted-foreground">Pending after this: {Math.max(statementEntries.filter((entry) => entry.status !== "finalized").length - (currentStatementEntry.status === "finalized" ? 0 : 1), 0)}</div>
+                  <div className="text-sm text-muted-foreground">Pending after this: {Math.max(statementEntries.filter((entry) => entry.status !== "finalized").length - (currentStatementEntry.status === "finalized" ? 0 : 1), 0)} · {transactionCadenceLabel(statementDraft.cadence)}</div>
                   <button
                     type="button"
                     onClick={handleStatementFinalize}

@@ -168,11 +168,37 @@ _CREDIT_DESCRIPTION_KEYWORDS = {
     "deposit",
 }
 
+_DEBIT_DESCRIPTION_KEYWORDS = {
+    "purchase",
+    "payment",
+    "card purchase",
+    "pos",
+    "debit",
+    "direct debit",
+    "transfer out",
+    "outgoing transfer",
+    "withdrawal",
+    "cash withdrawal",
+    "atm",
+    "fee",
+    "charge",
+}
 
-def _infer_transaction_type(description: str | None, amount: float | None) -> str:
+_CREDIT_DIRECTION_MARKERS = {"credit", "cr", "incoming", "in"}
+_DEBIT_DIRECTION_MARKERS = {"debit", "dr", "outgoing", "out"}
+
+
+def _infer_transaction_type(description: str | None, amount: float | None, *, direction_hint: str | None = None) -> str:
     normalized_description = re.sub(r"\s+", " ", (description or "").lower()).strip()
+    normalized_hint = re.sub(r"[^a-z]", "", (direction_hint or "").lower())
+    if normalized_hint in _CREDIT_DIRECTION_MARKERS:
+        return TRANSACTION_TYPE_CREDIT
+    if normalized_hint in _DEBIT_DIRECTION_MARKERS:
+        return TRANSACTION_TYPE_DEBIT
     if any(keyword in normalized_description for keyword in _CREDIT_DESCRIPTION_KEYWORDS):
         return TRANSACTION_TYPE_CREDIT
+    if any(keyword in normalized_description for keyword in _DEBIT_DESCRIPTION_KEYWORDS):
+        return TRANSACTION_TYPE_DEBIT
     if amount is not None and amount < 0:
         return TRANSACTION_TYPE_DEBIT
     return TRANSACTION_TYPE_DEBIT
@@ -187,7 +213,7 @@ def _normalize_statement_entries(entries: list[StatementPreviewEntryModel] | Non
                 normalized_amount = float(Decimal(str(cleaned.amount)).quantize(Decimal("0.01")))
             except (InvalidOperation, ValueError):
                 normalized_amount = None
-            cleaned.transaction_type = normalize_transaction_type(cleaned.transaction_type or _infer_transaction_type(cleaned.description, normalized_amount), default=TRANSACTION_TYPE_DEBIT)
+            cleaned.transaction_type = normalize_transaction_type(cleaned.transaction_type or _infer_transaction_type(f"{cleaned.description or ''} {cleaned.notes or ''}", normalized_amount), default=TRANSACTION_TYPE_DEBIT)
             cleaned.amount = abs(normalized_amount) if normalized_amount is not None else None
         else:
             cleaned.transaction_type = normalize_transaction_type(cleaned.transaction_type, default=TRANSACTION_TYPE_DEBIT)
@@ -272,6 +298,8 @@ def _preview_context_defaults(*, filename: str | None, context_text: str | None)
     expense_date = _parse_date_candidate(date_match.group(1)) if date_match else None
 
     merchant = lines[0][:255] if lines else None
+    if merchant and re.search(r"\b(total|amount|subtotal|balance|sum)\b", merchant, flags=re.IGNORECASE):
+        merchant = None
     if not merchant and filename:
         merchant = _merchant_hint_from_filename(filename)
 
@@ -427,7 +455,8 @@ def _merchant_from_statement_description(description: str) -> str | None:
 def fallback_statement_preview_from_text(text: str, filename: str) -> StatementPreviewModel:
     entries: list[StatementPreviewEntryModel] = []
     pattern = re.compile(
-        r"(?P<date>\d{2}[/-]\d{2}[/-](?:\d{2}|\d{4})|\d{4}-\d{2}-\d{2})\s+(?P<description>.+?)\s+(?P<amount>-?[\d\.,]+)\s*$"
+        r"(?P<date>\d{2}[/-]\d{2}[/-](?:\d{2}|\d{4})|\d{4}-\d{2}-\d{2})\s+(?P<description>.+?)\s+(?P<amount>-?[\d\.,]+)\s*(?P<marker>CR|DR|CREDIT|DEBIT)?\s*$",
+        flags=re.IGNORECASE,
     )
     for line in text.splitlines():
         candidate = line.strip()
@@ -436,6 +465,7 @@ def fallback_statement_preview_from_text(text: str, filename: str) -> StatementP
             continue
         amount = _parse_amount_candidate(match.group("amount"))
         description = match.group("description").strip()
+        direction_marker = match.group("marker")
         expense_date = _parse_date_candidate(match.group("date"))
         merchant = _merchant_from_statement_description(description)
         if amount is None or expense_date is None or merchant is None:
@@ -444,7 +474,7 @@ def fallback_statement_preview_from_text(text: str, filename: str) -> StatementP
             StatementPreviewEntryModel(
                 merchant=merchant,
                 amount=abs(amount),
-                transaction_type=normalize_transaction_type(_infer_transaction_type(description, amount), default=TRANSACTION_TYPE_DEBIT),
+                transaction_type=normalize_transaction_type(_infer_transaction_type(f"{description} {direction_marker or ''}", amount, direction_hint=direction_marker), default=TRANSACTION_TYPE_DEBIT),
                 currency=settings.default_currency,
                 expense_date=expense_date,
                 description=description[:300],
@@ -610,6 +640,7 @@ def _statement_prompt(filename: str, text: str) -> str:
         "The entries value must be an array of objects with keys: merchant, amount, transaction_type, currency, expense_date, description, category_name, notes, confidence, status, saved_expense_id. "
         "Use status='pending' and saved_expense_id=null for every extracted entry. "
         "Include both money-out debits and money-in credits such as salary, gifts, refunds, reimbursements, transfer-ins, and interest when they appear as real account activity. "
+        "Pay close attention to explicit debit or credit indicators such as CR, DR, credit, debit, withdrawal, deposit, payroll, and refund wording. "
         "Use positive JSON numbers for amounts, set transaction_type to either 'debit' or 'credit', and use ISO dates when possible. "
         f"Filename: {filename}\n\nStatement text:\n{text[:16000]}"
     )

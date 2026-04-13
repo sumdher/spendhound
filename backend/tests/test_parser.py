@@ -48,6 +48,18 @@ def test_fallback_statement_preview_from_text_parses_multiple_entries():
     assert preview.entries[0].expense_date == "2026-04-12"
 
 
+def test_fallback_statement_preview_from_text_handles_credit_and_debit_markers():
+    preview = fallback_statement_preview_from_text(
+        "12/04/2026 ACME PAYROLL 3200,00 CR\n13/04/2026 CARD PURCHASE SUPERMARKET 45,67 DR",
+        "statement.pdf",
+    )
+    assert len(preview.entries) == 2
+    assert preview.entries[0].transaction_type == "credit"
+    assert preview.entries[0].amount == pytest.approx(3200.00)
+    assert preview.entries[1].transaction_type == "debit"
+    assert preview.entries[1].amount == pytest.approx(45.67)
+
+
 @pytest.mark.asyncio
 async def test_extract_text_from_pdf_prefers_pdfplumber(tmp_path):
     pdf_path = tmp_path / "statement.pdf"
