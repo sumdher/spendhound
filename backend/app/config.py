@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     monthly_reports_frontend_token: str = Field(default="", description="Shared secret token sent to the internal frontend PDF endpoint")
     monthly_reports_frontend_token_header: str = Field(default="X-SpendHound-Internal-Token", description="Header name used for monthly report frontend authentication")
     monthly_reports_frontend_timeout_seconds: int = Field(default=60, description="Timeout for internal frontend monthly report PDF requests")
+    recurring_generation_enabled: bool = Field(default=False, description="Enable automatic generation of recurring expenses")
+    recurring_generation_timezone: str = Field(default="UTC", description="IANA timezone used to compute recurring expense generation months")
 
     debug: bool = Field(default=False, description="Enable debug mode")
     cors_origins: list[str] = Field(

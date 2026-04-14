@@ -109,6 +109,18 @@ export interface MerchantRule {
   updated_at: string;
 }
 
+export interface ItemKeywordRule {
+  id: string;
+  keyword: string;
+  subcategory_label: string;
+  pattern_type: string;
+  priority: number;
+  is_active: boolean;
+  notes?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Budget {
   id: string;
   name: string;
@@ -158,6 +170,8 @@ export interface ReceiptPreview {
   amount?: number | null;
   transaction_type?: string;
   cadence?: string | null;
+  recurring_variable?: boolean;
+  recurring_auto_add?: boolean;
   currency?: string;
   expense_date?: string | null;
   description?: string | null;
@@ -173,6 +187,8 @@ export interface StatementImportEntry {
   amount?: number | null;
   transaction_type?: string;
   cadence?: string | null;
+  recurring_variable?: boolean;
+  recurring_auto_add?: boolean;
   currency?: string;
   expense_date?: string | null;
   description?: string | null;
@@ -218,6 +234,11 @@ export interface Expense {
   recurring_group?: string | null;
   cadence: string;
   cadence_override?: string | null;
+  recurring_variable: boolean;
+  recurring_auto_add: boolean;
+  recurring_source_expense_id?: string | null;
+  auto_generated: boolean;
+  generated_for_month?: string | null;
   is_major_purchase: boolean;
   category_id?: string | null;
   category_name?: string | null;
@@ -339,12 +360,17 @@ export interface UserProfile {
   status: string;
   is_admin: boolean;
   automatic_monthly_reports: boolean;
+  receipt_prompt_override?: string | null;
   created_at: string;
   updated_at?: string;
 }
 
 export interface UpdateUserProfileRequest {
   automatic_monthly_reports: boolean;
+}
+
+export interface UpdateReceiptPromptRequest {
+  receipt_prompt_override?: string | null;
 }
 
 export interface MonthlyReportSendRequest {
@@ -612,6 +638,22 @@ export async function deleteMerchantRule(id: string): Promise<void> {
   return apiFetch<void>(`/api/categories/rules/${id}`, { method: "DELETE" });
 }
 
+export async function listItemKeywordRules(): Promise<ItemKeywordRule[]> {
+  return apiFetch<ItemKeywordRule[]>("/api/categories/item-rules");
+}
+
+export async function createItemKeywordRule(data: Partial<ItemKeywordRule> & { keyword: string; subcategory_label: string }): Promise<ItemKeywordRule> {
+  return apiFetch<ItemKeywordRule>("/api/categories/item-rules", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function updateItemKeywordRule(id: string, data: Partial<ItemKeywordRule>): Promise<ItemKeywordRule> {
+  return apiFetch<ItemKeywordRule>(`/api/categories/item-rules/${id}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+export async function deleteItemKeywordRule(id: string): Promise<void> {
+  return apiFetch<void>(`/api/categories/item-rules/${id}`, { method: "DELETE" });
+}
+
 export async function listBudgets(month?: string): Promise<Budget[]> {
   const query = month ? `?month=${encodeURIComponent(month)}` : "";
   return apiFetch<Budget[]>(`/api/budgets${query}`);
@@ -713,6 +755,13 @@ export async function getCurrentUserProfile(): Promise<UserProfile> {
 
 export async function updateCurrentUserProfile(data: UpdateUserProfileRequest): Promise<UserProfile> {
   return apiFetch<UserProfile>("/api/auth/me", {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateReceiptPrompt(data: UpdateReceiptPromptRequest): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/api/auth/me/receipt-prompt", {
     method: "PATCH",
     body: JSON.stringify(data),
   });

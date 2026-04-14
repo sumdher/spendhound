@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.receipt_extraction import _extract_json_object, extract_text_from_file, fallback_preview_from_text, fallback_statement_preview_from_text, llm_receipt_preview, llm_receipt_preview_from_image
+from app.services.receipt_extraction import _canonical_supermarket_name, _extract_json_object, _merchant_hint_from_receipt_text, _should_force_groceries, ReceiptPreviewItemModel, ReceiptPreviewModel, extract_text_from_file, fallback_preview_from_text, fallback_statement_preview_from_text, llm_receipt_preview, llm_receipt_preview_from_image
 from app.services.llm.base import ImageInput, LLMConfig, Message
 from app.services.llm.ollama import OllamaProvider
 
@@ -35,6 +35,24 @@ def test_fallback_preview_from_text_uses_filename_for_missing_merchant():
     preview = fallback_preview_from_text("Total EUR 8.50\n2026-04-11", "cafe-roma_2026-04-11.png")
     assert preview.merchant == "Cafe Roma"
     assert preview.expense_date == "2026-04-11"
+
+
+def test_merchant_hint_from_receipt_text_prefers_known_supermarket_brand():
+    merchant = _merchant_hint_from_receipt_text("PUNTI FIDELITY\nESSELUNGA ROMA\nVia Example 12\nTotale 24,90")
+    assert merchant == "Esselunga"
+
+
+def test_canonical_supermarket_name_normalizes_short_brands():
+    assert _canonical_supermarket_name("md discount") == "MD"
+
+
+def test_should_force_groceries_for_supermarket_receipts():
+    preview = ReceiptPreviewModel(
+        merchant="Carrefour Market",
+        transaction_type="debit",
+        items=[ReceiptPreviewItemModel(description="Pomodori datterini"), ReceiptPreviewItemModel(description="Cien shampoo")],
+    )
+    assert _should_force_groceries(preview) is True
 
 
 def test_fallback_statement_preview_from_text_parses_multiple_entries():

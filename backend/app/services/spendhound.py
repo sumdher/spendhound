@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import calendar
+from difflib import SequenceMatcher
 import re
+import unicodedata
 import uuid
 from collections import defaultdict
 from datetime import date
@@ -15,7 +18,7 @@ from sqlalchemy.orm.attributes import set_committed_value
 
 from app.config import settings
 from app.models.budget import Budget
-from app.models.category import Category, MerchantRule
+from app.models.category import Category, ItemKeywordRule, MerchantRule
 from app.models.expense import Expense
 from app.models.expense_item import ExpenseItem
 from app.models.receipt import Receipt
@@ -50,24 +53,160 @@ DEFAULT_CATEGORIES: list[tuple[str, str, str, str]] = [
 ]
 
 GROCERY_SUBCATEGORY_RULES: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\b(lettuce|tomato|spinach|potato|onion|broccoli|carrot|pepper|cucumber|zucchini|mushroom|salad|vegetable|veg)\b", re.IGNORECASE), "Vegetables"),
-    (re.compile(r"\b(apple|apples|banana|bananas|orange|oranges|lemon|lemons|lime|limes|berry|berries|grape|grapes|melon|melons|pear|pears|peach|peaches|kiwi|kiwis|mango|mangoes|avocado|avocados|fruit)\b", re.IGNORECASE), "Fruit"),
-    (re.compile(r"\b(chicken|beef|pork|turkey|sausage|bacon|mince|steak|ham|meat)\b", re.IGNORECASE), "Meat"),
-    (re.compile(r"\b(salmon|tuna|cod|shrimp|prawn|mussel|fish|seafood)\b", re.IGNORECASE), "Fish & Seafood"),
-    (re.compile(r"\b(milk|yogurt|cheese|butter|cream|mozzarella|parmesan|egg|eggs)\b", re.IGNORECASE), "Dairy & Eggs"),
-    (re.compile(r"\b(bread|bagel|croissant|bun|roll|baguette|cake|muffin|bakery|pastry|tortilla)\b", re.IGNORECASE), "Bakery"),
-    (re.compile(r"\b(frozen|ice cream|gelato|pizza|fries|fish fingers)\b", re.IGNORECASE), "Frozen"),
-    (re.compile(r"\b(chips|crisps|cracker|chocolate|cookie|biscuit|snack|candy|popcorn|nuts|trail mix)\b", re.IGNORECASE), "Snacks"),
-    (re.compile(r"\b(water|juice|cola|soda|sparkling|coffee|tea|beer|wine|drink|beverage)\b", re.IGNORECASE), "Beverages"),
-    (re.compile(r"\b(detergent|dish soap|dishwasher|bleach|cleaner|disinfectant|toilet cleaner|laundry|softener|descaler|cleaning)\b", re.IGNORECASE), "Cleaning Products"),
-    (re.compile(r"\b(shampoo|conditioner|soap|body wash|deodorant|toothpaste|toothbrush|razor|lotion|personal care)\b", re.IGNORECASE), "Personal Care"),
-    (re.compile(r"\b(diaper|diapers|wipes|formula|baby food|baby)\b", re.IGNORECASE), "Baby"),
-    (re.compile(r"\b(cat food|dog food|pet food|kibble|litter|treats|pet)\b", re.IGNORECASE), "Pet Care"),
-    (re.compile(r"\b(paper towel|paper towels|napkin|napkins|foil|cling film|garbage bag|trash bag|bin bag|batteries|light bulb|household)\b", re.IGNORECASE), "Household"),
-    (re.compile(r"\b(cereal|granola|oats|muesli|breakfast)\b", re.IGNORECASE), "Breakfast & Cereal"),
-    (re.compile(r"\b(ketchup|mustard|mayo|mayonnaise|vinegar|hot sauce|soy sauce|peppercorn|spice|spices|herb|seasoning|salt)\b", re.IGNORECASE), "Condiments & Spices"),
-    (re.compile(r"\b(pasta|rice|flour|oil|sauce|beans|lentils|canned|soup|pantry|sugar|breadcrumbs|noodles)\b", re.IGNORECASE), "Pantry"),
-    (re.compile(r"\b(ready meal|prepared|meal deal|sandwich|wrap|sushi|rotisserie|deli|take away)\b", re.IGNORECASE), "Prepared Meals"),
+    # Vegetables — EN + IT
+    (re.compile(
+        r"\b(lettuce|tomato|tomatoes|spinach|potato|potatoes|onion|onions|broccoli|carrot|carrots|"
+        r"pepper|peppers|cucumber|cucumbers|zucchini|mushroom|mushrooms|salad|vegetable|vegetables|veg|"
+        r"pomodoro|pomodori|pomodorino|pomodorini|spinaci|patata|patate|cipolla|cipolle|carota|carote|"
+        r"peperone|peperoni|cetriolo|cetrioli|zucchina|zucchine|fungo|funghi|insalata|verdura|verdure|"
+        r"aglio|finocchio|finocchi|melanzana|melanzane|carciofo|carciofi|cavolo|cavoli|"
+        r"asparago|asparagi|fagiolino|fagiolini|pisello|piselli|mais|radicchio|sedano|rucola|porro|porri|"
+        r"cipollotto|broccolo|cavolfiore|zucca|fagiolini)\b",
+        re.IGNORECASE,
+    ), "Vegetables"),
+
+    # Fruit — EN + IT
+    (re.compile(
+        r"\b(apple|apples|banana|bananas|orange|oranges|lemon|lemons|lime|limes|"
+        r"berry|berries|grape|grapes|melon|melons|pear|pears|peach|peaches|"
+        r"kiwi|kiwis|mango|mangoes|avocado|avocados|fruit|"
+        r"mela|mele|banane|arancia|arance|limone|limoni|fragola|fragole|uva|"
+        r"melone|meloni|pera|pere|pesca|pesche|frutta|ananas|ciliegia|ciliegie|"
+        r"albicocca|albicocche|prugna|prugne|fico|fichi|pompelmo|mandarino|mandarini|"
+        r"clementina|clementine|mora|more|lampone|lamponi|mirtillo|mirtilli)\b",
+        re.IGNORECASE,
+    ), "Fruit"),
+
+    # Meat — EN + IT
+    (re.compile(
+        r"\b(chicken|beef|pork|turkey|sausage|bacon|mince|steak|ham|meat|"
+        r"pollo|manzo|maiale|tacchino|salsiccia|salsicce|pancetta|bistecca|prosciutto|carne|"
+        r"vitello|agnello|salame|mortadella|bresaola|speck|wurstel|cotoletta|cotolette|"
+        r"arrosto|fettina|fettine|braciola|braciole|hamburger|polpetta|polpette|affettato|affettati)\b",
+        re.IGNORECASE,
+    ), "Meat"),
+
+    # Fish & Seafood — EN + IT
+    (re.compile(
+        r"\b(salmon|tuna|cod|shrimp|prawn|mussel|mussels|fish|seafood|"
+        r"salmone|tonno|merluzzo|gambero|gamberetti|gamberi|cozza|cozze|pesce|"
+        r"acciuga|acciughe|sardina|sardine|trota|branzino|orata|vongola|vongole|"
+        r"calamaro|calamari|polpo|baccala|dentice|sgombro|rombo|spigola)\b",
+        re.IGNORECASE,
+    ), "Fish & Seafood"),
+
+    # Dairy & Eggs — EN + IT
+    (re.compile(
+        r"\b(milk|yogurt|cheese|butter|cream|mozzarella|parmesan|egg|eggs|"
+        r"latte|formaggio|formaggi|burro|panna|parmigiano|grana|uova|uovo|ricotta|"
+        r"gorgonzola|pecorino|mascarpone|scamorza|stracchino|taleggio|kefir|"
+        r"brie|feta|fontina|provolone|asiago|emmental|caciotta|crescenza)\b",
+        re.IGNORECASE,
+    ), "Dairy & Eggs"),
+
+    # Bakery — EN + IT
+    (re.compile(
+        r"\b(bread|bagel|croissant|bun|roll|baguette|cake|muffin|bakery|pastry|tortilla|"
+        r"pane|cornetto|brioche|focaccia|ciabatta|grissini|panino|panini|"
+        r"schiacciata|tramezzino|filone|michetta|sfilatino|biscottate)\b",
+        re.IGNORECASE,
+    ), "Bakery"),
+
+    # Frozen — EN + IT
+    (re.compile(
+        r"\b(frozen|ice cream|gelato|pizza|fries|fish fingers|"
+        r"surgelato|surgelati|ghiacciolo|gelati)\b",
+        re.IGNORECASE,
+    ), "Frozen"),
+
+    # Snacks — EN + IT
+    (re.compile(
+        r"\b(chips|crisps|cracker|crackers|chocolate|cookie|cookies|biscuit|biscuits|"
+        r"snack|snacks|candy|popcorn|nuts|trail mix|"
+        r"patatine|cioccolato|biscotto|biscotti|caramella|caramelle|"
+        r"noccioline|noci|mandorle|arachidi|pistacchi|wafer|merendina|merendine|confetti)\b",
+        re.IGNORECASE,
+    ), "Snacks"),
+
+    # Beverages — EN + IT
+    (re.compile(
+        r"\b(water|juice|cola|soda|sparkling|coffee|tea|beer|wine|drink|beverage|"
+        r"acqua|succo|bibita|bibite|gassata|caffe|birra|vino|aranciata|limonata|"
+        r"aperitivo|spumante|prosecco|bevanda|bevande|sciroppo|infuso|tisana|smoothie)\b",
+        re.IGNORECASE,
+    ), "Beverages"),
+
+    # Cleaning Products — EN + IT
+    (re.compile(
+        r"\b(detergent|dish soap|dishwasher|bleach|cleaner|disinfectant|toilet cleaner|"
+        r"laundry|softener|descaler|cleaning|"
+        r"detersivo|detersivi|ammorbidente|anticalcare|sgrassatore|candeggina|"
+        r"disinfettante|brillantante|pavimenti)\b",
+        re.IGNORECASE,
+    ), "Cleaning Products"),
+
+    # Personal Care — EN + IT
+    (re.compile(
+        r"\b(shampoo|conditioner|soap|body wash|deodorant|toothpaste|toothbrush|"
+        r"razor|lotion|personal care|"
+        r"sapone|bagnoschiuma|dentifricio|spazzolino|rasoio|crema|balsamo|"
+        r"assorbente|assorbenti|deodorante|dopobarba|profumo|igiene)\b",
+        re.IGNORECASE,
+    ), "Personal Care"),
+
+    # Baby — EN + IT
+    (re.compile(
+        r"\b(diaper|diapers|wipes|formula|baby food|baby|"
+        r"pannolino|pannolini|salviette|omogeneizzato|omogeneizzati|neonato|biberon)\b",
+        re.IGNORECASE,
+    ), "Baby"),
+
+    # Pet Care — EN + IT
+    (re.compile(
+        r"\b(cat food|dog food|pet food|kibble|litter|treats|pet|"
+        r"gatto|lettiera|mangime|crocchette)\b",
+        re.IGNORECASE,
+    ), "Pet Care"),
+
+    # Household — EN + IT
+    (re.compile(
+        r"\b(paper towel|paper towels|napkin|napkins|foil|cling film|garbage bag|"
+        r"trash bag|bin bag|batteries|light bulb|household|"
+        r"tovagliolo|tovaglioli|alluminio|pellicola|batterie|lampadina|"
+        r"sacchetti|fazzoletti|scottex)\b",
+        re.IGNORECASE,
+    ), "Household"),
+
+    # Breakfast & Cereal — EN + IT
+    (re.compile(
+        r"\b(cereal|granola|oats|muesli|breakfast|"
+        r"cereali|fiocchi|avena|colazione|cacao|nesquik)\b",
+        re.IGNORECASE,
+    ), "Breakfast & Cereal"),
+
+    # Condiments & Spices — EN + IT
+    (re.compile(
+        r"\b(ketchup|mustard|mayo|mayonnaise|vinegar|hot sauce|soy sauce|peppercorn|"
+        r"spice|spices|herb|seasoning|salt|"
+        r"senape|maionese|aceto|pepe|spezie|erbe|condimento|sale|origano|rosmarino|"
+        r"basilico|prezzemolo|curry|paprika|dado|salsa)\b",
+        re.IGNORECASE,
+    ), "Condiments & Spices"),
+
+    # Pantry (staples) — EN + IT
+    (re.compile(
+        r"\b(pasta|rice|flour|oil|sauce|beans|lentils|canned|soup|pantry|sugar|breadcrumbs|noodles|"
+        r"riso|farina|olio|sugo|fagioli|lenticchie|conserva|minestra|zucchero|"
+        r"pangrattato|pelati|passata|legumi|ceci|polpa|brodo|dispensa)\b",
+        re.IGNORECASE,
+    ), "Pantry"),
+
+    # Prepared Meals — EN + IT
+    (re.compile(
+        r"\b(ready meal|prepared|meal deal|sandwich|wrap|sushi|rotisserie|deli|take away|"
+        r"gastronomia|rosticceria|piatto pronto)\b",
+        re.IGNORECASE,
+    ), "Prepared Meals"),
 ]
 
 
@@ -85,9 +224,29 @@ def next_month(month_start: date) -> date:
     return date(month_start.year, month_start.month + 1, 1)
 
 
+def month_start_for_date(value: date) -> date:
+    return date(value.year, value.month, 1)
+
+
+def month_date_for_day(target_month: date, day: int) -> date:
+    last_day = calendar.monthrange(target_month.year, target_month.month)[1]
+    return date(target_month.year, target_month.month, min(max(day, 1), last_day))
+
+
 def normalize_grocery_description(description: str | None) -> str:
     cleaned = re.sub(r"[^a-z0-9&]+", " ", (description or "").lower())
     return re.sub(r"\s+", " ", cleaned).strip()[:180]
+
+
+def normalize_match_text(value: str | None) -> str:
+    normalized = unicodedata.normalize("NFKD", (value or "").lower())
+    normalized = "".join(char for char in normalized if not unicodedata.combining(char))
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _match_tokens(value: str) -> set[str]:
+    return {token for token in normalize_match_text(value).split() if len(token) >= 2}
 
 
 def is_grocery_category_name(category_name: str | None) -> bool:
@@ -133,6 +292,13 @@ def cadence_is_recurring(value: str | None) -> bool:
     return normalize_cadence(value) in {CADENCE_MONTHLY, CADENCE_YEARLY}
 
 
+def normalize_recurring_settings(cadence: str | None, *, recurring_variable: bool | None = None, recurring_auto_add: bool | None = None) -> tuple[bool, bool]:
+    normalized_cadence = normalize_cadence(cadence)
+    if not cadence_is_recurring(normalized_cadence):
+        return False, False
+    return bool(recurring_variable), bool(recurring_auto_add)
+
+
 def signed_amount(value: Decimal | float, transaction_type: str) -> float:
     amount = float(value)
     return round(amount if normalize_transaction_type(transaction_type) == TRANSACTION_TYPE_CREDIT else -amount, 2)
@@ -170,6 +336,25 @@ def derive_grocery_subcategory(description: str | None) -> tuple[str, float]:
         if pattern.search(normalized):
             return label, 0.92
     return "Other Grocery", 0.55
+
+
+def fuzzy_text_match(value: str, pattern: str) -> bool:
+    normalized_value = normalize_match_text(value)
+    normalized_pattern = normalize_match_text(pattern)
+    if not normalized_value or not normalized_pattern:
+        return False
+    if normalized_pattern in normalized_value:
+        return True
+    value_tokens = _match_tokens(normalized_value)
+    pattern_tokens = _match_tokens(normalized_pattern)
+    if pattern_tokens and pattern_tokens.issubset(value_tokens):
+        return True
+    if SequenceMatcher(None, normalized_value, normalized_pattern).ratio() >= 0.84:
+        return True
+    for token in pattern_tokens:
+        if any(SequenceMatcher(None, token, candidate).ratio() >= 0.9 for candidate in value_tokens):
+            return True
+    return False
 
 
 async def expense_category_name(db: AsyncSession, expense: Expense, category_name: str | None = None) -> str | None:
@@ -234,7 +419,20 @@ def matches_rule(merchant: str, rule: MerchantRule) -> bool:
             return re.search(rule.merchant_pattern, merchant, flags=re.IGNORECASE) is not None
         except re.error:
             return False
+    if rule.pattern_type == "fuzzy":
+        return fuzzy_text_match(merchant, rule.merchant_pattern)
     return pattern in merchant_value
+
+
+def matches_item_keyword_rule(description: str, rule: ItemKeywordRule) -> bool:
+    if rule.pattern_type == "regex":
+        try:
+            return re.search(rule.keyword, description, flags=re.IGNORECASE) is not None
+        except re.error:
+            return False
+    if rule.pattern_type == "contains":
+        return normalize_match_text(rule.keyword) in normalize_match_text(description)
+    return fuzzy_text_match(description, rule.keyword)
 
 
 async def find_matching_category(db: AsyncSession, user_id: uuid.UUID, merchant: str | None, *, transaction_type: str | None = None) -> Category | None:
@@ -254,6 +452,20 @@ async def find_matching_category(db: AsyncSession, user_id: uuid.UUID, merchant:
             category = category_result.scalar_one_or_none()
             if category is not None and (normalized_type is None or category.transaction_type == normalized_type):
                 return category
+    return None
+
+
+async def find_matching_item_subcategory(db: AsyncSession, user_id: uuid.UUID, description: str | None) -> tuple[str, float] | None:
+    if not description:
+        return None
+    result = await db.execute(
+        select(ItemKeywordRule)
+        .where(ItemKeywordRule.user_id == user_id, ItemKeywordRule.is_active.is_(True))
+        .order_by(ItemKeywordRule.priority.asc(), ItemKeywordRule.created_at.asc())
+    )
+    for rule in result.scalars().all():
+        if matches_item_keyword_rule(description, rule):
+            return rule.subcategory_label, 0.98
     return None
 
 
@@ -312,6 +524,20 @@ def serialize_rule(rule: MerchantRule, category_name: str | None = None) -> dict
         "category_id": str(rule.category_id) if rule.category_id else None,
         "category_name": category_name,
         "merchant_pattern": rule.merchant_pattern,
+        "pattern_type": rule.pattern_type,
+        "priority": rule.priority,
+        "is_active": rule.is_active,
+        "notes": rule.notes,
+        "created_at": rule.created_at.isoformat(),
+        "updated_at": rule.updated_at.isoformat(),
+    }
+
+
+def serialize_item_rule(rule: ItemKeywordRule) -> dict:
+    return {
+        "id": str(rule.id),
+        "keyword": rule.keyword,
+        "subcategory_label": rule.subcategory_label,
         "pattern_type": rule.pattern_type,
         "priority": rule.priority,
         "is_active": rule.is_active,
@@ -400,6 +626,11 @@ def serialize_expense(
         "recurring_group": expense.recurring_group,
         "cadence": expense.cadence,
         "cadence_override": expense.cadence_override,
+        "recurring_variable": expense.recurring_variable,
+        "recurring_auto_add": expense.recurring_auto_add,
+        "recurring_source_expense_id": str(expense.recurring_source_expense_id) if expense.recurring_source_expense_id else None,
+        "auto_generated": expense.auto_generated,
+        "generated_for_month": expense.generated_for_month.isoformat() if expense.generated_for_month else None,
         "is_major_purchase": expense.is_major_purchase,
         "category_id": str(expense.category_id) if expense.category_id else None,
         "category_name": category_name,
@@ -446,6 +677,10 @@ async def replace_expense_items(db: AsyncSession, expense: Expense, items: list[
             continue
         subcategory = str(_item_value(item, "subcategory") or "").strip()[:120] or None
         subcategory_confidence = _coerce_optional_float(_item_value(item, "subcategory_confidence"))
+        if is_grocery_expense and not subcategory:
+            matched_subcategory = await find_matching_item_subcategory(db, expense.user_id, description)
+            if matched_subcategory is not None:
+                subcategory, subcategory_confidence = matched_subcategory
         if is_grocery_expense and not subcategory:
             subcategory, subcategory_confidence = derive_grocery_subcategory(description)
             derived_subcategory_count += 1
@@ -516,6 +751,82 @@ async def recompute_recurring_expenses(db: AsyncSession, user_id: uuid.UUID) -> 
         if normalize_transaction_type(expense.transaction_type) != TRANSACTION_TYPE_DEBIT or expense.cadence != CADENCE_ONE_TIME:
             expense.is_major_purchase = False
     await db.flush()
+
+
+def recurring_expense_is_due_for_month(expense: Expense, target_month: date) -> bool:
+    cadence = normalize_cadence(expense.cadence_override or expense.cadence)
+    template_month = month_start_for_date(expense.expense_date)
+    if target_month <= template_month:
+        return False
+    if cadence == CADENCE_MONTHLY:
+        return True
+    if cadence == CADENCE_YEARLY:
+        return expense.expense_date.month == target_month.month
+    return False
+
+
+async def generate_recurring_expenses_for_month(db: AsyncSession, user_id: uuid.UUID, target_month: date) -> list[Expense]:
+    target_month = month_start_for_date(target_month)
+    result = await db.execute(
+        select(Expense)
+        .where(
+            Expense.user_id == user_id,
+            Expense.recurring_auto_add.is_(True),
+            Expense.auto_generated.is_(False),
+        )
+        .order_by(Expense.expense_date.asc(), Expense.created_at.asc())
+    )
+    generated_expenses: list[Expense] = []
+
+    for template in result.scalars().all():
+        cadence = normalize_cadence(template.cadence_override or template.cadence)
+        if not cadence_is_recurring(cadence):
+            continue
+        if not recurring_expense_is_due_for_month(template, target_month):
+            continue
+
+        existing_result = await db.execute(
+            select(Expense.id).where(
+                Expense.user_id == user_id,
+                Expense.recurring_source_expense_id == template.id,
+                Expense.generated_for_month == target_month,
+            ).limit(1)
+        )
+        if existing_result.scalar_one_or_none() is not None:
+            continue
+
+        generated_expense = Expense(
+            user_id=user_id,
+            merchant=template.merchant,
+            description=template.description,
+            amount=template.amount,
+            transaction_type=template.transaction_type,
+            currency=template.currency,
+            expense_date=month_date_for_day(target_month, template.expense_date.day),
+            category_id=template.category_id,
+            receipt_id=None,
+            notes=template.notes,
+            source="auto_recurring",
+            confidence=1.0,
+            needs_review=template.recurring_variable or template.category_id is None,
+            recurring_group=template.recurring_group,
+            is_recurring=True,
+            cadence=cadence,
+            cadence_override=template.cadence_override or cadence,
+            recurring_variable=template.recurring_variable,
+            recurring_auto_add=template.recurring_auto_add,
+            recurring_source_expense_id=template.id,
+            auto_generated=True,
+            generated_for_month=target_month,
+            is_major_purchase=False,
+        )
+        db.add(generated_expense)
+        generated_expenses.append(generated_expense)
+
+    if generated_expenses:
+        await db.flush()
+        await recompute_recurring_expenses(db, user_id)
+    return generated_expenses
 
 
 def apply_expense_filters(

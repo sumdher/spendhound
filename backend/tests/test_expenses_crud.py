@@ -14,7 +14,7 @@ from app.models.category import Category
 from app.models.expense import Expense
 from app.models.expense_item import ExpenseItem
 from app.models.receipt import Receipt
-from app.services.spendhound import normalize_money, recompute_recurring_expenses, replace_expense_items
+from app.services.spendhound import generate_recurring_expenses_for_month, normalize_money, recompute_recurring_expenses, replace_expense_items
 
 pytestmark = pytest.mark.asyncio
 
@@ -108,6 +108,40 @@ async def test_all_time_listing_and_cadence_filter(client: AsyncClient, auth_hea
     assert all(item["id"] != created["id"] for item in current_month.json()["items"])
 
 
+async def test_recurring_settings_are_saved_and_cleared_on_update(client: AsyncClient, auth_headers: dict):
+    create_response = await client.post(
+        "/api/expenses",
+        json={
+            "merchant": "City Power",
+            "amount": 94.50,
+            "currency": "EUR",
+            "expense_date": "2026-04-03",
+            "category_name": "Bills",
+            "cadence": "monthly",
+            "recurring_variable": True,
+            "recurring_auto_add": True,
+        },
+        headers=auth_headers,
+    )
+    assert create_response.status_code == 200
+    created = create_response.json()
+    assert created["cadence"] == "monthly"
+    assert created["recurring_variable"] is True
+    assert created["recurring_auto_add"] is True
+    assert created["auto_generated"] is False
+
+    update_response = await client.patch(
+        f"/api/expenses/{created['id']}",
+        json={"cadence": "one_time"},
+        headers=auth_headers,
+    )
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated["cadence"] == "one_time"
+    assert updated["recurring_variable"] is False
+    assert updated["recurring_auto_add"] is False
+
+
 async def test_review_queue_and_export(client: AsyncClient, auth_headers: dict):
     await client.post(
         "/api/expenses",
@@ -134,6 +168,74 @@ async def test_review_queue_and_export(client: AsyncClient, auth_headers: dict):
     export_csv = await client.get("/api/expenses/export?format=csv&month=2026-04", headers=auth_headers)
     assert export_csv.status_code == 200
     assert "merchant" in export_csv.text
+
+
+async def test_generate_recurring_expenses_for_month_creates_constant_and_variable_entries(db_session: AsyncSession, test_user):
+    bills_category = Category(user_id=test_user.id, name="Bills", color="#f87171", transaction_type="debit")
+    db_session.add(bills_category)
+    await db_session.flush()
+
+    constant_template = Expense(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        merchant="Rent Ltd",
+        amount=normalize_money(1200.00),
+        transaction_type="debit",
+        currency="EUR",
+        expense_date=date(2026, 4, 2),
+        category_id=bills_category.id,
+        source="manual",
+        confidence=1.0,
+        needs_review=False,
+        cadence="monthly",
+        cadence_override="monthly",
+        recurring_variable=False,
+        recurring_auto_add=True,
+    )
+    variable_template = Expense(
+        id=uuid.uuid4(),
+        user_id=test_user.id,
+        merchant="City Power",
+        amount=normalize_money(86.40),
+        transaction_type="debit",
+        currency="EUR",
+        expense_date=date(2026, 4, 18),
+        category_id=bills_category.id,
+        source="manual",
+        confidence=1.0,
+        needs_review=False,
+        cadence="monthly",
+        cadence_override="monthly",
+        recurring_variable=True,
+        recurring_auto_add=True,
+    )
+    db_session.add_all([constant_template, variable_template])
+    await db_session.flush()
+    await recompute_recurring_expenses(db_session, test_user.id)
+
+    generated = await generate_recurring_expenses_for_month(db_session, test_user.id, date(2026, 5, 1))
+    await db_session.commit()
+
+    assert len(generated) == 2
+    by_merchant = {expense.merchant: expense for expense in generated}
+
+    rent = by_merchant["Rent Ltd"]
+    assert rent.auto_generated is True
+    assert rent.recurring_source_expense_id == constant_template.id
+    assert rent.generated_for_month == date(2026, 5, 1)
+    assert rent.expense_date == date(2026, 5, 2)
+    assert rent.needs_review is False
+
+    power = by_merchant["City Power"]
+    assert power.auto_generated is True
+    assert power.recurring_source_expense_id == variable_template.id
+    assert power.generated_for_month == date(2026, 5, 1)
+    assert power.expense_date == date(2026, 5, 18)
+    assert power.needs_review is True
+
+    second_run = await generate_recurring_expenses_for_month(db_session, test_user.id, date(2026, 5, 1))
+    await db_session.commit()
+    assert second_run == []
 
 
 async def test_create_expense_from_receipt_is_listed_in_saved_month(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):

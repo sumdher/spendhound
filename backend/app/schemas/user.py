@@ -22,6 +22,7 @@ class UserResponse(BaseModel):
     avatar_url: Optional[str] = None
     status: str
     automatic_monthly_reports: bool = True
+    receipt_prompt_override: Optional[str] = None
     created_at: datetime
 
 
@@ -29,3 +30,7 @@ class UserUpdateRequest(BaseModel):
     """Authenticated user profile updates supported by the API."""
 
     automatic_monthly_reports: bool
+
+
+class UserReceiptPromptUpdateRequest(BaseModel):
+    receipt_prompt_override: Optional[str] = None

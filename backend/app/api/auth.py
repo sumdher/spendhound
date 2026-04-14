@@ -13,7 +13,7 @@ from app.config import settings
 from app.database import get_db
 from app.middleware.auth import create_access_token, get_any_user, get_current_user
 from app.models.user import User
-from app.schemas.user import UserResponse, UserUpdateRequest
+from app.schemas.user import UserReceiptPromptUpdateRequest, UserResponse, UserUpdateRequest
 from app.services.email import send_approval_request_email
 from app.services.spendhound import ensure_default_categories
 
@@ -39,6 +39,7 @@ def serialize_user_profile(user: User) -> UserResponse:
         avatar_url=user.avatar_url,
         status=user.status,
         automatic_monthly_reports=user.automatic_monthly_reports,
+        receipt_prompt_override=user.receipt_prompt_override,
         created_at=user.created_at,
     )
 
@@ -112,6 +113,18 @@ async def update_me(
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     current_user.automatic_monthly_reports = body.automatic_monthly_reports
+    await db.commit()
+    await db.refresh(current_user)
+    return serialize_user_profile(current_user)
+
+
+@router.patch("/me/receipt-prompt", response_model=UserResponse)
+async def update_receipt_prompt(
+    body: UserReceiptPromptUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    current_user.receipt_prompt_override = (body.receipt_prompt_override or "").strip() or None
     await db.commit()
     await db.refresh(current_user)
     return serialize_user_profile(current_user)
