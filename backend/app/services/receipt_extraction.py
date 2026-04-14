@@ -16,14 +16,47 @@ from pydantic import BaseModel, Field
 import pdfplumber
 from pypdf import PdfReader
 import structlog
+from sqlalchemy import select
 
 from app.config import settings
+from app.models.user import User
 from app.services.llm.base import ImageInput, LLMConfig, Message
 from app.services.llm.factory import get_llm_provider
-from app.services.spendhound import TRANSACTION_TYPE_CREDIT, TRANSACTION_TYPE_DEBIT, normalize_transaction_type, resolve_category
+from app.services.spendhound import TRANSACTION_TYPE_CREDIT, TRANSACTION_TYPE_DEBIT, find_matching_category, get_category_by_name, normalize_grocery_description, normalize_match_text, normalize_transaction_type, resolve_category
 
 
 logger = structlog.get_logger(__name__)
+
+_ITALIAN_SUPERMARKET_MERCHANTS = {
+    "esselunga": "Esselunga",
+    "lidl": "Lidl",
+    "carrefour": "Carrefour",
+    "aldi": "Aldi",
+    "md": "MD",
+    "conad": "Conad",
+    "coop": "Coop",
+    "pam": "Pam",
+    "interspar": "Interspar",
+    "eurospar": "Eurospar",
+    "iper": "Iper",
+    "famila": "Famila",
+    "bennet": "Bennet",
+    "tigre": "Tigre",
+    "despar": "Despar",
+}
+
+_GENERIC_CATEGORY_NAMES = {"misc", "miscellaneous", "other", "other expense", "shopping", "spesa varia", "varie"}
+
+
+DEFAULT_RECEIPT_SYSTEM_PROMPT = (
+    "You are a receipt parser. Output only a single valid JSON object — no prose, no markdown, no code fences, no explanation. "
+    "Receipts may contain Italian text. The merchant is the store name near the top of the receipt, not a tax ID, VAT number, address, or footer line. "
+    "Default transaction_type to 'debit'. Use null for any field that is not visible on the receipt."
+)
+
+
+def build_receipt_system_prompt(override: str | None = None) -> str:
+    return (override or "").strip() or DEFAULT_RECEIPT_SYSTEM_PROMPT
 
 
 class ReceiptPreviewItemModel(BaseModel):
@@ -151,6 +184,89 @@ def _normalize_items(items: list[ReceiptPreviewItemModel] | None) -> list[Receip
             cleaned.subcategory_confidence = min(max(cleaned.subcategory_confidence, 0.0), 1.0)
         normalized.append(cleaned)
     return normalized
+
+
+def _canonical_supermarket_name(value: str | None) -> str | None:
+    normalized = normalize_match_text(value)
+    if not normalized:
+        return None
+    compact = normalized.replace(" ", "")
+    for candidate, label in _ITALIAN_SUPERMARKET_MERCHANTS.items():
+        if candidate == normalized or candidate == compact or candidate in normalized or normalized in candidate:
+            return label
+    return None
+
+
+def _looks_like_noise_line(line: str) -> bool:
+    normalized = normalize_match_text(line)
+    if not normalized:
+        return True
+    if any(token in normalized for token in {"totale", "subtotal", "pagamento", "contanti", "resto", "iva", "telefono", "scontrino", "documento", "eur", "euro", "bancomat", "cassa"}):
+        return True
+    if re.search(r"\d{2}[/-]\d{2}[/-]\d{2,4}", line):
+        return True
+    if re.search(r"\d+[\.,]\d{2}", line):
+        return True
+    return False
+
+
+def _merchant_hint_from_receipt_text(text: str | None) -> str | None:
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()][:10]
+    for line in lines:
+        canonical = _canonical_supermarket_name(line)
+        if canonical:
+            return canonical
+    for line in lines:
+        if _looks_like_noise_line(line):
+            continue
+        cleaned = re.sub(r"\s+", " ", line).strip(" -:")
+        if 2 <= len(cleaned) <= 80:
+            return cleaned.title()[:255]
+    return None
+
+
+def _is_supermarket_merchant(value: str | None) -> bool:
+    return _canonical_supermarket_name(value) is not None
+
+
+def _looks_like_grocery_item(description: str | None) -> bool:
+    normalized = normalize_grocery_description(description)
+    if not normalized:
+        return False
+    grocery_terms = {
+        "pomodoro", "pomodori", "latte", "pane", "pasta", "riso", "banana", "mele", "mela", "insalata", "zucchine", "pollo", "uova", "mozzarella", "yogurt", "acqua", "detersivo", "sapone", "shampoo", "cien", "verdura", "frutta",
+    }
+    return any(term in normalized for term in grocery_terms)
+
+
+def _should_force_groceries(preview: ReceiptPreviewModel, context_text: str | None = None) -> bool:
+    if normalize_transaction_type(preview.transaction_type, default=TRANSACTION_TYPE_DEBIT) != TRANSACTION_TYPE_DEBIT:
+        return False
+    if _is_supermarket_merchant(preview.merchant):
+        return True
+    item_descriptions = [item.description for item in (preview.items or []) if item.description]
+    if item_descriptions and sum(1 for description in item_descriptions if _looks_like_grocery_item(description)) >= max(1, len(item_descriptions) // 2):
+        return True
+    return _canonical_supermarket_name(context_text or "") is not None
+
+
+async def _apply_category_heuristics(db, user_id: uuid.UUID, preview: ReceiptPreviewModel, *, context_text: str | None = None) -> ReceiptPreviewModel:
+    if _should_force_groceries(preview, context_text=context_text):
+        preview.category_name = "Groceries"
+        preview.confidence = max(preview.confidence or 0.35, 0.86)
+
+    normalized_category_name = normalize_match_text(preview.category_name)
+    if preview.merchant:
+        matched_category = await find_matching_category(db, user_id, preview.merchant, transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT)
+        if matched_category is not None and (not normalized_category_name or normalized_category_name in _GENERIC_CATEGORY_NAMES or _is_supermarket_merchant(preview.merchant)):
+            preview.category_name = matched_category.name
+            preview.confidence = max(preview.confidence or 0.35, 0.82)
+
+    if preview.category_name:
+        existing_category = await get_category_by_name(db, user_id, preview.category_name, transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT)
+        if existing_category is not None:
+            preview.category_name = existing_category.name
+    return preview
 
 
 _CREDIT_DESCRIPTION_KEYWORDS = {
@@ -297,11 +413,12 @@ def _preview_context_defaults(*, filename: str | None, context_text: str | None)
     date_match = re.search(r"(\d{4}-\d{2}-\d{2}|\d{2}[/-]\d{2}[/-]\d{4})", date_source)
     expense_date = _parse_date_candidate(date_match.group(1)) if date_match else None
 
-    merchant = lines[0][:255] if lines else None
-    if merchant and re.search(r"\b(total|amount|subtotal|balance|sum)\b", merchant, flags=re.IGNORECASE):
-        merchant = None
+    merchant = _merchant_hint_from_receipt_text(text)
     if not merchant and filename:
         merchant = _merchant_hint_from_filename(filename)
+    canonical_merchant = _canonical_supermarket_name(merchant)
+    if canonical_merchant:
+        merchant = canonical_merchant
 
     description = lines[1][:300] if len(lines) > 1 else None
     return {
@@ -327,7 +444,9 @@ def _finalize_preview_model(model: ReceiptPreviewModel, *, filename: str | None 
     model.transaction_type = normalize_transaction_type(model.transaction_type, default=TRANSACTION_TYPE_DEBIT)
     model.currency = _normalize_currency(model.currency)
     if model.merchant:
-        model.merchant = model.merchant.strip()[:255]
+        model.merchant = (_canonical_supermarket_name(model.merchant) or model.merchant.strip())[:255]
+    elif isinstance(defaults["merchant"], str):
+        model.merchant = defaults["merchant"][:255]
     parsed_expense_date = _parse_date_candidate(model.expense_date)
     model.expense_date = parsed_expense_date or (defaults["expense_date"] if isinstance(defaults["expense_date"], str) else None)
     if model.description:
@@ -341,6 +460,39 @@ def _finalize_preview_model(model: ReceiptPreviewModel, *, filename: str | None 
     model.confidence = min(max(model.confidence if model.confidence is not None else 0.35, 0.0), 1.0)
     model.items = _normalize_items(model.items)
     return model
+
+
+async def _apply_receipt_category_heuristics(db, user_id: uuid.UUID, preview: ReceiptPreviewModel, *, context_text: str | None = None) -> ReceiptPreviewModel:
+    if _should_force_groceries(preview, context_text=context_text):
+        preview.category_name = "Groceries"
+        preview.confidence = max(preview.confidence or 0.35, 0.86)
+
+    normalized_category_name = normalize_match_text(preview.category_name)
+    if preview.merchant:
+        matched_category = await find_matching_category(
+            db,
+            user_id,
+            preview.merchant,
+            transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT,
+        )
+        if matched_category is not None and (
+            not normalized_category_name
+            or normalized_category_name in _GENERIC_CATEGORY_NAMES
+            or _is_supermarket_merchant(preview.merchant)
+        ):
+            preview.category_name = matched_category.name
+            preview.confidence = max(preview.confidence or 0.35, 0.82)
+
+    if preview.category_name:
+        existing_category = await get_category_by_name(
+            db,
+            user_id,
+            preview.category_name,
+            transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT,
+        )
+        if existing_category is not None:
+            preview.category_name = existing_category.name
+    return preview
 
 
 def _finalize_statement_preview(model: StatementPreviewModel, *, text: str | None = None) -> StatementPreviewModel:
@@ -494,22 +646,55 @@ def fallback_statement_preview_from_text(text: str, filename: str) -> StatementP
     )
 
 
+_RECEIPT_ITEM_SUBCATEGORIES = (
+    "Vegetables | Fruit | Meat | Fish & Seafood | Dairy & Eggs | Bakery | Frozen | Snacks | Beverages | "
+    "Cleaning Products | Personal Care | Baby | Pet Care | Household | "
+    "Breakfast & Cereal | Condiments & Spices | Pantry | Prepared Meals | Other Grocery"
+)
+
+_RECEIPT_ITALIAN_SUBCATEGORY_GUIDE = (
+    "pomodori/verdura/insalata→Vegetables  frutta/mele/arance/fragole→Fruit  "
+    "pollo/carne/manzo/prosciutto/salame→Meat  pesce/tonno/salmone/gamberi/cozze→Fish & Seafood  "
+    "latte/formaggio/uova/burro/yogurt/mozzarella/parmigiano→Dairy & Eggs  "
+    "pane/focaccia/cornetto/brioche/grissini/panino→Bakery  "
+    "surgelati/surgelato/gelato→Frozen  "
+    "patatine/biscotti/cioccolato/snack/wafer→Snacks  "
+    "acqua/birra/vino/caffe/succo/bibite/aranciata→Beverages  "
+    "detersivo/ammorbidente/candeggina/anticalcare→Cleaning Products  "
+    "shampoo/sapone/dentifricio/bagnoschiuma/rasoio→Personal Care  "
+    "pannolini/omogeneizzato/biberon→Baby  "
+    "pasta/riso/farina/olio/conserva/fagioli/pelati/brodo/zucchero→Pantry  "
+    "cereali/fiocchi/avena/muesli→Breakfast & Cereal  "
+    "sale/pepe/origano/basilico/aceto/dado/senape/maionese→Condiments & Spices  "
+    "gastronomia/rosticceria→Prepared Meals"
+)
+
+
 def _receipt_prompt(filename: str) -> str:
     return (
-        "Read this receipt image directly and return strict JSON only. "
-        "Return exactly one minified JSON object and no surrounding prose, markdown, or code fences. "
-        "Infer the best possible structured transaction draft from the receipt itself. "
-        "Use null only when the value is genuinely not visible or inferable from the receipt. "
-        "Return exactly one JSON object with keys: "
-        "merchant, amount, transaction_type, currency, expense_date, description, category_name, notes, items, confidence. "
-        "The items value must be an array of objects with keys: description, quantity, unit_price, total. "
-        "Use JSON numbers for amount, quantity, unit_price, total, and confidence. "
-        "Use double-quoted JSON strings. "
-        "Set expense_date to ISO format YYYY-MM-DD when possible. "
-        "Set currency to an ISO-style currency code when possible. "
-        "Use transaction_type='credit' only when the document clearly represents money coming in, such as a refund or reimbursement; otherwise use 'debit'. "
-        "Confidence must be a number between 0 and 1 reflecting extraction certainty. "
-        f"Filename: {filename}"
+        "Read this receipt and return exactly one JSON object. No prose, no markdown, no code fences.\n"
+        "\n"
+        "Top-level keys: merchant, amount, transaction_type, currency, expense_date, "
+        "category_name, description, notes, confidence, items\n"
+        "\n"
+        "Each element of 'items' must have: description, quantity, unit_price, total, subcategory\n"
+        "\n"
+        f"Valid subcategory values: {_RECEIPT_ITEM_SUBCATEGORIES}\n"
+        "\n"
+        f"Italian item guide: {_RECEIPT_ITALIAN_SUBCATEGORY_GUIDE}\n"
+        "\n"
+        "Rules:\n"
+        "- merchant: store name near top of receipt (e.g. Esselunga, Lidl, Coop, Carrefour, Conad, Aldi, MD)\n"
+        "- category_name: 'Groceries' for any supermarket receipt\n"
+        "- amount: positive total paid (number, not string)\n"
+        "- currency: ISO code such as EUR, USD, GBP\n"
+        "- expense_date: YYYY-MM-DD format\n"
+        "- transaction_type: 'debit' (default) or 'credit' (refund/reimbursement only)\n"
+        "- confidence: 0.0 to 1.0 reflecting your extraction certainty\n"
+        "- subcategory: classify each item using the valid subcategory list above; use null only if truly unclassifiable\n"
+        "- Keep repeated line items as separate rows unless the receipt shows an explicit quantity\n"
+        "- Use null for any value not visible on the receipt\n"
+        f"- Filename: {filename}"
     )
 
 
@@ -518,6 +703,7 @@ async def llm_receipt_preview_from_image(
     filename: str,
     content_type: str | None,
     llm_config: LLMConfig | None,
+    system_prompt: str | None = None,
 ) -> ReceiptPreviewModel | None:
     if not _is_supported_image(content_type, filename):
         logger.info(
@@ -545,11 +731,7 @@ async def llm_receipt_preview_from_image(
             [
                 Message(
                     role="system",
-                    content=(
-                        "You extract receipt fields from images into validated JSON for a transaction draft. "
-                        "The JSON may represent either a debit expense or a credit refund, but default to debit when unsure. "
-                        "Never return prose, markdown, or code fences. Return JSON only."
-                    ),
+                    content=build_receipt_system_prompt(system_prompt),
                 ),
                 Message(
                     role="user",
@@ -585,7 +767,7 @@ async def llm_receipt_preview_from_image(
         return None
 
 
-async def llm_receipt_preview(text: str, filename: str, llm_config: LLMConfig | None) -> ReceiptPreviewModel | None:
+async def llm_receipt_preview(text: str, filename: str, llm_config: LLMConfig | None, system_prompt: str | None = None) -> ReceiptPreviewModel | None:
     if not text.strip():
         return None
     try:
@@ -595,14 +777,31 @@ async def llm_receipt_preview(text: str, filename: str, llm_config: LLMConfig | 
             [
                 Message(
                     role="system",
-                    content=(
-                        "You extract receipt transaction fields into strict JSON only. Return one object with keys: merchant, amount, transaction_type, currency, expense_date, description, category_name, notes, items, confidence. Use null where unknown and default transaction_type to debit when unsure."
-                    ),
+                    content=build_receipt_system_prompt(system_prompt),
                 ),
                 Message(
                     role="user",
                     content=(
-                        f"Filename: {filename}\nReceipt text follows. Infer the best structured expense draft. Include line items when visible in the text.\n\n{text[:8000]}"
+                        "Extract the receipt text below into one JSON object. No prose, no markdown.\n"
+                        "\n"
+                        "Top-level keys: merchant, amount, transaction_type, currency, expense_date, "
+                        "category_name, description, notes, confidence, items\n"
+                        "\n"
+                        "Each element of 'items' must have: description, quantity, unit_price, total, subcategory\n"
+                        "\n"
+                        f"Valid subcategory values: {_RECEIPT_ITEM_SUBCATEGORIES}\n"
+                        "\n"
+                        f"Italian item guide: {_RECEIPT_ITALIAN_SUBCATEGORY_GUIDE}\n"
+                        "\n"
+                        "Rules:\n"
+                        "- merchant: store name (e.g. Esselunga, Lidl, Coop, Carrefour, Conad, Aldi)\n"
+                        "- category_name: 'Groceries' for any supermarket receipt\n"
+                        "- amount: positive total paid (number); currency as ISO code\n"
+                        "- expense_date: YYYY-MM-DD; transaction_type: 'debit' (default) or 'credit'\n"
+                        "- confidence: 0.0 to 1.0; use null for values not present in the text\n"
+                        "\n"
+                        f"Filename: {filename}\n"
+                        f"Receipt text:\n{text[:8000]}"
                     ),
                 ),
             ],
@@ -700,7 +899,9 @@ async def build_receipt_preview(
 ) -> ReceiptExtractionResult:
     extracted_text: str | None = None
     used_text_fallback = False
-    preview = await llm_receipt_preview_from_image(storage_path, filename, content_type, llm_config)
+    prompt_override_result = await db.execute(select(User.receipt_prompt_override).where(User.id == user_id).limit(1))
+    prompt_override = prompt_override_result.scalar_one_or_none()
+    preview = await llm_receipt_preview_from_image(storage_path, filename, content_type, llm_config, prompt_override)
     if preview is None:
         logger.info(
             "receipt_extraction.using_text_fallback",
@@ -709,7 +910,7 @@ async def build_receipt_preview(
         )
         extracted_text = await extract_text_from_file(storage_path, content_type)
         used_text_fallback = bool(extracted_text.strip()) or not _is_supported_image(content_type, filename)
-        preview = await llm_receipt_preview(extracted_text, filename, llm_config)
+        preview = await llm_receipt_preview(extracted_text, filename, llm_config, prompt_override)
         if preview is None:
             logger.info(
                 "receipt_extraction.using_rule_based_fallback",
@@ -723,6 +924,7 @@ async def build_receipt_preview(
         if category is not None:
             preview.category_name = category.name
             preview.confidence = max(preview.confidence, 0.72)
+    preview = await _apply_receipt_category_heuristics(db, user_id, preview, context_text=extracted_text)
     preview = _finalize_preview_model(preview, filename=filename, context_text=extracted_text)
     return ReceiptExtractionResult(preview=preview, extracted_text=extracted_text, used_text_fallback=used_text_fallback)
 

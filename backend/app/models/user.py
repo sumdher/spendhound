@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, String, Uuid, func, true
+from sqlalchemy import Boolean, DateTime, String, Text, Uuid, func, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -22,6 +22,7 @@ class User(Base):
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
     automatic_monthly_reports: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    receipt_prompt_override: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
@@ -29,6 +30,7 @@ class User(Base):
 
     categories: Mapped[list["Category"]] = relationship("Category", back_populates="user", cascade="all, delete-orphan")
     merchant_rules: Mapped[list["MerchantRule"]] = relationship("MerchantRule", back_populates="user", cascade="all, delete-orphan")
+    item_keyword_rules: Mapped[list["ItemKeywordRule"]] = relationship("ItemKeywordRule", back_populates="user", cascade="all, delete-orphan")
     budgets: Mapped[list["Budget"]] = relationship("Budget", back_populates="user", cascade="all, delete-orphan")
     receipts: Mapped[list["Receipt"]] = relationship("Receipt", back_populates="user", cascade="all, delete-orphan")
     expenses: Mapped[list["Expense"]] = relationship("Expense", back_populates="user", cascade="all, delete-orphan")

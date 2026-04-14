@@ -11,9 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.middleware.auth import get_current_user
-from app.models.category import Category, MerchantRule
+from app.models.category import Category, ItemKeywordRule, MerchantRule
 from app.models.user import User
-from app.services.spendhound import TRANSACTION_TYPE_DEBIT, ensure_default_categories, normalize_transaction_type, serialize_category, serialize_rule
+from app.services.spendhound import TRANSACTION_TYPE_DEBIT, ensure_default_categories, normalize_transaction_type, serialize_category, serialize_item_rule, serialize_rule
 
 router = APIRouter()
 
@@ -37,7 +37,7 @@ class CategoryUpdate(BaseModel):
 class MerchantRuleCreate(BaseModel):
     merchant_pattern: str
     category_id: uuid.UUID | None = None
-    pattern_type: str = "contains"
+    pattern_type: str = "fuzzy"
     priority: int = 100
     is_active: bool = True
     notes: str | None = None
@@ -46,6 +46,24 @@ class MerchantRuleCreate(BaseModel):
 class MerchantRuleUpdate(BaseModel):
     merchant_pattern: str | None = None
     category_id: uuid.UUID | None = None
+    pattern_type: str | None = None
+    priority: int | None = None
+    is_active: bool | None = None
+    notes: str | None = None
+
+
+class ItemKeywordRuleCreate(BaseModel):
+    keyword: str
+    subcategory_label: str
+    pattern_type: str = "fuzzy"
+    priority: int = 100
+    is_active: bool = True
+    notes: str | None = None
+
+
+class ItemKeywordRuleUpdate(BaseModel):
+    keyword: str | None = None
+    subcategory_label: str | None = None
     pattern_type: str | None = None
     priority: int | None = None
     is_active: bool | None = None
@@ -156,4 +174,51 @@ async def delete_rule(rule_id: uuid.UUID, current_user: User = Depends(get_curre
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail="Rule not found")
+    await db.delete(rule)
+
+
+@router.get("/item-rules")
+async def list_item_rules(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[dict]:
+    result = await db.execute(
+        select(ItemKeywordRule)
+        .where(ItemKeywordRule.user_id == current_user.id)
+        .order_by(ItemKeywordRule.priority.asc(), ItemKeywordRule.created_at.asc())
+    )
+    return [serialize_item_rule(rule) for rule in result.scalars().all()]
+
+
+@router.post("/item-rules")
+async def create_item_rule(body: ItemKeywordRuleCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    rule = ItemKeywordRule(
+        user_id=current_user.id,
+        keyword=body.keyword.strip(),
+        subcategory_label=body.subcategory_label.strip(),
+        pattern_type=body.pattern_type,
+        priority=body.priority,
+        is_active=body.is_active,
+        notes=body.notes,
+    )
+    db.add(rule)
+    await db.flush()
+    return serialize_item_rule(rule)
+
+
+@router.patch("/item-rules/{rule_id}")
+async def update_item_rule(rule_id: uuid.UUID, body: ItemKeywordRuleUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    result = await db.execute(select(ItemKeywordRule).where(ItemKeywordRule.id == rule_id, ItemKeywordRule.user_id == current_user.id))
+    rule = result.scalar_one_or_none()
+    if rule is None:
+        raise HTTPException(status_code=404, detail="Item rule not found")
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(rule, field, value)
+    await db.flush()
+    return serialize_item_rule(rule)
+
+
+@router.delete("/item-rules/{rule_id}", status_code=204)
+async def delete_item_rule(rule_id: uuid.UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
+    result = await db.execute(select(ItemKeywordRule).where(ItemKeywordRule.id == rule_id, ItemKeywordRule.user_id == current_user.id))
+    rule = result.scalar_one_or_none()
+    if rule is None:
+        raise HTTPException(status_code=404, detail="Item rule not found")
     await db.delete(rule)

@@ -61,8 +61,10 @@ export default function ExpenseDetailPage() {
               <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Receipt / import file</dt><dd className="mt-1 text-sm">{expense.receipt_filename || "—"}</dd></div>
               <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Transaction type</dt><dd className="mt-1 text-sm">{transactionTypeLabel(expense.transaction_type)}</dd></div>
               <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Cadence</dt><dd className="mt-1 text-sm">{transactionCadenceLabel(expense.cadence)}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Recurring setup</dt><dd className="mt-1 text-sm">{expense.is_recurring ? `${expense.recurring_variable ? "Variable" : "Constant"} · ${expense.recurring_auto_add ? "Auto-add on" : "Manual add"}` : "Not recurring"}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Generation</dt><dd className="mt-1 text-sm">{expense.auto_generated ? `Auto-generated for ${expense.generated_for_month ? monthLabel(expense.generated_for_month) : "a scheduled month"}` : "Created directly by you or import review"}</dd></div>
               <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Confidence</dt><dd className="mt-1 text-sm">{Math.round(expense.confidence * 100)}%</dd></div>
-              <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Review status</dt><dd className="mt-1 text-sm">{expense.needs_review ? "Needs review" : expense.is_major_purchase ? "Major one-time purchase" : expense.is_recurring ? "Recurring" : "Tracked"}</dd></div>
+              <div><dt className="text-xs uppercase tracking-wide text-muted-foreground">Review status</dt><dd className="mt-1 text-sm">{expense.needs_review ? (expense.auto_generated ? "Needs review (auto-added draft)" : "Needs review") : expense.is_major_purchase ? "Major one-time purchase" : expense.is_recurring ? "Recurring" : "Tracked"}</dd></div>
               <div className="md:col-span-2"><dt className="text-xs uppercase tracking-wide text-muted-foreground">Notes</dt><dd className="mt-1 whitespace-pre-wrap text-sm">{expense.notes || "—"}</dd></div>
             </dl>
           </div>

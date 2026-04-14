@@ -21,7 +21,7 @@ from app.models.expense import Expense
 from app.models.receipt import Receipt
 from app.models.user import User
 from app.services.report_exports import build_expense_export_payload
-from app.services.spendhound import CADENCE_ONE_TIME, TRANSACTION_TYPE_DEBIT, apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_cadence, normalize_money, normalize_transaction_type, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_receipt
+from app.services.spendhound import CADENCE_ONE_TIME, TRANSACTION_TYPE_DEBIT, apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_cadence, normalize_money, normalize_recurring_settings, normalize_transaction_type, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_receipt
 
 router = APIRouter()
 
@@ -70,7 +70,10 @@ class ExpenseCreate(BaseModel):
     category_id: uuid.UUID | None = None
     category_name: str | None = None
     notes: str | None = None
+    items: list[dict] | None = None
     cadence: str | None = None
+    recurring_variable: bool = False
+    recurring_auto_add: bool = False
     is_major_purchase: bool = False
 
 
@@ -86,6 +89,8 @@ class ExpenseUpdate(BaseModel):
     notes: str | None = None
     needs_review: bool | None = None
     cadence: str | None = None
+    recurring_variable: bool | None = None
+    recurring_auto_add: bool | None = None
     is_major_purchase: bool | None = None
 
 
@@ -160,6 +165,11 @@ async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_c
     await ensure_default_categories(db, current_user.id)
     transaction_type = normalize_transaction_type(body.transaction_type)
     cadence_override = _parse_cadence_override(body.cadence)
+    recurring_variable, recurring_auto_add = normalize_recurring_settings(
+        cadence_override or CADENCE_ONE_TIME,
+        recurring_variable=body.recurring_variable,
+        recurring_auto_add=body.recurring_auto_add,
+    )
     category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
     expense = Expense(
         user_id=current_user.id,
@@ -176,10 +186,13 @@ async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_c
         needs_review=expense_requires_review(category, 1.0, "manual"),
         cadence=cadence_override or CADENCE_ONE_TIME,
         cadence_override=cadence_override,
+        recurring_variable=recurring_variable,
+        recurring_auto_add=recurring_auto_add,
         is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
     )
     db.add(expense)
     await db.flush()
+    await replace_expense_items(db, expense, body.items, category_name=category.name if category else body.category_name)
     await recompute_recurring_expenses(db, current_user.id)
     await db.refresh(expense)
     return serialize_expense(expense, category_name=category.name if category else None)
@@ -209,6 +222,11 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
 
     transaction_type = normalize_transaction_type(body.transaction_type)
     cadence_override = _parse_cadence_override(body.cadence)
+    recurring_variable, recurring_auto_add = normalize_recurring_settings(
+        cadence_override or CADENCE_ONE_TIME,
+        recurring_variable=body.recurring_variable,
+        recurring_auto_add=body.recurring_auto_add,
+    )
     category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
     confidence = body.confidence if body.confidence is not None else receipt.extraction_confidence or 0.5
     expense = Expense(
@@ -227,6 +245,8 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
         needs_review=expense_requires_review(category, confidence, "receipt"),
         cadence=cadence_override or CADENCE_ONE_TIME,
         cadence_override=cadence_override,
+        recurring_variable=recurring_variable,
+        recurring_auto_add=recurring_auto_add,
         is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
     )
     db.add(expense)
@@ -240,15 +260,17 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
         "category_name": category.name if category else body.category_name,
         "notes": body.notes,
         "cadence": cadence_override or CADENCE_ONE_TIME,
+        "recurring_variable": recurring_variable,
+        "recurring_auto_add": recurring_auto_add,
         "is_major_purchase": _normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
-        "items": (receipt.preview_data or {}).get("items", []),
+        "items": body.items if body.items is not None else (receipt.preview_data or {}).get("items", []),
         "confidence": confidence,
     }
     receipt.needs_review = expense.needs_review
     receipt.extraction_status = "finalized"
     receipt.finalized_at = datetime.now(timezone.utc)
     await db.flush()
-    await replace_expense_items(db, expense, (receipt.preview_data or {}).get("items", []), category_name=category.name if category else body.category_name)
+    await replace_expense_items(db, expense, body.items if body.items is not None else (receipt.preview_data or {}).get("items", []), category_name=category.name if category else body.category_name)
     await recompute_recurring_expenses(db, current_user.id)
     await db.refresh(expense)
     return serialize_expense(expense, category_name=category.name if category else None, receipt_filename=receipt.original_filename)
@@ -282,6 +304,11 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
 
     transaction_type = normalize_transaction_type(body.transaction_type)
     cadence_override = _parse_cadence_override(body.cadence)
+    recurring_variable, recurring_auto_add = normalize_recurring_settings(
+        cadence_override or CADENCE_ONE_TIME,
+        recurring_variable=body.recurring_variable,
+        recurring_auto_add=body.recurring_auto_add,
+    )
     category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
     confidence = body.confidence if body.confidence is not None else float(entry.get("confidence") or receipt.extraction_confidence or 0.5)
     expense = Expense(
@@ -300,6 +327,8 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
         needs_review=expense_requires_review(category, confidence, "statement"),
         cadence=cadence_override or CADENCE_ONE_TIME,
         cadence_override=cadence_override,
+        recurring_variable=recurring_variable,
+        recurring_auto_add=recurring_auto_add,
         is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
     )
     db.add(expense)
@@ -316,6 +345,8 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
             "category_name": category.name if category else body.category_name,
             "notes": body.notes,
             "cadence": cadence_override or CADENCE_ONE_TIME,
+            "recurring_variable": recurring_variable,
+            "recurring_auto_add": recurring_auto_add,
             "is_major_purchase": _normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
             "confidence": confidence,
             "status": "finalized",
@@ -374,8 +405,16 @@ async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_use
 
     data = body.model_dump(exclude_unset=True)
     next_transaction_type = normalize_transaction_type(data.get("transaction_type"), default=expense.transaction_type)
+    next_cadence = _parse_cadence_override(data.get("cadence")) if "cadence" in data else (expense.cadence_override or expense.cadence)
+    recurring_variable, recurring_auto_add = normalize_recurring_settings(
+        next_cadence,
+        recurring_variable=data.get("recurring_variable", expense.recurring_variable),
+        recurring_auto_add=data.get("recurring_auto_add", expense.recurring_auto_add),
+    )
     if "cadence" in data:
         expense.cadence_override = _parse_cadence_override(data.get("cadence"))
+    expense.recurring_variable = recurring_variable
+    expense.recurring_auto_add = recurring_auto_add
     if {"category_id", "category_name", "merchant", "transaction_type"} & set(data):
         category_id = data.get("category_id") if "category_id" in data else None
         category_name = data.get("category_name") if "category_name" in data else None
@@ -396,6 +435,8 @@ async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_use
             expense.is_major_purchase = _normalize_major_purchase(value, transaction_type=next_transaction_type)
         elif field == "cadence":
             continue
+        elif field in {"recurring_variable", "recurring_auto_add"}:
+            continue
         elif field not in {"category_id", "category_name"}:
             setattr(expense, field, value)
 
@@ -406,6 +447,7 @@ async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_use
     expense.needs_review = body.needs_review if body.needs_review is not None else expense_requires_review(current_category, expense.confidence, expense.source)
     await db.flush()
     await recompute_recurring_expenses(db, current_user.id)
+    await db.refresh(expense)
     receipt_filename = None
     if expense.receipt_id:
         receipt_result = await db.execute(select(Receipt.original_filename).where(Receipt.id == expense.receipt_id))

@@ -9,12 +9,16 @@ import { currentMonthString, formatCurrency, formatDate, formatSignedCurrency, m
 function cadenceBadgeClasses(cadence: string) {
   switch (cadence) {
     case "monthly":
-      return "bg-primary/15 text-primary";
+      return "bg-red-500/15 text-red-300";
     case "yearly":
-      return "bg-emerald-500/15 text-emerald-300";
+      return "bg-red-500/15 text-red-300";
     default:
-      return "bg-secondary text-muted-foreground";
+      return "bg-orange-500/15 text-orange-300";
   }
+}
+
+function transactionTypeBadgeClasses(transactionType: string) {
+  return transactionType === "credit" ? "bg-emerald-500/15 text-emerald-400" : "bg-orange-500/15 text-orange-300";
 }
 
 export default function ExpensesPage() {
@@ -208,11 +212,13 @@ export default function ExpensesPage() {
                         <div className="font-medium">{expense.merchant}</div>
                         <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
                           <span>{expense.description || expense.receipt_filename || "—"}</span>
+                          {expense.auto_generated ? <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-[11px] text-red-300">{expense.needs_review ? "Auto-added draft" : "Auto-added"}</span> : null}
+                          {expense.recurring_variable ? <span className="rounded-full bg-yellow-500/15 px-2 py-0.5 text-[11px] text-yellow-300">Variable recurring</span> : null}
                           {expense.is_major_purchase ? <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">Major purchase</span> : null}
                         </div>
                       </Link>
                     </td>
-                    <td className="py-3 pr-4"><span className={`rounded-full px-2 py-1 text-xs ${expense.transaction_type === "credit" ? "bg-emerald-500/15 text-emerald-400" : "bg-red-500/15 text-red-400"}`}>{transactionTypeLabel(expense.transaction_type)}</span></td>
+                    <td className="py-3 pr-4"><span className={`rounded-full px-2 py-1 text-xs ${transactionTypeBadgeClasses(expense.transaction_type)}`}>{transactionTypeLabel(expense.transaction_type)}</span></td>
                     <td className="py-3 pr-4"><span className={`rounded-full px-2 py-1 text-xs ${cadenceBadgeClasses(expense.cadence)}`}>{transactionCadenceLabel(expense.cadence)}</span></td>
                     <td className="py-3 pr-4">{expense.category_name ?? "Uncategorized"}</td>
                     <td className="py-3 pr-4 capitalize">{expense.source}</td>
