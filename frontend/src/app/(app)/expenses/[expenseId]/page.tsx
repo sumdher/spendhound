@@ -2,9 +2,17 @@
 
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { getExpense, type Expense, type ReceiptPreview, type StatementImportPreview } from "@/lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getExpense, updateExpenseItemSubcategory, type Expense, type ExpenseItem, type ItemKeywordRule, type ReceiptPreview, type StatementImportPreview } from "@/lib/api";
 import { formatCurrency, formatDate, formatSignedCurrency, monthLabel, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
+
+const GROCERY_SUBCATEGORIES = [
+  "Vegetables", "Fruit", "Meat", "Fish & Seafood", "Dairy & Eggs",
+  "Bakery", "Frozen", "Snacks", "Beverages", "Cleaning Products",
+  "Personal Care", "Baby", "Pet Care", "Household",
+  "Breakfast & Cereal", "Condiments & Spices", "Pantry", "Prepared Meals",
+  "Other Grocery",
+];
 
 function isStatementPreview(preview: Expense["receipt_preview"]): preview is StatementImportPreview {
   return Boolean(preview && typeof preview === "object" && "entries" in preview);
@@ -14,18 +22,82 @@ function isReceiptPreview(preview: Expense["receipt_preview"]): preview is Recei
   return Boolean(preview && typeof preview === "object" && !isStatementPreview(preview));
 }
 
+function SubcategoryCell({
+  item,
+  expenseId,
+  onUpdated,
+}: {
+  item: ExpenseItem;
+  expenseId: string;
+  onUpdated: (item: ExpenseItem, ruleCreated: ItemKeywordRule | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const selectRef = useRef<HTMLSelectElement>(null);
+
+  async function handleChange(newSubcat: string) {
+    const value = newSubcat === "" ? null : newSubcat;
+    setSaving(true);
+    try {
+      const result = await updateExpenseItemSubcategory(expenseId, item.id, value);
+      onUpdated(result.item, result.rule_created ?? null);
+    } catch {
+      // silently ignore — item stays as-is
+    } finally {
+      setSaving(false);
+      setEditing(false);
+    }
+  }
+
+  if (saving) {
+    return <span className="text-xs text-muted-foreground">Saving…</span>;
+  }
+
+  if (editing) {
+    return (
+      <select
+        ref={selectRef}
+        defaultValue={item.subcategory ?? ""}
+        autoFocus
+        onBlur={() => setEditing(false)}
+        onChange={(e) => void handleChange(e.target.value)}
+        className="rounded border border-border bg-background px-2 py-1 text-xs"
+      >
+        <option value="">— unset —</option>
+        {GROCERY_SUBCATEGORIES.map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      title="Click to correct subcategory"
+      onClick={() => setEditing(true)}
+      className="rounded px-1 py-0.5 text-left text-sm hover:bg-accent"
+    >
+      {item.subcategory ?? <span className="text-muted-foreground">—</span>}
+    </button>
+  );
+}
+
 export default function ExpenseDetailPage() {
   const params = useParams<{ expenseId: string }>();
   const searchParams = useSearchParams();
   const [expense, setExpense] = useState<Expense | null>(null);
+  const [items, setItems] = useState<ExpenseItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastRuleCreated, setLastRuleCreated] = useState<ItemKeywordRule | null>(null);
 
   useEffect(() => {
     setLoading(true);
     getExpense(params.expenseId)
       .then((value) => {
         setExpense(value);
+        setItems(value.items ?? []);
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load expense"))
@@ -33,6 +105,14 @@ export default function ExpenseDetailPage() {
   }, [params.expenseId]);
 
   const backMonth = useMemo(() => searchParams.get("month") || (expense?.expense_date?.slice(0, 7) ?? undefined), [expense?.expense_date, searchParams]);
+
+  function handleItemUpdated(updated: ExpenseItem, ruleCreated: ItemKeywordRule | null) {
+    setItems((prev) => prev.map((it) => it.id === updated.id ? { ...it, ...updated } : it));
+    if (ruleCreated) {
+      setLastRuleCreated(ruleCreated);
+      setTimeout(() => setLastRuleCreated(null), 4000);
+    }
+  }
 
   if (loading) return <div className="py-20 text-center text-muted-foreground">Loading transaction details…</div>;
   if (error || !expense) return <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error ?? "Transaction not found"}</div>;
@@ -73,11 +153,20 @@ export default function ExpenseDetailPage() {
             <div className="mb-4 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-semibold">Receipt-derived items</h2>
-                <p className="text-sm text-muted-foreground">Stored line items, quantities, prices, and grocery subcategories when available.</p>
+                <p className="text-sm text-muted-foreground">Click any subcategory to correct it — the system will learn from your correction.</p>
               </div>
-              <div className="rounded-full bg-secondary px-3 py-1 text-sm">{expense.items?.length ?? 0} items</div>
+              <div className="rounded-full bg-secondary px-3 py-1 text-sm">{items.length} items</div>
             </div>
-            {!expense.items?.length ? <div className="rounded-xl border border-border bg-background px-4 py-8 text-center text-sm text-muted-foreground">No itemized receipt lines were stored for this transaction.</div> : (
+
+            {lastRuleCreated ? (
+              <div className="mb-3 rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-2 text-xs text-green-400">
+                Rule created: <strong>{lastRuleCreated.keyword}</strong> → {lastRuleCreated.subcategory_label} ({lastRuleCreated.pattern_type})
+              </div>
+            ) : null}
+
+            {!items.length ? (
+              <div className="rounded-xl border border-border bg-background px-4 py-8 text-center text-sm text-muted-foreground">No itemized receipt lines were stored for this transaction.</div>
+            ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead className="border-b border-border text-left text-muted-foreground">
@@ -90,10 +179,12 @@ export default function ExpenseDetailPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {expense.items.map((item) => (
+                    {items.map((item) => (
                       <tr key={item.id} className="border-b border-border/50">
                         <td className="py-3 pr-4 font-medium">{item.description}</td>
-                        <td className="py-3 pr-4">{item.subcategory || "—"}</td>
+                        <td className="py-3 pr-4">
+                          <SubcategoryCell item={item} expenseId={expense.id} onUpdated={handleItemUpdated} />
+                        </td>
                         <td className="py-3 pr-4">{item.quantity ?? "—"}</td>
                         <td className="py-3 pr-4">{item.unit_price != null ? formatCurrency(item.unit_price, expense.currency) : "—"}</td>
                         <td className="py-3 pr-0">{item.total != null ? formatCurrency(item.total, expense.currency) : "—"}</td>

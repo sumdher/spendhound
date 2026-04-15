@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     recurring_generation_enabled: bool = Field(default=False, description="Enable automatic generation of recurring expenses")
     recurring_generation_timezone: str = Field(default="UTC", description="IANA timezone used to compute recurring expense generation months")
 
+    ollama_embedding_model: str = Field(default="embeddinggemma:latest", description="Ollama model for item embeddings (RAG)")
+    embedding_dimensions: int = Field(default=768, description="Vector dimensions produced by the embedding model")
+    rag_similarity_threshold: float = Field(default=0.22, description="Cosine distance threshold for RAG match (lower = stricter; 0.0=identical, 2.0=opposite)")
+
     debug: bool = Field(default=False, description="Enable debug mode")
     cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"],

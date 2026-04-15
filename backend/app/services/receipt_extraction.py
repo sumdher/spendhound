@@ -901,6 +901,14 @@ async def build_receipt_preview(
     used_text_fallback = False
     prompt_override_result = await db.execute(select(User.receipt_prompt_override).where(User.id == user_id).limit(1))
     prompt_override = prompt_override_result.scalar_one_or_none()
+    if not prompt_override:
+        # Fall back to admin's prompt (acts as the global default)
+        admin_email = settings.admin_email
+        if admin_email:
+            admin_prompt_result = await db.execute(
+                select(User.receipt_prompt_override).where(User.email == admin_email).limit(1)
+            )
+            prompt_override = admin_prompt_result.scalar_one_or_none()
     preview = await llm_receipt_preview_from_image(storage_path, filename, content_type, llm_config, prompt_override)
     if preview is None:
         logger.info(

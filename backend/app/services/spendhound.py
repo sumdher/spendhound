@@ -12,7 +12,7 @@ from datetime import date
 from decimal import Decimal
 
 import structlog
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 
@@ -424,7 +424,24 @@ def matches_rule(merchant: str, rule: MerchantRule) -> bool:
     return pattern in merchant_value
 
 
+def _is_subsequence(pattern: str, text: str) -> bool:
+    """Return True if every character of *pattern* appears in *text* in order."""
+    it = iter(text)
+    return all(char in it for char in pattern)
+
+
 def matches_item_keyword_rule(description: str, rule: ItemKeywordRule) -> bool:
+    """Return True if *description* matches *rule* according to its pattern_type.
+
+    Pattern types:
+      fuzzy      – smart fuzzy match (existing behaviour)
+      contains   – normalized keyword is a substring of the normalized description
+      starts_with – any token of the description starts with the keyword
+                   e.g. keyword="diges" matches "DIGES. MCVITIE'S" and "DIGESTIVI"
+      abbrev     – all keyword chars appear in order inside any single token
+                   e.g. keyword="mcvt" matches "MCVITIE" (m·c·v···t inside)
+      regex      – full regex against the original description (case-insensitive)
+    """
     if rule.pattern_type == "regex":
         try:
             return re.search(rule.keyword, description, flags=re.IGNORECASE) is not None
@@ -432,6 +449,16 @@ def matches_item_keyword_rule(description: str, rule: ItemKeywordRule) -> bool:
             return False
     if rule.pattern_type == "contains":
         return normalize_match_text(rule.keyword) in normalize_match_text(description)
+    if rule.pattern_type == "starts_with":
+        kw = normalize_match_text(rule.keyword)
+        if not kw:
+            return False
+        return any(token.startswith(kw) for token in normalize_match_text(description).split())
+    if rule.pattern_type == "abbrev":
+        kw = normalize_match_text(rule.keyword)
+        if len(kw) < 2:
+            return False
+        return any(_is_subsequence(kw, token) for token in normalize_match_text(description).split())
     return fuzzy_text_match(description, rule.keyword)
 
 
@@ -441,14 +468,25 @@ async def find_matching_category(db: AsyncSession, user_id: uuid.UUID, merchant:
     normalized_type = normalize_transaction_type(transaction_type) if transaction_type else None
     result = await db.execute(
         select(MerchantRule)
-        .where(MerchantRule.user_id == user_id, MerchantRule.is_active.is_(True))
-        .order_by(MerchantRule.priority.asc(), MerchantRule.created_at.asc())
+        .where(
+            MerchantRule.is_active.is_(True),
+            or_(
+                (MerchantRule.user_id == user_id) & MerchantRule.is_global.is_(False),
+                MerchantRule.is_global.is_(True),
+            ),
+        )
+        # user-specific rules first, then global; within each group order by priority
+        .order_by(MerchantRule.is_global.asc(), MerchantRule.priority.asc(), MerchantRule.created_at.asc())
     )
     for rule in result.scalars().all():
         if not rule.category_id:
             continue
         if matches_rule(merchant, rule):
-            category_result = await db.execute(select(Category).where(Category.id == rule.category_id, Category.user_id == user_id))
+            # For global rules, the category may belong to a different user — look up by id only
+            if rule.is_global:
+                category_result = await db.execute(select(Category).where(Category.id == rule.category_id))
+            else:
+                category_result = await db.execute(select(Category).where(Category.id == rule.category_id, Category.user_id == user_id))
             category = category_result.scalar_one_or_none()
             if category is not None and (normalized_type is None or category.transaction_type == normalized_type):
                 return category
@@ -456,17 +494,76 @@ async def find_matching_category(db: AsyncSession, user_id: uuid.UUID, merchant:
 
 
 async def find_matching_item_subcategory(db: AsyncSession, user_id: uuid.UUID, description: str | None) -> tuple[str, float] | None:
+    """Check user-specific rules first (lower priority number = higher precedence),
+    then fall back to global rules created by admin."""
     if not description:
         return None
+    from sqlalchemy import or_
     result = await db.execute(
         select(ItemKeywordRule)
-        .where(ItemKeywordRule.user_id == user_id, ItemKeywordRule.is_active.is_(True))
-        .order_by(ItemKeywordRule.priority.asc(), ItemKeywordRule.created_at.asc())
+        .where(
+            ItemKeywordRule.is_active.is_(True),
+            or_(
+                # User's own rules
+                (ItemKeywordRule.user_id == user_id) & (ItemKeywordRule.is_global.is_(False)),
+                # Admin-created global rules (visible to all)
+                ItemKeywordRule.is_global.is_(True),
+            ),
+        )
+        .order_by(
+            # User rules first (is_global=False), then global (is_global=True)
+            ItemKeywordRule.is_global.asc(),
+            ItemKeywordRule.priority.asc(),
+            ItemKeywordRule.created_at.asc(),
+        )
     )
     for rule in result.scalars().all():
         if matches_item_keyword_rule(description, rule):
             return rule.subcategory_label, 0.98
     return None
+
+
+async def upsert_item_keyword_rule_from_correction(
+    db: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    description: str,
+    subcategory_label: str,
+) -> ItemKeywordRule | None:
+    """Auto-create a user-specific keyword rule from a manual subcategory correction.
+
+    Picks the longest normalized token (≥4 chars, non-numeric) as the keyword
+    with `contains` matching. Skips if an identical rule already exists.
+    """
+    tokens = [t for t in normalize_match_text(description).split() if len(t) >= 4 and not t.isdigit()]
+    if not tokens:
+        return None
+    keyword = max(tokens, key=len)
+
+    existing = await db.execute(
+        select(ItemKeywordRule).where(
+            ItemKeywordRule.user_id == user_id,
+            ItemKeywordRule.keyword == keyword,
+            ItemKeywordRule.subcategory_label == subcategory_label,
+            ItemKeywordRule.is_global.is_(False),
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        return None
+
+    rule = ItemKeywordRule(
+        user_id=user_id,
+        is_global=False,
+        keyword=keyword,
+        subcategory_label=subcategory_label,
+        pattern_type="contains",
+        priority=50,
+        is_active=True,
+        notes=f"Auto-created from item correction: {description[:80]}",
+    )
+    db.add(rule)
+    await db.flush()
+    return rule
 
 
 async def resolve_category(
@@ -527,6 +624,7 @@ def serialize_rule(rule: MerchantRule, category_name: str | None = None) -> dict
         "pattern_type": rule.pattern_type,
         "priority": rule.priority,
         "is_active": rule.is_active,
+        "is_global": rule.is_global,
         "notes": rule.notes,
         "created_at": rule.created_at.isoformat(),
         "updated_at": rule.updated_at.isoformat(),
@@ -540,6 +638,7 @@ def serialize_item_rule(rule: ItemKeywordRule) -> dict:
         "subcategory_label": rule.subcategory_label,
         "pattern_type": rule.pattern_type,
         "priority": rule.priority,
+        "is_global": rule.is_global,
         "is_active": rule.is_active,
         "notes": rule.notes,
         "created_at": rule.created_at.isoformat(),
@@ -681,6 +780,11 @@ async def replace_expense_items(db: AsyncSession, expense: Expense, items: list[
             matched_subcategory = await find_matching_item_subcategory(db, expense.user_id, description)
             if matched_subcategory is not None:
                 subcategory, subcategory_confidence = matched_subcategory
+        if is_grocery_expense and not subcategory:
+            from app.services.item_rag import find_similar_subcategory
+            rag_result = await find_similar_subcategory(db, expense.user_id, description)
+            if rag_result is not None:
+                subcategory, subcategory_confidence = rag_result
         if is_grocery_expense and not subcategory:
             subcategory, subcategory_confidence = derive_grocery_subcategory(description)
             derived_subcategory_count += 1

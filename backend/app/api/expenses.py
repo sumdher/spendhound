@@ -18,10 +18,12 @@ from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.models.category import Category
 from app.models.expense import Expense
+from app.models.expense_item import ExpenseItem
 from app.models.receipt import Receipt
 from app.models.user import User
+from app.services.item_rag import upsert_item_embedding
 from app.services.report_exports import build_expense_export_payload
-from app.services.spendhound import CADENCE_ONE_TIME, TRANSACTION_TYPE_DEBIT, apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_cadence, normalize_money, normalize_recurring_settings, normalize_transaction_type, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_receipt
+from app.services.spendhound import CADENCE_ONE_TIME, TRANSACTION_TYPE_DEBIT, apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_cadence, normalize_money, normalize_recurring_settings, normalize_transaction_type, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_item_rule, serialize_receipt, upsert_item_keyword_rule_from_correction
 
 router = APIRouter()
 
@@ -464,3 +466,80 @@ async def delete_expense(expense_id: uuid.UUID, current_user: User = Depends(get
     await db.delete(expense)
     await db.flush()
     await recompute_recurring_expenses(db, current_user.id)
+
+
+class ExpenseItemUpdate(BaseModel):
+    subcategory: str | None = None
+    # When True (default), auto-create a keyword rule + RAG embedding from this correction
+    learn: bool = True
+
+
+@router.patch("/{expense_id}/items/{item_id}")
+async def update_expense_item(
+    expense_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: ExpenseItemUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Correct a single item's subcategory.
+
+    When learn=true (default) the system:
+    1. Creates a user-specific keyword rule (contains, priority 50) so future
+       items with the same description token are matched immediately.
+    2. Stores a RAG embedding so semantically similar items are also caught.
+    Both are user-specific (is_global=False) — only admins can promote to global.
+    """
+    expense_result = await db.execute(
+        select(Expense).where(Expense.id == expense_id, Expense.user_id == current_user.id)
+    )
+    expense = expense_result.scalar_one_or_none()
+    if expense is None:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    item_result = await db.execute(
+        select(ExpenseItem).where(ExpenseItem.id == item_id, ExpenseItem.expense_id == expense_id)
+    )
+    item = item_result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=404, detail="Expense item not found")
+
+    subcategory_changed = item.subcategory != body.subcategory
+    item.subcategory = body.subcategory
+    item.subcategory_confidence = 1.0 if body.subcategory else None
+
+    rule_created = None
+    if body.learn and body.subcategory and subcategory_changed and item.description:
+        # 1. Keyword rule (fast, deterministic)
+        new_rule = await upsert_item_keyword_rule_from_correction(
+            db,
+            user_id=current_user.id,
+            description=item.description,
+            subcategory_label=body.subcategory,
+        )
+        if new_rule is not None:
+            rule_created = serialize_item_rule(new_rule)
+        # 2. RAG embedding (semantic, async — fire and don't block on failure)
+        await upsert_item_embedding(
+            db,
+            description=item.description,
+            subcategory_label=body.subcategory,
+            user_id=current_user.id,
+            is_global=False,
+            source="correction",
+            notes=f"Corrected on expense {expense_id}",
+        )
+
+    await db.flush()
+    return {
+        "item": {
+            "id": str(item.id),
+            "description": item.description,
+            "subcategory": item.subcategory,
+            "subcategory_confidence": item.subcategory_confidence,
+            "quantity": item.quantity,
+            "unit_price": float(item.unit_price) if item.unit_price is not None else None,
+            "total": float(item.total_price) if item.total_price is not None else None,
+        },
+        "rule_created": rule_created,
+    }

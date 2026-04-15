@@ -21,6 +21,7 @@ class UserResponse(BaseModel):
     name: Optional[str] = None
     avatar_url: Optional[str] = None
     status: str
+    is_admin: bool = False
     automatic_monthly_reports: bool = True
     receipt_prompt_override: Optional[str] = None
     created_at: datetime

@@ -31,6 +31,7 @@ class User(Base):
     categories: Mapped[list["Category"]] = relationship("Category", back_populates="user", cascade="all, delete-orphan")
     merchant_rules: Mapped[list["MerchantRule"]] = relationship("MerchantRule", back_populates="user", cascade="all, delete-orphan")
     item_keyword_rules: Mapped[list["ItemKeywordRule"]] = relationship("ItemKeywordRule", back_populates="user", cascade="all, delete-orphan")
+    item_embeddings: Mapped[list["ItemEmbedding"]] = relationship("ItemEmbedding", back_populates="user", cascade="all, delete-orphan")
     budgets: Mapped[list["Budget"]] = relationship("Budget", back_populates="user", cascade="all, delete-orphan")
     receipts: Mapped[list["Receipt"]] = relationship("Receipt", back_populates="user", cascade="all, delete-orphan")
     expenses: Mapped[list["Expense"]] = relationship("Expense", back_populates="user", cascade="all, delete-orphan")

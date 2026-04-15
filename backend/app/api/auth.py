@@ -38,6 +38,7 @@ def serialize_user_profile(user: User) -> UserResponse:
         name=user.name,
         avatar_url=user.avatar_url,
         status=user.status,
+        is_admin=is_admin_email(user.email),
         automatic_monthly_reports=user.automatic_monthly_reports,
         receipt_prompt_override=user.receipt_prompt_override,
         created_at=user.created_at,

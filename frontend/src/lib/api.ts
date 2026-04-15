@@ -104,6 +104,7 @@ export interface MerchantRule {
   pattern_type: string;
   priority: number;
   is_active: boolean;
+  is_global: boolean;
   notes?: string | null;
   created_at: string;
   updated_at: string;
@@ -116,9 +117,20 @@ export interface ItemKeywordRule {
   pattern_type: string;
   priority: number;
   is_active: boolean;
+  is_global: boolean;
   notes?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface KnowledgeBaseEntry {
+  id: string;
+  description_text: string;
+  subcategory_label: string;
+  is_global: boolean;
+  source: string;
+  notes?: string | null;
+  created_at: string;
 }
 
 export interface Budget {
@@ -652,6 +664,54 @@ export async function updateItemKeywordRule(id: string, data: Partial<ItemKeywor
 
 export async function deleteItemKeywordRule(id: string): Promise<void> {
   return apiFetch<void>(`/api/categories/item-rules/${id}`, { method: "DELETE" });
+}
+
+// ── Knowledge base (RAG embeddings) ──────────────────────────────────────────
+
+export async function listKnowledgeBase(isGlobal?: boolean): Promise<KnowledgeBaseEntry[]> {
+  const query = isGlobal !== undefined ? `?is_global=${isGlobal}` : "";
+  return apiFetch<KnowledgeBaseEntry[]>(`/api/categories/knowledge-base${query}`);
+}
+
+export async function uploadKnowledgeBase(file: File, isGlobal: boolean): Promise<{ total_parsed: number; inserted: number }> {
+  const session = await getSession();
+  const token = (session as { accessToken?: string } | null)?.accessToken;
+  const formData = new FormData();
+  formData.append("file", file);
+  const url = `${API_URL}/api/categories/knowledge-base/upload?is_global=${isGlobal}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? `Upload failed: ${response.status}`);
+  }
+  return response.json() as Promise<{ total_parsed: number; inserted: number }>;
+}
+
+export async function deleteKnowledgeBaseEntry(id: string): Promise<void> {
+  return apiFetch<void>(`/api/categories/knowledge-base/${id}`, { method: "DELETE" });
+}
+
+// ── Expense item subcategory correction ──────────────────────────────────────
+
+export interface ExpenseItemCorrectionResult {
+  item: ExpenseItem;
+  rule_created?: ItemKeywordRule | null;
+}
+
+export async function updateExpenseItemSubcategory(
+  expenseId: string,
+  itemId: string,
+  subcategory: string | null,
+  learn = true,
+): Promise<ExpenseItemCorrectionResult> {
+  return apiFetch<ExpenseItemCorrectionResult>(`/api/expenses/${expenseId}/items/${itemId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ subcategory, learn }),
+  });
 }
 
 export async function listBudgets(month?: string): Promise<Budget[]> {
