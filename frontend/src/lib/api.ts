@@ -1,14 +1,6 @@
 import { getSession } from "next-auth/react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "/backend";
-const LLM_CONFIG_KEY = "spendhound_llm_config";
-
-export interface LLMConfig {
-  provider?: string;
-  model?: string;
-  apiKey?: string;
-  baseUrl?: string;
-}
 
 export interface ChatMessage {
   id: string;
@@ -393,8 +385,20 @@ export interface UserProfile {
   is_admin: boolean;
   automatic_monthly_reports: boolean;
   receipt_prompt_override?: string | null;
+  llm_provider?: string | null;
+  llm_model?: string | null;
+  llm_base_url?: string | null;
+  has_llm_api_key: boolean;
   created_at: string;
   updated_at?: string;
+}
+
+export interface UserLLMSettings {
+  llm_provider?: string | null;
+  llm_model?: string | null;
+  llm_api_key?: string | null;
+  llm_base_url?: string | null;
+  clear_api_key?: boolean;
 }
 
 export interface UpdateUserProfileRequest {
@@ -422,21 +426,6 @@ export interface MonthlyReportSendResponse {
 let sessionPromise: ReturnType<typeof getSession> | null = null;
 let sessionTimestamp = 0;
 const SESSION_CACHE_MS = 5_000;
-
-export function getLLMConfig(): LLMConfig {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = localStorage.getItem(LLM_CONFIG_KEY);
-    return raw ? (JSON.parse(raw) as LLMConfig) : {};
-  } catch {
-    return {};
-  }
-}
-
-export function saveLLMConfig(config: LLMConfig) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(LLM_CONFIG_KEY, JSON.stringify(config));
-}
 
 async function getAuthHeaders(): Promise<Record<string, string>> {
   const now = Date.now();
@@ -501,16 +490,6 @@ async function proxyStream(body: Record<string, unknown>): Promise<Response> {
   }
 
   return response;
-}
-
-function getStreamConfig() {
-  const llmConfig = getLLMConfig();
-  return {
-    provider: llmConfig.provider,
-    model: llmConfig.model,
-    apiKey: llmConfig.apiKey,
-    baseUrl: llmConfig.baseUrl,
-  };
 }
 
 export async function consumeSSE(
@@ -627,7 +606,6 @@ export async function streamChatSession(sessionId: string, request: ChatStreamRe
     assistantClientId: request.assistantClientId,
     temperature: request.temperature,
     maxTokens: request.maxTokens,
-    ...getStreamConfig(),
   });
 }
 
@@ -638,7 +616,6 @@ export async function streamChatSummary(request: ChatSummarizeRequest): Promise<
     prompt: request.prompt,
     temperature: request.temperature,
     maxTokens: request.maxTokens,
-    ...getStreamConfig(),
   });
 }
 
@@ -810,22 +787,12 @@ export async function getReceipt(id: string): Promise<Receipt> {
 export async function uploadReceipt(file: File): Promise<Receipt> {
   const formData = new FormData();
   formData.append("file", file);
-  const llmConfig = getLLMConfig();
-  if (llmConfig.provider) formData.append("provider", llmConfig.provider);
-  if (llmConfig.model) formData.append("model", llmConfig.model);
-  if (llmConfig.apiKey) formData.append("api_key", llmConfig.apiKey);
-  if (llmConfig.baseUrl) formData.append("base_url", llmConfig.baseUrl);
   return apiFetch<Receipt>("/api/receipts/upload", { method: "POST", body: formData });
 }
 
 export async function uploadStatement(file: File): Promise<Receipt> {
   const formData = new FormData();
   formData.append("file", file);
-  const llmConfig = getLLMConfig();
-  if (llmConfig.provider) formData.append("provider", llmConfig.provider);
-  if (llmConfig.model) formData.append("model", llmConfig.model);
-  if (llmConfig.apiKey) formData.append("api_key", llmConfig.apiKey);
-  if (llmConfig.baseUrl) formData.append("base_url", llmConfig.baseUrl);
   return apiFetch<Receipt>("/api/receipts/upload-statement", { method: "POST", body: formData });
 }
 
@@ -854,6 +821,68 @@ export async function updateReceiptPrompt(data: UpdateReceiptPromptRequest): Pro
     method: "PATCH",
     body: JSON.stringify(data),
   });
+}
+
+export async function updateLLMSettings(settings: UserLLMSettings): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/api/auth/me/llm-settings", {
+    method: "PATCH",
+    body: JSON.stringify(settings),
+  });
+}
+
+export interface LLMModelPricing {
+  input_per_1m: number | null;
+  output_per_1m: number | null;
+}
+
+export interface LLMModelInfo {
+  id: string;
+  name: string;
+  description: string | null;
+  context_length: number | null;
+  pricing: LLMModelPricing | null;
+  supports_vision: boolean;
+}
+
+export interface LLMTestRequest {
+  provider?: string;
+  model?: string;
+  api_key?: string;
+  base_url?: string;
+}
+
+export interface LLMTestResponse {
+  success: boolean;
+  response?: string;
+  error?: string;
+}
+
+export async function testLLMSettings(payload: LLMTestRequest): Promise<LLMTestResponse> {
+  return apiFetch<LLMTestResponse>("/api/auth/me/test-llm", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getOllamaModels(): Promise<string[]> {
+  try {
+    return await apiFetch<string[]>("/api/ollama/models");
+  } catch {
+    return [];
+  }
+}
+
+export async function getLLMModels(
+  provider: string,
+  apiKey?: string,
+): Promise<LLMModelInfo[]> {
+  try {
+    const params = new URLSearchParams({ provider });
+    if (apiKey) params.set("api_key", apiKey);
+    return await apiFetch<LLMModelInfo[]>(`/api/llm/models?${params.toString()}`);
+  } catch {
+    return [];
+  }
 }
 
 export async function sendMonthlyReportEmail(data: MonthlyReportSendRequest): Promise<MonthlyReportSendResponse> {

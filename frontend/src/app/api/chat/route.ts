@@ -14,10 +14,6 @@ interface ChatProxyRequestBody {
   parentClientId?: string | null;
   assistantClientId?: string;
   prompt?: string;
-  provider?: string;
-  model?: string;
-  apiKey?: string;
-  baseUrl?: string;
   temperature?: number;
   maxTokens?: number;
 }
@@ -39,10 +35,6 @@ export async function POST(request: NextRequest) {
   let upstreamBody: Record<string, unknown> = {
     session_id: body.sessionId,
     prompt: body.prompt,
-    provider: body.provider,
-    model: body.model,
-    api_key: body.apiKey,
-    base_url: body.baseUrl,
     temperature: body.temperature ?? 0.1,
     max_tokens: body.maxTokens ?? 1024,
   };
@@ -58,10 +50,6 @@ export async function POST(request: NextRequest) {
       client_id: body.clientId,
       parent_client_id: body.parentClientId,
       assistant_client_id: body.assistantClientId,
-      provider: body.provider,
-      model: body.model,
-      api_key: body.apiKey,
-      base_url: body.baseUrl,
       temperature: body.temperature ?? 0.1,
       max_tokens: body.maxTokens ?? 4096,
     };

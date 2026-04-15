@@ -23,10 +23,11 @@ from app.models.expense import Expense
 from app.models.expense_item import ExpenseItem
 from app.models.receipt import Receipt
 from app.schemas.chat import ChatHistoryResponse, ChatMessageResponse, ChatSessionResponse, ChatSummarizeStreamRequest, ChatStreamRequest
+from app.models.user import User
 from app.services.receipt_extraction import create_llm_config
 from app.services.spendhound import month_start_from_string
 from app.services.llm.base import LLMConfig, Message
-from app.services.llm.factory import get_llm_provider
+from app.services.llm.factory import get_llm_provider, resolve_user_llm_config
 
 
 SYSTEM_PROMPT = """You are SpendHound's expense assistant.
@@ -48,8 +49,9 @@ TITLE_SYSTEM_PROMPT = (
 class ExpenseChatService:
     """Application service for session-based expense chat."""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, user: User):
         self.db = db
+        self.user = user
 
     async def list_sessions(self, user_id: uuid.UUID) -> list[ChatSessionResponse]:
         result = await self.db.execute(
@@ -499,23 +501,19 @@ class ExpenseChatService:
         )
 
     def _build_llm_config(self, request: ChatStreamRequest | ChatSummarizeStreamRequest) -> LLMConfig:
-        base_config = create_llm_config(
+        # Build a config from any explicit request params (may all be None)
+        request_config = create_llm_config(
             provider=request.provider,
             model=request.model,
             api_key=request.api_key,
             base_url=request.base_url,
         )
-        if base_config is None:
-            return LLMConfig(temperature=request.temperature, max_tokens=request.max_tokens)
-        return LLMConfig(
-            provider=base_config.provider,
-            model=base_config.model,
-            api_key=base_config.api_key,
-            base_url=base_config.base_url,
-            temperature=request.temperature,
-            max_tokens=request.max_tokens,
-            extra=base_config.extra,
-        )
+        # Resolve final config using user's stored settings as fallback
+        resolved = resolve_user_llm_config(self.user, request_config)
+        # Always honour temperature and max_tokens from the chat request
+        resolved.temperature = request.temperature
+        resolved.max_tokens = request.max_tokens
+        return resolved
 
     async def _generate_title(self, message: str, llm_config: LLMConfig) -> str:
         fallback = self._derive_title(message)

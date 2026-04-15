@@ -107,7 +107,7 @@ function createEmptyExpenseForm(): ExpenseFormState {
     recurring_auto_add: false,
     is_major_purchase: false,
     currency: "EUR",
-    expense_date: `${currentMonthString()}-01`,
+    expense_date: new Date().toISOString().slice(0, 10),
     category_id: "",
     category_name: "",
     notes: "",

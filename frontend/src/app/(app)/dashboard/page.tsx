@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell, Line, LineChart } from "recharts";
 import { getDashboardAnalytics, listExpenses, sendMonthlyReportEmail, type DashboardAnalytics, type Expense } from "@/lib/api";
 import { DASHBOARD_CHART_COLORS, getDashboardSummaryStats } from "@/lib/dashboard-report";
-import { convertToEur, fetchAndStoreRates, getStoredRates, getStoredRatesUpdatedAt } from "@/lib/fx-rates";
+import { convertToBase, fetchAndStoreRates, getDefaultCurrency, getStoredRates, getStoredRatesUpdatedAt } from "@/lib/fx-rates";
 import { currentMonthString, formatCurrency, formatDate, monthLabel, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
 
 import type { DashboardSummaryStat } from "@/lib/dashboard-report";
@@ -44,12 +44,12 @@ function RefreshIcon({ spinning }: { spinning: boolean }) {
  * Formats a currency amount with an optional EUR approximation suffix for non-EUR currencies.
  * e.g. for INR: "₹1,234.56 ~ €11.21". For EUR (or missing rate): "€11.21".
  */
-function formatFxHint(amount: number, currency: string, fxRates: Record<string, number>): string {
+function formatFxHint(amount: number, currency: string, defaultCurrency: string, fxRates: Record<string, number>): string {
   const native = formatCurrency(amount, currency);
-  if (!currency || currency === "EUR") return native;
+  if (!currency || currency === defaultCurrency) return native;
   const rate = fxRates[currency];
   if (!rate) return native;
-  return `${native} ~ ${formatCurrency(convertToEur(amount, currency, fxRates))}`;
+  return `${native} ~ ${formatCurrency(convertToBase(amount, currency, defaultCurrency, fxRates), defaultCurrency)}`;
 }
 
 /**
@@ -59,10 +59,11 @@ function formatSignedFxHint(
   amount: number,
   transactionType: string | null | undefined,
   currency: string,
+  defaultCurrency: string,
   fxRates: Record<string, number>,
 ): string {
   const signed = transactionType === "credit" ? amount : -amount;
-  return formatFxHint(signed, currency, fxRates);
+  return formatFxHint(signed, currency, defaultCurrency, fxRates);
 }
 
 export default function DashboardPage() {
@@ -79,6 +80,7 @@ export default function DashboardPage() {
   const [fxUpdatedAt, setFxUpdatedAt] = useState<string | null>(() => getStoredRatesUpdatedAt());
   const [fxLoading, setFxLoading] = useState(false);
   const [fxError, setFxError] = useState<string | null>(null);
+  const [defaultCurrency] = useState<string>(() => getDefaultCurrency());
 
   // Raw per-expense data for the selected month (for FX-aware re-aggregation)
   const [monthExpenses, setMonthExpenses] = useState<Expense[]>([]);
@@ -127,9 +129,9 @@ export default function DashboardPage() {
     const seen = new Set<string>();
     Object.keys(data.summary.money_out_by_currency ?? {}).forEach((c) => seen.add(c));
     Object.keys(data.summary.money_in_by_currency ?? {}).forEach((c) => seen.add(c));
-    seen.delete("EUR");
+    seen.delete(defaultCurrency);
     return Array.from(seen).sort();
-  }, [data]);
+  }, [data, defaultCurrency]);
 
   // FX-aware "spend by category" — re-aggregated from raw debit expenses converted to EUR.
   // Falls back to the backend-provided totals when raw expenses are not yet loaded.
@@ -140,12 +142,12 @@ export default function DashboardPage() {
     const map = new Map<string, number>();
     for (const expense of debits) {
       const name = expense.category_name ?? "Uncategorised";
-      map.set(name, (map.get(name) ?? 0) + convertToEur(expense.amount, expense.currency, fxRates));
+      map.set(name, (map.get(name) ?? 0) + convertToBase(expense.amount, expense.currency, defaultCurrency, fxRates));
     }
     return Array.from(map.entries())
       .map(([name, amount]) => ({ name, amount }))
       .sort((a, b) => b.amount - a.amount);
-  }, [monthExpenses, fxRates, data?.spend_by_category]);
+  }, [monthExpenses, fxRates, defaultCurrency, data?.spend_by_category]);
 
   // FX-aware "top merchants" — same approach, top 10 by EUR-equivalent spend.
   const fxTopMerchants = useMemo(() => {
@@ -155,13 +157,13 @@ export default function DashboardPage() {
     const map = new Map<string, number>();
     for (const expense of debits) {
       const merchant = expense.merchant ?? "Unknown";
-      map.set(merchant, (map.get(merchant) ?? 0) + convertToEur(expense.amount, expense.currency, fxRates));
+      map.set(merchant, (map.get(merchant) ?? 0) + convertToBase(expense.amount, expense.currency, defaultCurrency, fxRates));
     }
     return Array.from(map.entries())
       .map(([merchant, amount]) => ({ merchant, amount }))
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 10);
-  }, [monthExpenses, fxRates, data?.top_merchants]);
+  }, [monthExpenses, fxRates, defaultCurrency, data?.top_merchants]);
 
   // FX-aware "grocery subcategory insights" — re-aggregated from expense items converted to EUR.
   // Each item's total is converted using its parent expense's currency. Falls back to the
@@ -177,7 +179,7 @@ export default function DashboardPage() {
     for (const expense of expensesWithItems) {
       for (const item of expense.items ?? []) {
         const total = item.total ?? 0;
-        const eurAmount = convertToEur(total, expense.currency, fxRates);
+        const eurAmount = convertToBase(total, expense.currency, defaultCurrency, fxRates);
         totalItemizedSpend += eurAmount;
         const subcategory = item.subcategory ?? null;
         if (!subcategory) { uncategorizedCount++; continue; }
@@ -201,7 +203,7 @@ export default function DashboardPage() {
       least_subcategories: [...sorted].reverse().slice(0, 5),
       uncategorized_count: uncategorizedCount,
     };
-  }, [monthExpenses, fxRates, data?.grocery_insights]);
+  }, [monthExpenses, fxRates, defaultCurrency, data?.grocery_insights]);
 
   // Stable grocery data reference: prefers FX-re-aggregated data, falls back to backend totals.
   const groceryData = fxGroceryInsights ?? data?.grocery_insights ?? null;
@@ -211,7 +213,7 @@ export default function DashboardPage() {
     setFxLoading(true);
     setFxError(null);
     try {
-      const newRates = await fetchAndStoreRates(detectedCurrencies);
+      const newRates = await fetchAndStoreRates(detectedCurrencies, defaultCurrency);
       setFxRates(newRates);
       setFxUpdatedAt(getStoredRatesUpdatedAt());
     } catch {
@@ -270,38 +272,38 @@ export default function DashboardPage() {
           </div>
 
           {/* FX conversion toolbar — affects the "Spend by category" and "Top merchants" charts below */}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-2.5">
-            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <span>Spend charts — EUR-equivalent totals</span>
-              {detectedCurrencies.length > 0 && (
+          {detectedCurrencies.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-2.5">
+              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span>Spend charts — {defaultCurrency}-equivalent totals</span>
                 <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tracking-wide">
                   {detectedCurrencies.join(" · ")}
                 </span>
-              )}
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="text-right">
-                {fxUpdatedAt ? (
-                  <p className="text-xs text-muted-foreground">
-                    Rates updated {new Date(fxUpdatedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground">Using default rates</p>
-                )}
-                {fxError && <p className="text-xs text-red-400 mt-0.5">{fxError}</p>}
               </div>
-              <button
-                type="button"
-                onClick={handleUpdateRates}
-                disabled={fxLoading || detectedCurrencies.length === 0}
-                title={detectedCurrencies.length === 0 ? "No non-EUR currencies detected in this month's expenses" : "Fetch live ECB rates for detected currencies"}
-                className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <RefreshIcon spinning={fxLoading} />
-                Update rates
-              </button>
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  {fxUpdatedAt ? (
+                    <p className="text-xs text-muted-foreground">
+                      Rates updated {new Date(fxUpdatedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Using default rates</p>
+                  )}
+                  {fxError && <p className="text-xs text-red-400 mt-0.5">{fxError}</p>}
+                </div>
+                <button
+                  type="button"
+                  onClick={handleUpdateRates}
+                  disabled={fxLoading}
+                  title="Fetch live ECB rates for detected currencies"
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <RefreshIcon spinning={fxLoading} />
+                  Update rates
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="grid gap-4 xl:grid-cols-2">
             <div className="rounded-2xl border border-border bg-card p-5">
@@ -460,7 +462,7 @@ export default function DashboardPage() {
                       <div className="font-medium">{expense.merchant}</div>
                       <div className="text-sm text-muted-foreground">{expense.category_name} · {formatDate(expense.expense_date)} · {transactionTypeLabel(expense.transaction_type)} · {transactionCadenceLabel(expense.cadence, (expense as { cadence_interval?: number | null }).cadence_interval)}</div>
                     </div>
-                    <div className={`text-right font-medium ${expense.transaction_type === "credit" ? "text-emerald-400" : "text-red-400"}`}>{formatSignedFxHint(expense.amount, expense.transaction_type, expense.currency, fxRates)}</div>
+                    <div className={`text-right font-medium ${expense.transaction_type === "credit" ? "text-emerald-400" : "text-red-400"}`}>{formatSignedFxHint(expense.amount, expense.transaction_type, expense.currency, defaultCurrency, fxRates)}</div>
                   </div>
                 ))}
               </div>
@@ -493,7 +495,7 @@ export default function DashboardPage() {
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1">
-                      <div className="font-medium text-red-400">{formatFxHint(sub.amount, sub.currency, fxRates)}</div>
+                      <div className="font-medium text-red-400">{formatFxHint(sub.amount, sub.currency, defaultCurrency, fxRates)}</div>
                       <span className={`rounded-full px-2 py-0.5 text-xs ${statusClasses}`}>{statusLabel}</span>
                     </div>
                   </div>
@@ -514,7 +516,7 @@ export default function DashboardPage() {
                     <div className="font-medium">{expense.merchant}</div>
                     <div className="text-sm text-muted-foreground">{expense.category_name} · {formatDate(expense.expense_date)} · {transactionCadenceLabel(expense.cadence)}</div>
                   </div>
-                  <div className="text-right font-medium text-red-400">{formatSignedFxHint(expense.amount, expense.transaction_type, expense.currency, fxRates)}</div>
+                  <div className="text-right font-medium text-red-400">{formatSignedFxHint(expense.amount, expense.transaction_type, expense.currency, defaultCurrency, fxRates)}</div>
                 </div>
               ))}
             </div>

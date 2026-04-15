@@ -34,7 +34,7 @@ async def upload_receipt(file: UploadFile = File(...), provider: str | None = Fo
     stored = await store_upload(current_user.id, file)
     extraction = await build_receipt_preview(
         db,
-        current_user.id,
+        current_user,
         storage_path=stored.storage_path,
         content_type=file.content_type,
         filename=file.filename or stored.stored_filename,
@@ -78,7 +78,7 @@ async def upload_statement(file: UploadFile = File(...), provider: str | None = 
     stored = await store_upload(current_user.id, file)
     extraction = await build_statement_preview(
         db,
-        current_user.id,
+        current_user,
         storage_path=stored.storage_path,
         content_type=file.content_type,
         filename=filename,

@@ -22,7 +22,7 @@ async def list_chat_sessions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[ChatSessionResponse]:
-    service = ExpenseChatService(db)
+    service = ExpenseChatService(db, current_user)
     return await service.list_sessions(current_user.id)
 
 
@@ -32,7 +32,7 @@ async def create_chat_session(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ChatSessionResponse:
-    service = ExpenseChatService(db)
+    service = ExpenseChatService(db, current_user)
     return await service.create_session(current_user.id, title=body.title)
 
 
@@ -43,7 +43,7 @@ async def rename_chat_session(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ChatSessionResponse:
-    service = ExpenseChatService(db)
+    service = ExpenseChatService(db, current_user)
     return await service.rename_session(current_user.id, session_id=session_id, title=body.title)
 
 
@@ -53,7 +53,7 @@ async def delete_chat_session(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> Response:
-    service = ExpenseChatService(db)
+    service = ExpenseChatService(db, current_user)
     await service.delete_session(current_user.id, session_id=session_id)
     return Response(status_code=204)
 
@@ -64,7 +64,7 @@ async def get_chat_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ChatHistoryResponse:
-    service = ExpenseChatService(db)
+    service = ExpenseChatService(db, current_user)
     return await service.get_history(current_user.id, session_id=session_id)
 
 
@@ -74,7 +74,7 @@ async def clear_chat_history(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ChatHistoryResponse:
-    service = ExpenseChatService(db)
+    service = ExpenseChatService(db, current_user)
     return await service.clear_history(current_user.id, session_id=session_id)
 
 
@@ -87,7 +87,7 @@ async def stream_chat(
 ) -> StreamingResponse:
     if not body.message.strip():
         raise HTTPException(status_code=400, detail="Message is required")
-    service = ExpenseChatService(db)
+    service = ExpenseChatService(db, current_user)
     return StreamingResponse(
         service.stream_chat(current_user.id, session_id=session_id, request=body),
         media_type="text/event-stream",
@@ -105,7 +105,7 @@ async def stream_chat_summary(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
-    service = ExpenseChatService(db)
+    service = ExpenseChatService(db, current_user)
     return StreamingResponse(
         service.stream_summary(current_user.id, request=body),
         media_type="text/event-stream",
