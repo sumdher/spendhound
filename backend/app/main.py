@@ -39,7 +39,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    from app.api import admin, analytics, auth, budgets, categories, chat, expenses, monthly_reports, receipts
+    from app.api import admin, analytics, auth, budgets, categories, chat, expenses, llm_models, monthly_reports, ollama, receipts
 
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
     app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
@@ -50,6 +50,8 @@ def create_app() -> FastAPI:
     app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
     app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
     app.include_router(monthly_reports.router, prefix="/api/monthly-reports", tags=["monthly-reports"])
+    app.include_router(ollama.router)
+    app.include_router(llm_models.router)
 
     @app.get("/health", tags=["health"])
     async def health_check() -> dict[str, str]:

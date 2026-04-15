@@ -1,5 +1,7 @@
 """Authentication API router for SpendHound."""
 
+from datetime import datetime, timezone
+
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from google.auth.transport import requests as google_requests
@@ -13,8 +15,9 @@ from app.config import settings
 from app.database import get_db
 from app.middleware.auth import create_access_token, get_any_user, get_current_user
 from app.models.user import User
-from app.schemas.user import UserReceiptPromptUpdateRequest, UserResponse, UserUpdateRequest
+from app.schemas.user import LLMTestRequest, LLMTestResponse, UserLLMSettingsUpdateRequest, UserReceiptPromptUpdateRequest, UserResponse, UserUpdateRequest
 from app.services.email import send_approval_request_email
+from app.services.llm.encryption import encrypt_api_key
 from app.services.spendhound import ensure_default_categories
 
 router = APIRouter()
@@ -41,6 +44,10 @@ def serialize_user_profile(user: User) -> UserResponse:
         is_admin=is_admin_email(user.email),
         automatic_monthly_reports=user.automatic_monthly_reports,
         receipt_prompt_override=user.receipt_prompt_override,
+        llm_provider=user.llm_provider,
+        llm_model=user.llm_model,
+        llm_base_url=user.llm_base_url,
+        has_llm_api_key=bool(user.llm_api_key),
         created_at=user.created_at,
     )
 
@@ -129,6 +136,69 @@ async def update_receipt_prompt(
     await db.commit()
     await db.refresh(current_user)
     return serialize_user_profile(current_user)
+
+
+@router.patch("/me/llm-settings", response_model=UserResponse)
+async def update_llm_settings(
+    body: UserLLMSettingsUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Update the current user's LLM provider settings and API key."""
+    if body.llm_provider is not None:
+        current_user.llm_provider = body.llm_provider or None
+    if body.llm_model is not None:
+        current_user.llm_model = body.llm_model or None
+    if body.llm_base_url is not None:
+        current_user.llm_base_url = body.llm_base_url or None
+
+    if body.clear_api_key:
+        current_user.llm_api_key = None
+    elif body.llm_api_key:
+        current_user.llm_api_key = encrypt_api_key(body.llm_api_key)
+
+    current_user.updated_at = datetime.now(timezone.utc)
+    db.add(current_user)
+    await db.commit()
+    await db.refresh(current_user)
+    return serialize_user_profile(current_user)
+
+
+@router.post("/me/test-llm", response_model=LLMTestResponse)
+async def test_llm_settings(
+    body: LLMTestRequest,
+    current_user: User = Depends(get_current_user),
+) -> LLMTestResponse:
+    """Test LLM settings without saving them. Used by the settings page."""
+    try:
+        from app.services.llm.base import LLMConfig, Message
+        from app.services.llm.factory import get_llm_provider, resolve_user_llm_config
+
+        # Build request-level config from form inputs
+        # This does NOT save anything to the DB
+        request_config = None
+        if any([body.provider, body.model, body.api_key, body.base_url]):
+            request_config = LLMConfig(
+                provider=body.provider,
+                model=body.model,
+                api_key=body.api_key,
+                base_url=body.base_url,
+            )
+
+        # Resolve final config using the same priority chain as real calls
+        # This means: form values > user's stored DB key > admin .env fallback
+        llm_config = resolve_user_llm_config(current_user, request_config)
+        provider = get_llm_provider(llm_config)
+
+        # Send a short test message
+        messages = [
+            Message(role="user", content="Say hi and bark like a dog! Keep it short (1 sentence).")
+        ]
+        response_text = await provider.complete(messages, llm_config)
+        return LLMTestResponse(success=True, response=response_text)
+
+    except Exception as e:
+        return LLMTestResponse(success=False, error=str(e))
 
 
 @router.get("/status")

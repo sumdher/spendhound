@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { deleteExpense, exportExpenses, listCategories, listExpenses, type Category, type Expense } from "@/lib/api";
 import { currentMonthString, formatCurrency, formatDate, formatSignedCurrency, monthLabel, recentMonthOptions, shiftMonth, transactionCadenceLabel, transactionTypeLabel, triggerDownload } from "@/lib/utils";
+import { convertToBase, fetchAndStoreRates, getDefaultCurrency, getStoredRates, getStoredRatesUpdatedAt } from "@/lib/fx-rates";
 
 function cadenceBadgeClasses(cadence: string) {
   switch (cadence) {
@@ -23,6 +24,27 @@ function transactionTypeBadgeClasses(transactionType: string) {
   return transactionType === "credit" ? "bg-emerald-500/15 text-emerald-400" : "bg-orange-500/15 text-orange-300";
 }
 
+const CADENCE_ORDER: Record<string, number> = {
+  one_time: 0,
+  monthly: 1,
+  custom: 2,
+  prepaid: 3,
+  yearly: 4,
+};
+
+function RefreshIcon({ spinning }: { spinning: boolean }) {
+  return spinning ? (
+    <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  ) : (
+    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+  );
+}
+
 export default function ExpensesPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -35,6 +57,13 @@ export default function ExpensesPage() {
   const [reviewOnly, setReviewOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [fxRates, setFxRates] = useState<Record<string, number>>(() => getStoredRates());
+  const [fxUpdatedAt, setFxUpdatedAt] = useState<string | null>(() => getStoredRatesUpdatedAt());
+  const [fxLoading, setFxLoading] = useState(false);
+  const [fxError, setFxError] = useState<string | null>(null);
+  const [defaultCurrency] = useState<string>(() => getDefaultCurrency());
+  const [sortField, setSortField] = useState<"date" | "merchant" | "type" | "cadence" | "category" | "amount" | "status">("date");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
   const monthParam = searchParams.get("month");
   const isAllTime = monthParam === "all";
@@ -76,19 +105,27 @@ export default function ExpensesPage() {
   const byCurrency = useMemo(() => {
     const map: Record<string, { moneyIn: number; moneyOut: number }> = {};
     for (const item of expenses) {
-      const cur = item.currency || "EUR";
+      const cur = item.currency || defaultCurrency;
       if (!map[cur]) map[cur] = { moneyIn: 0, moneyOut: 0 };
       if (item.transaction_type === "credit") map[cur].moneyIn += item.amount;
       else map[cur].moneyOut += item.amount;
     }
-    // EUR first, then descending by total volume
-    const sorted = Object.entries(map).sort(([a], [b]) => a === "EUR" ? -1 : b === "EUR" ? 1 : 0);
+    // default currency first, then descending by total volume
+    const sorted = Object.entries(map).sort(([a], [b]) => a === defaultCurrency ? -1 : b === defaultCurrency ? 1 : 0);
     return {
       moneyOutEntries: sorted.filter(([, v]) => v.moneyOut > 0),
       moneyInEntries: sorted.filter(([, v]) => v.moneyIn > 0),
       netEntries: sorted.map(([currency, { moneyIn, moneyOut }]) => ({ currency, net: moneyIn - moneyOut })).filter(({ net }) => net !== 0 || sorted.length === 1),
     };
-  }, [expenses]);
+  }, [expenses, defaultCurrency]);
+
+  const detectedCurrencies = useMemo<string[]>(() => {
+    const seen = new Set<string>();
+    for (const e of expenses) {
+      if (e.currency && e.currency !== defaultCurrency) seen.add(e.currency);
+    }
+    return Array.from(seen).sort();
+  }, [expenses, defaultCurrency]);
 
   async function handleDelete(id: string) {
     if (!window.confirm("Delete this expense?")) return;
@@ -102,6 +139,63 @@ export default function ExpensesPage() {
     const blob = await exportExpenses(format, exportMonth);
     triggerDownload(blob, `spendhound-transactions-${fileMonth}.${format === "json" ? "json" : "csv"}`);
   }
+
+  async function handleUpdateRates() {
+    if (detectedCurrencies.length === 0) return;
+    setFxLoading(true);
+    setFxError(null);
+    try {
+      const newRates = await fetchAndStoreRates(detectedCurrencies, defaultCurrency);
+      setFxRates(newRates);
+      setFxUpdatedAt(getStoredRatesUpdatedAt());
+    } catch {
+      setFxError("Could not fetch rates");
+    } finally {
+      setFxLoading(false);
+    }
+  }
+
+  const handleSort = useCallback((field: "date" | "merchant" | "type" | "cadence" | "category" | "amount" | "status") => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDirection("asc");
+    }
+  }, [sortField]);
+
+  const sortedExpenses = useMemo(() => {
+    const arr = [...expenses];
+    arr.sort((a, b) => {
+      let cmp = 0;
+      switch (sortField) {
+        case "date":
+          cmp = a.expense_date.localeCompare(b.expense_date);
+          break;
+        case "merchant":
+          cmp = (a.merchant ?? "").toLowerCase().localeCompare((b.merchant ?? "").toLowerCase());
+          break;
+        case "type":
+          cmp = a.transaction_type.localeCompare(b.transaction_type);
+          break;
+        case "cadence":
+          cmp = (CADENCE_ORDER[a.cadence] ?? 99) - (CADENCE_ORDER[b.cadence] ?? 99);
+          break;
+        case "category":
+          cmp = (a.category_name ?? "").toLowerCase().localeCompare((b.category_name ?? "").toLowerCase());
+          break;
+        case "amount":
+          cmp = convertToBase(a.amount, a.currency, defaultCurrency, fxRates) - convertToBase(b.amount, b.currency, defaultCurrency, fxRates);
+          break;
+        case "status":
+          // asc = untracked (needs_review=true) first, then tracked
+          cmp = (b.needs_review ? 1 : 0) - (a.needs_review ? 1 : 0);
+          break;
+      }
+      return sortDirection === "asc" ? cmp : -cmp;
+    });
+    return arr;
+  }, [expenses, sortField, sortDirection, fxRates, defaultCurrency]);
 
   const detailMonthParam = isAllTime ? "all" : month && month !== currentMonthString() ? month : null;
 
@@ -219,25 +313,93 @@ export default function ExpensesPage() {
           </div>
         </div>
 
+        {detectedCurrencies.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-2.5">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span>Amount sort — {defaultCurrency}-equivalent values</span>
+              <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tracking-wide">
+                {detectedCurrencies.join(" · ")}
+              </span>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                {fxUpdatedAt ? (
+                  <p className="text-xs text-muted-foreground">
+                    Rates updated {new Date(fxUpdatedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Using default rates</p>
+                )}
+                {fxError && <p className="text-xs text-red-400 mt-0.5">{fxError}</p>}
+              </div>
+              <button
+                type="button"
+                onClick={handleUpdateRates}
+                disabled={fxLoading}
+                title="Fetch live ECB rates for detected currencies"
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshIcon spinning={fxLoading} />
+                Update rates
+              </button>
+            </div>
+          </div>
+        )}
+
         {error ? <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{error}</div> : null}
         {loading ? <div className="py-20 text-center text-muted-foreground">Loading transactions…</div> : expenses.length === 0 ? <div className="py-20 text-center text-muted-foreground">No transactions found for the current filters.</div> : (
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead className="border-b border-border text-left text-muted-foreground">
                 <tr>
-                  <th className="py-3 pr-4">Date</th>
-                  <th className="py-3 pr-4">Merchant</th>
-                  <th className="py-3 pr-4">Type</th>
-                  <th className="py-3 pr-4">Cadence</th>
-                  <th className="py-3 pr-4">Category</th>
+                  <th className="py-3 pr-4 cursor-pointer select-none hover:text-foreground" onClick={() => handleSort("date")}>
+                    <span className="inline-flex items-center gap-1">
+                      <span className={sortField === "date" ? "font-bold text-foreground" : ""}>Date</span>
+                      {sortField === "date" ? <span className="text-xs">{sortDirection === "asc" ? "↑" : "↓"}</span> : <span className="text-xs opacity-30">↕</span>}
+                    </span>
+                  </th>
+                  <th className="py-3 pr-4 cursor-pointer select-none hover:text-foreground" onClick={() => handleSort("merchant")}>
+                    <span className="inline-flex items-center gap-1">
+                      <span className={sortField === "merchant" ? "font-bold text-foreground" : ""}>Merchant</span>
+                      {sortField === "merchant" ? <span className="text-xs">{sortDirection === "asc" ? "↑" : "↓"}</span> : <span className="text-xs opacity-30">↕</span>}
+                    </span>
+                  </th>
+                  <th className="py-3 pr-4 cursor-pointer select-none hover:text-foreground" onClick={() => handleSort("type")}>
+                    <span className="inline-flex items-center gap-1">
+                      <span className={sortField === "type" ? "font-bold text-foreground" : ""}>Type</span>
+                      {sortField === "type" ? <span className="text-xs">{sortDirection === "asc" ? "↑" : "↓"}</span> : <span className="text-xs opacity-30">↕</span>}
+                    </span>
+                  </th>
+                  <th className="py-3 pr-4 cursor-pointer select-none hover:text-foreground" onClick={() => handleSort("cadence")}>
+                    <span className="inline-flex items-center gap-1">
+                      <span className={sortField === "cadence" ? "font-bold text-foreground" : ""}>Cadence</span>
+                      {sortField === "cadence" ? <span className="text-xs">{sortDirection === "asc" ? "↑" : "↓"}</span> : <span className="text-xs opacity-30">↕</span>}
+                    </span>
+                  </th>
+                  <th className="py-3 pr-4 cursor-pointer select-none hover:text-foreground" onClick={() => handleSort("category")}>
+                    <span className="inline-flex items-center gap-1">
+                      <span className={sortField === "category" ? "font-bold text-foreground" : ""}>Category</span>
+                      {sortField === "category" ? <span className="text-xs">{sortDirection === "asc" ? "↑" : "↓"}</span> : <span className="text-xs opacity-30">↕</span>}
+                    </span>
+                  </th>
                   <th className="py-3 pr-4">Source</th>
-                  <th className="py-3 pr-4">Amount</th>
-                  <th className="py-3 pr-4">Status</th>
+                  <th className="py-3 pr-4 cursor-pointer select-none hover:text-foreground" onClick={() => handleSort("amount")}>
+                    <span className="inline-flex items-center gap-1">
+                      <span className={sortField === "amount" ? "font-bold text-foreground" : ""}>Amount</span>
+                      {sortField === "amount" ? <span className="text-xs">{sortDirection === "asc" ? "↑" : "↓"}</span> : <span className="text-xs opacity-30">↕</span>}
+                    </span>
+                  </th>
+                  <th className="py-3 pr-4 cursor-pointer select-none hover:text-foreground" onClick={() => handleSort("status")}>
+                    <span className="inline-flex items-center gap-1">
+                      <span className={sortField === "status" ? "font-bold text-foreground" : ""}>Status</span>
+                      {sortField === "status" ? <span className="text-xs">{sortDirection === "asc" ? "↑" : "↓"}</span> : <span className="text-xs opacity-30">↕</span>}
+                    </span>
+                  </th>
                   <th className="py-3 pr-0 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {expenses.map((expense) => {
+                {sortedExpenses.map((expense) => {
                   const detailHref = detailMonthParam ? `/expenses/${expense.id}?month=${detailMonthParam}` : `/expenses/${expense.id}`;
                   const editHref = detailMonthParam ? `/expenses/${expense.id}?month=${detailMonthParam}&mode=edit` : `/expenses/${expense.id}?mode=edit`;
                   return (

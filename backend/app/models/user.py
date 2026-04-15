@@ -23,6 +23,10 @@ class User(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
     automatic_monthly_reports: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
     receipt_prompt_override: Mapped[str | None] = mapped_column(Text, nullable=True)
+    llm_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    llm_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    llm_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    llm_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

@@ -21,7 +21,7 @@ from sqlalchemy import select
 from app.config import settings
 from app.models.user import User
 from app.services.llm.base import ImageInput, LLMConfig, Message
-from app.services.llm.factory import get_llm_provider
+from app.services.llm.factory import get_llm_provider, resolve_user_llm_config
 from app.services.spendhound import TRANSACTION_TYPE_CREDIT, TRANSACTION_TYPE_DEBIT, find_matching_category, get_category_by_name, normalize_grocery_description, normalize_match_text, normalize_transaction_type, resolve_category
 
 
@@ -890,26 +890,28 @@ async def llm_statement_preview(text: str, filename: str, llm_config: LLMConfig 
 
 async def build_receipt_preview(
     db,
-    user_id: uuid.UUID,
+    user: User,
     *,
     storage_path: str,
     content_type: str | None,
     filename: str,
     llm_config: LLMConfig | None,
 ) -> ReceiptExtractionResult:
+    # Resolve the effective LLM config: user's stored key > admin env fallback > error
+    effective_config = resolve_user_llm_config(user, llm_config)
+
     extracted_text: str | None = None
     used_text_fallback = False
-    prompt_override_result = await db.execute(select(User.receipt_prompt_override).where(User.id == user_id).limit(1))
-    prompt_override = prompt_override_result.scalar_one_or_none()
+    # Use the user's own prompt override if set; otherwise fall back to admin's global default
+    prompt_override = user.receipt_prompt_override
     if not prompt_override:
-        # Fall back to admin's prompt (acts as the global default)
         admin_email = settings.admin_email
         if admin_email:
             admin_prompt_result = await db.execute(
                 select(User.receipt_prompt_override).where(User.email == admin_email).limit(1)
             )
             prompt_override = admin_prompt_result.scalar_one_or_none()
-    preview = await llm_receipt_preview_from_image(storage_path, filename, content_type, llm_config, prompt_override)
+    preview = await llm_receipt_preview_from_image(storage_path, filename, content_type, effective_config, prompt_override)
     if preview is None:
         logger.info(
             "receipt_extraction.using_text_fallback",
@@ -918,7 +920,7 @@ async def build_receipt_preview(
         )
         extracted_text = await extract_text_from_file(storage_path, content_type)
         used_text_fallback = bool(extracted_text.strip()) or not _is_supported_image(content_type, filename)
-        preview = await llm_receipt_preview(extracted_text, filename, llm_config, prompt_override)
+        preview = await llm_receipt_preview(extracted_text, filename, effective_config, prompt_override)
         if preview is None:
             logger.info(
                 "receipt_extraction.using_rule_based_fallback",
@@ -928,26 +930,29 @@ async def build_receipt_preview(
             )
             preview = fallback_preview_from_text(extracted_text, filename)
     if preview.category_name is None and preview.merchant:
-        category = await resolve_category(db, user_id, merchant=preview.merchant, transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT)
+        category = await resolve_category(db, user.id, merchant=preview.merchant, transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT)
         if category is not None:
             preview.category_name = category.name
             preview.confidence = max(preview.confidence, 0.72)
-    preview = await _apply_receipt_category_heuristics(db, user_id, preview, context_text=extracted_text)
+    preview = await _apply_receipt_category_heuristics(db, user.id, preview, context_text=extracted_text)
     preview = _finalize_preview_model(preview, filename=filename, context_text=extracted_text)
     return ReceiptExtractionResult(preview=preview, extracted_text=extracted_text, used_text_fallback=used_text_fallback)
 
 
 async def build_statement_preview(
     db,
-    user_id: uuid.UUID,
+    user: User,
     *,
     storage_path: str,
     content_type: str | None,
     filename: str,
     llm_config: LLMConfig | None,
 ) -> ReceiptExtractionResult:
+    # Resolve the effective LLM config: user's stored key > admin env fallback > error
+    effective_config = resolve_user_llm_config(user, llm_config)
+
     extracted_text = await extract_text_from_file(storage_path, content_type)
-    preview = await llm_statement_preview(extracted_text, filename, llm_config)
+    preview = await llm_statement_preview(extracted_text, filename, effective_config)
     if preview is None:
         logger.info("receipt_extraction.using_statement_fallback", filename=filename, content_type=content_type)
         preview = fallback_statement_preview_from_text(extracted_text, filename)
@@ -955,7 +960,7 @@ async def build_statement_preview(
     for entry in preview.entries:
         payload = entry.model_dump()
         if payload.get("category_name") is None and payload.get("merchant"):
-            category = await resolve_category(db, user_id, merchant=payload["merchant"], transaction_type=payload.get("transaction_type") or TRANSACTION_TYPE_DEBIT)
+            category = await resolve_category(db, user.id, merchant=payload["merchant"], transaction_type=payload.get("transaction_type") or TRANSACTION_TYPE_DEBIT)
             if category is not None:
                 payload["category_name"] = category.name
                 payload["confidence"] = max(float(payload.get("confidence") or 0.45), 0.72)
