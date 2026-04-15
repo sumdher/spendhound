@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -18,10 +18,12 @@ from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.models.category import Category
 from app.models.expense import Expense
+from app.models.expense_item import ExpenseItem
 from app.models.receipt import Receipt
 from app.models.user import User
+from app.services.item_rag import upsert_item_embedding
 from app.services.report_exports import build_expense_export_payload
-from app.services.spendhound import CADENCE_ONE_TIME, TRANSACTION_TYPE_DEBIT, apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_cadence, normalize_money, normalize_recurring_settings, normalize_transaction_type, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_receipt
+from app.services.spendhound import CADENCE_CUSTOM, CADENCE_ONE_TIME, CADENCE_PREPAID, TRANSACTION_TYPE_DEBIT, apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_cadence, normalize_money, normalize_recurring_settings, normalize_transaction_type, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_item_rule, serialize_receipt, upsert_item_keyword_rule_from_correction
 
 router = APIRouter()
 
@@ -33,6 +35,32 @@ def _parse_cadence_override(value: str | None) -> str | None:
     if cleaned in {"", "auto", "automatic", "detect", "detected"}:
         return None
     return normalize_cadence(value)
+
+
+def _resolve_cadence_fields(
+    cadence_str: str | None,
+    *,
+    cadence_interval: int | None,
+    prepaid_months: int | None,
+    prepaid_start_date_str: str | None,
+    expense_date_str: str,
+) -> tuple[int | None, int | None, "date | None"]:
+    """Return (cadence_interval, prepaid_months, prepaid_start_date) cleaned by cadence type."""
+    resolved_cadence = normalize_cadence(cadence_str)
+    if resolved_cadence == CADENCE_CUSTOM:
+        interval = cadence_interval or 3
+        if interval < 2:
+            raise HTTPException(status_code=422, detail="cadence_interval must be at least 2 for custom cadence")
+        return interval, None, None
+    if resolved_cadence == CADENCE_PREPAID:
+        months = prepaid_months or 12
+        start_str = prepaid_start_date_str or expense_date_str
+        try:
+            start = datetime.fromisoformat(start_str).date()
+        except ValueError:
+            start = datetime.fromisoformat(expense_date_str).date()
+        return None, months, start
+    return None, None, None
 
 
 def _normalize_major_purchase(value: bool | None, *, transaction_type: str) -> bool:
@@ -72,6 +100,9 @@ class ExpenseCreate(BaseModel):
     notes: str | None = None
     items: list[dict] | None = None
     cadence: str | None = None
+    cadence_interval: int | None = None      # for cadence="custom", must be >= 2
+    prepaid_months: int | None = None        # for cadence="prepaid"
+    prepaid_start_date: str | None = None    # ISO date; defaults to expense_date for prepaid
     recurring_variable: bool = False
     recurring_auto_add: bool = False
     is_major_purchase: bool = False
@@ -89,6 +120,9 @@ class ExpenseUpdate(BaseModel):
     notes: str | None = None
     needs_review: bool | None = None
     cadence: str | None = None
+    cadence_interval: int | None = None
+    prepaid_months: int | None = None
+    prepaid_start_date: str | None = None
     recurring_variable: bool | None = None
     recurring_auto_add: bool | None = None
     is_major_purchase: bool | None = None
@@ -165,6 +199,13 @@ async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_c
     await ensure_default_categories(db, current_user.id)
     transaction_type = normalize_transaction_type(body.transaction_type)
     cadence_override = _parse_cadence_override(body.cadence)
+    resolved_interval, resolved_prepaid_months, resolved_prepaid_start = _resolve_cadence_fields(
+        cadence_override,
+        cadence_interval=body.cadence_interval,
+        prepaid_months=body.prepaid_months,
+        prepaid_start_date_str=body.prepaid_start_date,
+        expense_date_str=body.expense_date,
+    )
     recurring_variable, recurring_auto_add = normalize_recurring_settings(
         cadence_override or CADENCE_ONE_TIME,
         recurring_variable=body.recurring_variable,
@@ -186,6 +227,9 @@ async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_c
         needs_review=expense_requires_review(category, 1.0, "manual"),
         cadence=cadence_override or CADENCE_ONE_TIME,
         cadence_override=cadence_override,
+        cadence_interval=resolved_interval,
+        prepaid_months=resolved_prepaid_months,
+        prepaid_start_date=resolved_prepaid_start,
         recurring_variable=recurring_variable,
         recurring_auto_add=recurring_auto_add,
         is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
@@ -222,6 +266,13 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
 
     transaction_type = normalize_transaction_type(body.transaction_type)
     cadence_override = _parse_cadence_override(body.cadence)
+    resolved_interval, resolved_prepaid_months, resolved_prepaid_start = _resolve_cadence_fields(
+        cadence_override,
+        cadence_interval=body.cadence_interval,
+        prepaid_months=body.prepaid_months,
+        prepaid_start_date_str=body.prepaid_start_date,
+        expense_date_str=body.expense_date,
+    )
     recurring_variable, recurring_auto_add = normalize_recurring_settings(
         cadence_override or CADENCE_ONE_TIME,
         recurring_variable=body.recurring_variable,
@@ -245,6 +296,9 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
         needs_review=expense_requires_review(category, confidence, "receipt"),
         cadence=cadence_override or CADENCE_ONE_TIME,
         cadence_override=cadence_override,
+        cadence_interval=resolved_interval,
+        prepaid_months=resolved_prepaid_months,
+        prepaid_start_date=resolved_prepaid_start,
         recurring_variable=recurring_variable,
         recurring_auto_add=recurring_auto_add,
         is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
@@ -304,6 +358,13 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
 
     transaction_type = normalize_transaction_type(body.transaction_type)
     cadence_override = _parse_cadence_override(body.cadence)
+    resolved_interval, resolved_prepaid_months, resolved_prepaid_start = _resolve_cadence_fields(
+        cadence_override,
+        cadence_interval=body.cadence_interval,
+        prepaid_months=body.prepaid_months,
+        prepaid_start_date_str=body.prepaid_start_date,
+        expense_date_str=body.expense_date,
+    )
     recurring_variable, recurring_auto_add = normalize_recurring_settings(
         cadence_override or CADENCE_ONE_TIME,
         recurring_variable=body.recurring_variable,
@@ -327,6 +388,9 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
         needs_review=expense_requires_review(category, confidence, "statement"),
         cadence=cadence_override or CADENCE_ONE_TIME,
         cadence_override=cadence_override,
+        cadence_interval=resolved_interval,
+        prepaid_months=resolved_prepaid_months,
+        prepaid_start_date=resolved_prepaid_start,
         recurring_variable=recurring_variable,
         recurring_auto_add=recurring_auto_add,
         is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
@@ -413,6 +477,22 @@ async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_use
     )
     if "cadence" in data:
         expense.cadence_override = _parse_cadence_override(data.get("cadence"))
+        # Clear cross-type fields when cadence type changes
+        if next_cadence != CADENCE_CUSTOM:
+            expense.cadence_interval = None
+        if next_cadence != CADENCE_PREPAID:
+            expense.prepaid_months = None
+            expense.prepaid_start_date = None
+    if "cadence_interval" in data and next_cadence == CADENCE_CUSTOM:
+        interval = data["cadence_interval"] or 3
+        if interval < 2:
+            raise HTTPException(status_code=422, detail="cadence_interval must be at least 2 for custom cadence")
+        expense.cadence_interval = interval
+    if "prepaid_months" in data and next_cadence == CADENCE_PREPAID:
+        expense.prepaid_months = data["prepaid_months"]
+    if "prepaid_start_date" in data and next_cadence == CADENCE_PREPAID:
+        raw_start = data.get("prepaid_start_date")
+        expense.prepaid_start_date = datetime.fromisoformat(raw_start).date() if raw_start else None
     expense.recurring_variable = recurring_variable
     expense.recurring_auto_add = recurring_auto_add
     if {"category_id", "category_name", "merchant", "transaction_type"} & set(data):
@@ -435,7 +515,7 @@ async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_use
             expense.is_major_purchase = _normalize_major_purchase(value, transaction_type=next_transaction_type)
         elif field == "cadence":
             continue
-        elif field in {"recurring_variable", "recurring_auto_add"}:
+        elif field in {"recurring_variable", "recurring_auto_add", "cadence_interval", "prepaid_months", "prepaid_start_date"}:
             continue
         elif field not in {"category_id", "category_name"}:
             setattr(expense, field, value)
@@ -464,3 +544,165 @@ async def delete_expense(expense_id: uuid.UUID, current_user: User = Depends(get
     await db.delete(expense)
     await db.flush()
     await recompute_recurring_expenses(db, current_user.id)
+
+
+class ExpenseItemUpdate(BaseModel):
+    subcategory: str | None = None
+    description: str | None = None
+    quantity: float | None = None
+    unit_price: float | None = None
+    total: float | None = None
+    # When True (default), auto-create a keyword rule + RAG embedding from this correction
+    learn: bool = True
+
+
+class ExpenseItemCreate(BaseModel):
+    description: str
+    subcategory: str | None = None
+    quantity: float | None = None
+    unit_price: float | None = None
+    total: float | None = None
+
+
+@router.patch("/{expense_id}/items/{item_id}")
+async def update_expense_item(
+    expense_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: ExpenseItemUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Correct a single item's subcategory and/or other fields.
+
+    When learn=true (default) the system:
+    1. Creates a user-specific keyword rule (contains, priority 50) so future
+       items with the same description token are matched immediately.
+    2. Stores a RAG embedding so semantically similar items are also caught.
+    Both are user-specific (is_global=False) — only admins can promote to global.
+    """
+    expense_result = await db.execute(
+        select(Expense).where(Expense.id == expense_id, Expense.user_id == current_user.id)
+    )
+    expense = expense_result.scalar_one_or_none()
+    if expense is None:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    item_result = await db.execute(
+        select(ExpenseItem).where(ExpenseItem.id == item_id, ExpenseItem.expense_id == expense_id)
+    )
+    item = item_result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=404, detail="Expense item not found")
+
+    subcategory_changed = item.subcategory != body.subcategory
+    item.subcategory = body.subcategory
+    item.subcategory_confidence = 1.0 if body.subcategory else None
+
+    if body.description is not None:
+        item.description = body.description
+    if body.quantity is not None:
+        item.quantity = body.quantity
+    if body.unit_price is not None:
+        item.unit_price = body.unit_price
+    if body.total is not None:
+        item.total_price = body.total
+
+    rule_created = None
+    if body.learn and body.subcategory and subcategory_changed and item.description:
+        # 1. Keyword rule (fast, deterministic)
+        new_rule = await upsert_item_keyword_rule_from_correction(
+            db,
+            user_id=current_user.id,
+            description=item.description,
+            subcategory_label=body.subcategory,
+        )
+        if new_rule is not None:
+            rule_created = serialize_item_rule(new_rule)
+        # 2. RAG embedding (semantic, async — fire and don't block on failure)
+        await upsert_item_embedding(
+            db,
+            description=item.description,
+            subcategory_label=body.subcategory,
+            user_id=current_user.id,
+            is_global=False,
+            source="correction",
+            notes=f"Corrected on expense {expense_id}",
+        )
+
+    await db.flush()
+    return {
+        "item": {
+            "id": str(item.id),
+            "description": item.description,
+            "subcategory": item.subcategory,
+            "subcategory_confidence": item.subcategory_confidence,
+            "quantity": item.quantity,
+            "unit_price": float(item.unit_price) if item.unit_price is not None else None,
+            "total": float(item.total_price) if item.total_price is not None else None,
+        },
+        "rule_created": rule_created,
+    }
+
+
+@router.post("/{expense_id}/items")
+async def create_expense_item(
+    expense_id: uuid.UUID,
+    body: ExpenseItemCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Create a new line item linked to the given expense."""
+    expense_result = await db.execute(
+        select(Expense).where(Expense.id == expense_id, Expense.user_id == current_user.id)
+    )
+    expense = expense_result.scalar_one_or_none()
+    if expense is None:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    item = ExpenseItem(
+        expense_id=expense_id,
+        description=body.description,
+        subcategory=body.subcategory,
+        quantity=body.quantity,
+        unit_price=body.unit_price,
+        total_price=body.total,
+    )
+    db.add(item)
+    await db.flush()
+    await db.refresh(item)
+    return {
+        "id": str(item.id),
+        "description": item.description,
+        "subcategory": item.subcategory,
+        "subcategory_confidence": item.subcategory_confidence,
+        "quantity": item.quantity,
+        "unit_price": float(item.unit_price) if item.unit_price is not None else None,
+        "total": float(item.total_price) if item.total_price is not None else None,
+    }
+
+
+@router.delete("/{expense_id}/items/{item_id}")
+async def delete_expense_item(
+    expense_id: uuid.UUID,
+    item_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Delete a single line item from the given expense."""
+    expense_result = await db.execute(
+        select(Expense).where(Expense.id == expense_id, Expense.user_id == current_user.id)
+    )
+    expense = expense_result.scalar_one_or_none()
+    if expense is None:
+        raise HTTPException(status_code=404, detail="Expense not found")
+
+    item_result = await db.execute(
+        select(ExpenseItem).where(ExpenseItem.id == item_id, ExpenseItem.expense_id == expense_id)
+    )
+    item = item_result.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=404, detail="Expense item not found")
+
+    await db.delete(item)
+    await db.flush()
+    return {"ok": True}

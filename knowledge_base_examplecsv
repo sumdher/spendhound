@@ -1,0 +1,37 @@
+# Format: description,Subcategory
+
+# DON'T: add a header row — the parser treats every non-# line as data
+# DON'T: use no quotes around the words
+# DO: use raw receipt abbreviations as they appear
+# DO: use the shortest unique prefix that unambiguously identifies the product category
+# tab-separated is accepted in case your spreadsheet exports that way 
+
+# Use the brand name alone when you buy many variants: PARMALAT, BARILLA, MULINO BIANCO
+# The RAG system uses semantic embedding similarity, not exact matching — so, for example, `PARMALAT` alone is enough. 
+# The embedding model understands that `PARMALAT B12 1.5L` is semantically close to `PARMALAT`. You don't need to enumerate every variant.
+
+# Use the generic Italian noun when brandless: LATTE, PANE, UOVA, POMODORI
+
+BISCOTTI,Snacks
+PARMALAT,Dairy & Eggs
+PANE,Bakery
+LATTE,Dairy & Eggs
+MOZZAREL,Dairy & Eggs
+POMODOR,Vegetables
+BANAN,Fruit
+PROSCIUTTO,Meat
+SALMONE,Fish & Seafood
+LAVATRICE,Cleaning Products
+DOVE,Personal Care
+BARILLA,Pantry
+OLIO,Condiments & Spices
+PATATINE,Snacks
+LAYS,Snacks
+ACQUA NATUR,Beverages
+YOGURT,Dairy & Eggs
+DIGES. MCVITIE'S,Snacks
+
+
+# Can DO: include variant spellings and truncations for the same item
+MCVITIE,Snacks
+MCVITIE'S DIGESTIV,Snacks

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime
 
 import structlog
 from sqlalchemy import func, select
@@ -14,7 +14,7 @@ from app.models.budget import Budget
 from app.models.category import Category
 from app.models.expense import Expense
 from app.models.expense_item import ExpenseItem
-from app.services.spendhound import CADENCE_ONE_TIME, TRANSACTION_TYPE_CREDIT, TRANSACTION_TYPE_DEBIT, derive_grocery_subcategory, month_start_from_string, next_month, serialize_budget, signed_amount
+from app.services.spendhound import CADENCE_ONE_TIME, CADENCE_PREPAID, TRANSACTION_TYPE_CREDIT, TRANSACTION_TYPE_DEBIT, _compute_prepaid_end_date, derive_grocery_subcategory, month_start_from_string, next_month, serialize_budget, signed_amount
 
 logger = structlog.get_logger(__name__)
 
@@ -122,6 +122,17 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
     money_in = round(sum(float(expense.amount) for expense, _ in expense_rows if expense.transaction_type == TRANSACTION_TYPE_CREDIT), 2)
     monthly_total = money_out
     net_total = round(money_in - money_out, 2)
+
+    money_out_by_currency: dict[str, float] = defaultdict(float)
+    money_in_by_currency: dict[str, float] = defaultdict(float)
+    for expense, _ in expense_rows:
+        cur = expense.currency or "EUR"
+        if expense.transaction_type == TRANSACTION_TYPE_DEBIT:
+            money_out_by_currency[cur] += float(expense.amount)
+        else:
+            money_in_by_currency[cur] += float(expense.amount)
+    all_currencies = set(list(money_out_by_currency.keys()) + list(money_in_by_currency.keys()))
+    net_by_currency = {cur: round(money_in_by_currency.get(cur, 0.0) - money_out_by_currency.get(cur, 0.0), 2) for cur in all_currencies}
     transaction_count = len(expense_rows)
     debit_count = sum(1 for expense, _ in expense_rows if expense.transaction_type == TRANSACTION_TYPE_DEBIT)
     credit_count = sum(1 for expense, _ in expense_rows if expense.transaction_type == TRANSACTION_TYPE_CREDIT)
@@ -209,6 +220,50 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
 
     grocery_insights = await _build_grocery_insights(db, user_id, selected_month, month_end)
 
+    # Prepaid subscriptions — query all time (not month-scoped), coverage window computed from today
+    prepaid_result = await db.execute(
+        select(Expense, Category.name)
+        .outerjoin(Category, Category.id == Expense.category_id)
+        .where(
+            Expense.user_id == user_id,
+            Expense.cadence == CADENCE_PREPAID,
+            Expense.transaction_type == TRANSACTION_TYPE_DEBIT,
+        )
+        .order_by(Expense.expense_date.desc())
+    )
+    today = datetime.now().date()
+    prepaid_subscriptions = []
+    for prepaid_expense, prepaid_cat_name in prepaid_result.all():
+        end_date_str = _compute_prepaid_end_date(prepaid_expense)
+        if not end_date_str:
+            continue
+        end_date = date.fromisoformat(end_date_str)
+        days_remaining = (end_date - today).days
+        if days_remaining < -30:
+            continue  # expired more than 30 days ago — suppress
+        if days_remaining < 0:
+            status = "expired"
+        elif days_remaining <= 30:
+            status = "expiring_soon"
+        else:
+            status = "active"
+        start = prepaid_expense.prepaid_start_date or prepaid_expense.expense_date
+        prepaid_subscriptions.append(
+            {
+                "id": str(prepaid_expense.id),
+                "merchant": prepaid_expense.merchant,
+                "amount": float(prepaid_expense.amount),
+                "currency": prepaid_expense.currency,
+                "expense_date": prepaid_expense.expense_date.isoformat(),
+                "category_name": prepaid_cat_name or "Uncategorized",
+                "prepaid_months": prepaid_expense.prepaid_months or 0,
+                "prepaid_start_date": start.isoformat(),
+                "prepaid_end_date": end_date_str,
+                "days_remaining": days_remaining,
+                "status": status,
+            }
+        )
+
     return {
         "month": selected_month.strftime("%Y-%m"),
         "summary": {
@@ -217,6 +272,9 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
             "money_in": money_in,
             "money_out": money_out,
             "net": net_total,
+            "money_out_by_currency": {k: round(v, 2) for k, v in sorted(money_out_by_currency.items(), key=lambda item: (item[0] != "EUR", -item[1]))},
+            "money_in_by_currency": {k: round(v, 2) for k, v in sorted(money_in_by_currency.items(), key=lambda item: (item[0] != "EUR", -item[1]))},
+            "net_by_currency": {k: v for k, v in sorted(net_by_currency.items(), key=lambda item: item[0] != "EUR")},
             "transaction_count": transaction_count,
             "average_transaction": average_transaction,
             "average_outflow": average_transaction,
@@ -252,6 +310,7 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
         "recurring_transactions": recurring_items,
         "recurring_expenses": recurring_items,
         "major_one_time_purchases": sorted(major_one_time_purchases, key=lambda item: item["amount"], reverse=True)[:6],
+        "prepaid_subscriptions": prepaid_subscriptions,
         "budgets": budgets,
         "grocery_insights": grocery_insights,
     }
