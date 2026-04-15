@@ -251,6 +251,10 @@ export interface Expense {
   recurring_source_expense_id?: string | null;
   auto_generated: boolean;
   generated_for_month?: string | null;
+  cadence_interval?: number | null;
+  prepaid_months?: number | null;
+  prepaid_start_date?: string | null;
+  prepaid_end_date?: string | null;
   is_major_purchase: boolean;
   category_id?: string | null;
   category_name?: string | null;
@@ -290,6 +294,9 @@ export interface DashboardAnalytics {
     money_in: number;
     money_out: number;
     net: number;
+    money_out_by_currency: Record<string, number>;
+    money_in_by_currency: Record<string, number>;
+    net_by_currency: Record<string, number>;
     transaction_count: number;
     average_transaction: number;
     average_outflow: number;
@@ -336,6 +343,19 @@ export interface DashboardAnalytics {
     category_name: string;
     cadence: string;
     is_major_purchase: boolean;
+  }>;
+  prepaid_subscriptions: Array<{
+    id: string;
+    merchant: string;
+    amount: number;
+    currency: string;
+    expense_date: string;
+    category_name: string;
+    prepaid_months: number;
+    prepaid_start_date: string;
+    prepaid_end_date: string;
+    days_remaining: number;
+    status: "active" | "expiring_soon" | "expired";
   }>;
   budgets: Budget[];
   grocery_insights: {
@@ -668,9 +688,18 @@ export async function deleteItemKeywordRule(id: string): Promise<void> {
 
 // ── Knowledge base (RAG embeddings) ──────────────────────────────────────────
 
-export async function listKnowledgeBase(isGlobal?: boolean): Promise<KnowledgeBaseEntry[]> {
-  const query = isGlobal !== undefined ? `?is_global=${isGlobal}` : "";
+export async function listKnowledgeBase(isGlobal?: boolean, source?: string): Promise<KnowledgeBaseEntry[]> {
+  const params = new URLSearchParams();
+  if (isGlobal !== undefined) params.set("is_global", String(isGlobal));
+  if (source !== undefined) params.set("source", source);
+  const query = params.size ? `?${params.toString()}` : "";
   return apiFetch<KnowledgeBaseEntry[]>(`/api/categories/knowledge-base${query}`);
+}
+
+export async function listLearntEntries(): Promise<KnowledgeBaseEntry[]> {
+  return apiFetch<KnowledgeBaseEntry[]>(
+    "/api/categories/knowledge-base?source=correction&is_global=false"
+  );
 }
 
 export async function uploadKnowledgeBase(file: File, isGlobal: boolean): Promise<{ total_parsed: number; inserted: number }> {

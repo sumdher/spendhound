@@ -289,6 +289,7 @@ def _serialize_kb_entry(entry: ItemEmbedding) -> dict:
 @router.get("/knowledge-base")
 async def list_knowledge_base(
     is_global: bool | None = Query(default=None),
+    source: str | None = Query(default=None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[dict]:
@@ -301,6 +302,8 @@ async def list_knowledge_base(
     )
     if is_global is not None:
         stmt = stmt.where(ItemEmbedding.is_global == is_global)
+    if source is not None:
+        stmt = stmt.where(ItemEmbedding.source == source)
     stmt = stmt.order_by(ItemEmbedding.is_global.desc(), ItemEmbedding.created_at.desc())
     result = await db.execute(stmt)
     return [_serialize_kb_entry(e) for e in result.scalars().all()]

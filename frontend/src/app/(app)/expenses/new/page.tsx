@@ -11,6 +11,9 @@ type ExpenseFormState = {
   amount: string;
   transaction_type: string;
   cadence: string;
+  cadence_interval: number;
+  prepaid_months: number;
+  prepaid_start_date: string;
   recurring_variable: boolean;
   recurring_auto_add: boolean;
   is_major_purchase: boolean;
@@ -52,6 +55,44 @@ const RECEIPT_TAB = "upload-receipt";
 const STATEMENT_TAB = "import-statement";
 const ITEM_QUANTITY_OPTIONS = ["1", "2", "3", "4", "5", "6", "8", "10"];
 
+const DEFAULT_CURRENCY = "EUR";
+const COMMON_CURRENCIES = [
+  { code: "EUR", symbol: "€", name: "Euro" },
+  { code: "USD", symbol: "$", name: "US Dollar" },
+  { code: "GBP", symbol: "£", name: "British Pound" },
+  { code: "INR", symbol: "₹", name: "Indian Rupee" },
+  { code: "JPY", symbol: "¥", name: "Japanese Yen" },
+  { code: "CHF", symbol: "Fr", name: "Swiss Franc" },
+  { code: "CAD", symbol: "C$", name: "Canadian Dollar" },
+  { code: "AUD", symbol: "A$", name: "Australian Dollar" },
+  { code: "CNY", symbol: "¥", name: "Chinese Yuan" },
+  { code: "SEK", symbol: "kr", name: "Swedish Krona" },
+  { code: "NOK", symbol: "kr", name: "Norwegian Krone" },
+  { code: "DKK", symbol: "kr", name: "Danish Krone" },
+  { code: "PLN", symbol: "zł", name: "Polish Zloty" },
+  { code: "BRL", symbol: "R$", name: "Brazilian Real" },
+  { code: "MXN", symbol: "$", name: "Mexican Peso" },
+  { code: "SGD", symbol: "S$", name: "Singapore Dollar" },
+  { code: "HKD", symbol: "HK$", name: "Hong Kong Dollar" },
+  { code: "NZD", symbol: "NZ$", name: "New Zealand Dollar" },
+  { code: "ZAR", symbol: "R", name: "South African Rand" },
+  { code: "TRY", symbol: "₺", name: "Turkish Lira" },
+  { code: "KRW", symbol: "₩", name: "South Korean Won" },
+  { code: "THB", symbol: "฿", name: "Thai Baht" },
+  { code: "IDR", symbol: "Rp", name: "Indonesian Rupiah" },
+  { code: "MYR", symbol: "RM", name: "Malaysian Ringgit" },
+  { code: "PHP", symbol: "₱", name: "Philippine Peso" },
+  { code: "ILS", symbol: "₪", name: "Israeli Shekel" },
+  { code: "CZK", symbol: "Kč", name: "Czech Koruna" },
+  { code: "HUF", symbol: "Ft", name: "Hungarian Forint" },
+  { code: "RON", symbol: "lei", name: "Romanian Leu" },
+  { code: "BGN", symbol: "лв", name: "Bulgarian Lev" },
+];
+
+function getCurrencySymbol(code: string): string {
+  return COMMON_CURRENCIES.find((c) => c.code === code)?.symbol ?? code;
+}
+
 function createEmptyExpenseForm(): ExpenseFormState {
   return {
     merchant: "",
@@ -59,6 +100,9 @@ function createEmptyExpenseForm(): ExpenseFormState {
     amount: "",
     transaction_type: "debit",
     cadence: "one_time",
+    cadence_interval: 3,
+    prepaid_months: 12,
+    prepaid_start_date: `${currentMonthString()}-01`,
     recurring_variable: false,
     recurring_auto_add: false,
     is_major_purchase: false,
@@ -109,7 +153,7 @@ function findCategoryIdByName(categories: Category[], transactionType: string, c
 }
 
 function isRecurringCadence(cadence: string) {
-  return cadence === "monthly" || cadence === "yearly";
+  return cadence === "monthly" || cadence === "yearly" || cadence === "custom";
 }
 
 function applyCadenceSelection<T extends ExpenseFormState>(form: T, cadence: string): T {
@@ -131,6 +175,9 @@ function createReceiptDraftFromPreview(preview: ReceiptPreview, categories: Cate
     amount: preview.amount != null ? String(preview.amount) : "",
     transaction_type: preview.transaction_type ?? "debit",
     cadence: preview.cadence ?? "one_time",
+    cadence_interval: 3,
+    prepaid_months: 12,
+    prepaid_start_date: preview.expense_date ?? new Date().toISOString().slice(0, 10),
     recurring_variable: preview.recurring_variable ?? false,
     recurring_auto_add: preview.recurring_auto_add ?? false,
     is_major_purchase: preview.is_major_purchase ?? false,
@@ -141,7 +188,7 @@ function createReceiptDraftFromPreview(preview: ReceiptPreview, categories: Cate
     category_name: categoryId ? "" : preview.category_name ?? "",
     notes: preview.notes ?? "",
     confidence: String(preview.confidence ?? 0.5),
-    items: (preview.items ?? []).map((item) => ({ ...item })),
+    items: (preview.items ?? []).map((item) => ({ ...item, id: item.id ?? crypto.randomUUID() })),
   };
 }
 
@@ -170,28 +217,158 @@ function TransactionTypeSelector({ value, onChange, disabled = false }: { value:
   );
 }
 
+const CADENCE_OPTIONS = [
+  { value: "one_time", label: "One-time / irregular", description: "Occasional spending, large purchases, ad-hoc income" },
+  { value: "monthly", label: "Recurring monthly", description: "Subscriptions, rent, salary, utilities" },
+  { value: "yearly", label: "Recurring yearly", description: "Insurance, annual renewals, yearly fees" },
+  { value: "custom", label: "Every N months", description: "Quarterly plans, bi-annual charges, custom intervals" },
+  { value: "prepaid", label: "Prepaid subscription", description: "One lump-sum payment covering N months of service" },
+];
+
 function CadenceSelector({ value, onChange, disabled = false }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const selected = CADENCE_OPTIONS.find((o) => o.value === value) ?? CADENCE_OPTIONS[0];
+
   return (
     <div className="space-y-2">
-      <div className="text-sm text-muted-foreground">Transaction cadence</div>
-      <div className="grid gap-2 md:grid-cols-3">
-        {[
-          { value: "one_time", label: "One-time / irregular", description: "Occasional spending, large purchases, ad-hoc income" },
-          { value: "monthly", label: "Recurring monthly", description: "Subscriptions, rent, salary, utilities" },
-          { value: "yearly", label: "Recurring yearly", description: "Insurance, annual renewals, yearly fees" },
-        ].map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            disabled={disabled}
-            onClick={() => onChange(option.value)}
-            className={`rounded-xl border px-4 py-3 text-left disabled:cursor-not-allowed disabled:opacity-60 ${value === option.value ? "border-primary bg-primary/5" : "border-border bg-background hover:bg-accent"}`}
-          >
-            <div className="font-medium">{option.label}</div>
-            <div className="text-xs text-muted-foreground">{option.description}</div>
-          </button>
-        ))}
+      <div className="flex items-center justify-between">
+        <div className="text-sm text-muted-foreground">Transaction cadence</div>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setOpen((prev) => !prev)}
+          className="text-xs text-primary underline-offset-2 hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {open ? "Close" : "Change cadence"}
+        </button>
       </div>
+      {open ? (
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {CADENCE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              disabled={disabled}
+              onClick={() => { onChange(option.value); setOpen(false); }}
+              className={`rounded-xl border px-4 py-3 text-left disabled:cursor-not-allowed disabled:opacity-60 ${value === option.value ? "border-primary bg-primary/5" : "border-border bg-background hover:bg-accent"}`}
+            >
+              <div className="font-medium text-sm">{option.label}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">{option.description}</div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-2.5 text-sm">
+          <span className="font-medium">{selected.label}</span>
+          <span className="text-xs text-muted-foreground">{selected.description}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomIntervalPanel({
+  cadence,
+  interval,
+  onIntervalChange,
+  disabled = false,
+}: {
+  cadence: string;
+  interval: number;
+  onIntervalChange: (value: number) => void;
+  disabled?: boolean;
+}) {
+  if (cadence !== "custom") return null;
+  return (
+    <div className="space-y-3 rounded-2xl border border-border bg-background p-4">
+      <div>
+        <div className="text-sm font-medium">Recurrence interval</div>
+        <p className="text-xs text-muted-foreground">How many months between each charge.</p>
+      </div>
+      <label className="flex items-center gap-3 text-sm">
+        <span className="text-muted-foreground">Every</span>
+        <input
+          type="number"
+          min={2}
+          max={120}
+          value={interval}
+          onChange={(e) => onIntervalChange(Math.max(2, Math.min(120, parseInt(e.target.value) || 2)))}
+          disabled={disabled}
+          className="w-20 rounded-lg border border-border bg-card px-3 py-2 text-center disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <span className="text-muted-foreground">months</span>
+      </label>
+      <p className="text-xs text-muted-foreground">Common: 3 (quarterly), 6 (bi-annual), 24 (bi-annual 2-year plan). Minimum is 2 — use &quot;Monthly&quot; for every month.</p>
+    </div>
+  );
+}
+
+function PrepaidSettingsPanel({
+  cadence,
+  prepaidMonths,
+  prepaidStartDate,
+  onPrepaidMonthsChange,
+  onPrepaidStartDateChange,
+  disabled = false,
+}: {
+  cadence: string;
+  prepaidMonths: number;
+  prepaidStartDate: string;
+  onPrepaidMonthsChange: (value: number) => void;
+  onPrepaidStartDateChange: (value: string) => void;
+  disabled?: boolean;
+}) {
+  if (cadence !== "prepaid") return null;
+
+  const endDateLabel = (() => {
+    if (!prepaidStartDate || !prepaidMonths) return null;
+    try {
+      const start = new Date(prepaidStartDate);
+      const totalMonths = start.getMonth() + prepaidMonths;
+      const endYear = start.getFullYear() + Math.floor(totalMonths / 12);
+      const endMonth = totalMonths % 12;
+      const lastDay = new Date(endYear, endMonth + 1, 0).getDate();
+      return new Date(endYear, endMonth, lastDay).toLocaleDateString("en-GB", { year: "numeric", month: "long", day: "numeric" });
+    } catch {
+      return null;
+    }
+  })();
+
+  return (
+    <div className="space-y-3 rounded-2xl border border-border bg-background p-4">
+      <div>
+        <div className="text-sm font-medium">Prepaid coverage</div>
+        <p className="text-xs text-muted-foreground">A single payment covering multiple months of a service. No recurring generation — tracked as one expense.</p>
+      </div>
+      <label className="flex items-center gap-3 text-sm">
+        <span className="text-muted-foreground">Covers</span>
+        <input
+          type="number"
+          min={1}
+          max={120}
+          value={prepaidMonths}
+          onChange={(e) => onPrepaidMonthsChange(Math.max(1, Math.min(120, parseInt(e.target.value) || 1)))}
+          disabled={disabled}
+          className="w-20 rounded-lg border border-border bg-card px-3 py-2 text-center disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <span className="text-muted-foreground">months</span>
+      </label>
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-muted-foreground">Coverage starts</span>
+        <input
+          type="date"
+          value={prepaidStartDate}
+          onChange={(e) => onPrepaidStartDateChange(e.target.value)}
+          disabled={disabled}
+          className="w-full rounded-lg border border-border bg-card px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <span className="text-xs text-muted-foreground">Defaults to the purchase date if unchanged.</span>
+      </label>
+      {endDateLabel ? (
+        <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 px-4 py-3 text-xs text-blue-300">
+          Coverage active until <span className="font-medium">{endDateLabel}</span>.
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -205,6 +382,88 @@ function MajorPurchaseToggle({ checked, onChange, disabled = false }: { checked:
         <span className="text-xs text-muted-foreground">Use this for larger irregular purchases such as a phone, watch, laptop, appliance, or other meaningful one-off buy.</span>
       </span>
     </label>
+  );
+}
+
+function CurrencySelector({ value, onChange, disabled = false }: { value: string; onChange: (value: string) => void; disabled?: boolean }) {
+  const isInList = COMMON_CURRENCIES.some((c) => c.code === value);
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {!isInList && value ? <option value={value}>{value}</option> : null}
+      {COMMON_CURRENCIES.map((c) => (
+        <option key={c.code} value={c.code}>{c.symbol} {c.code} — {c.name}</option>
+      ))}
+    </select>
+  );
+}
+
+function CurrencyDisplayToggle({
+  currency,
+  amount,
+  displayAsEur,
+  rate,
+  onToggle,
+  disabled = false,
+}: {
+  currency: string;
+  amount: string;
+  displayAsEur: boolean;
+  rate: number | null;
+  onToggle: (displayAsEur: boolean, rate: number | null) => void;
+  disabled?: boolean;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => { setError(null); }, [currency]);
+
+  const numAmount = parseFloat(amount) || 0;
+  const eurPreview = rate != null ? numAmount * rate : null;
+
+  async function handleConvertToEur() {
+    if (rate != null) { onToggle(true, rate); return; }
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`https://api.frankfurter.app/latest?from=${currency}&to=EUR`);
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      const fetchedRate: number = data.rates?.EUR;
+      if (!fetchedRate) throw new Error();
+      onToggle(true, fetchedRate);
+    } catch {
+      setError("Couldn't fetch live rate. Check connection or try a supported currency.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 space-y-2">
+      <div className="text-xs font-medium text-amber-400/80">Non-default currency — how to show in dashboard</div>
+      <div className="flex gap-2 flex-wrap">
+        <button type="button" disabled={disabled} onClick={() => onToggle(false, null)}
+          className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${!displayAsEur ? "border-primary bg-primary/10 text-primary" : "border-border bg-background hover:bg-accent"}`}>
+          Keep as {getCurrencySymbol(currency)} {currency}
+        </button>
+        <button type="button" disabled={disabled || loading} onClick={handleConvertToEur}
+          className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${displayAsEur ? "border-primary bg-primary/10 text-primary" : "border-border bg-background hover:bg-accent"}`}>
+          {loading ? "Fetching rate…" : "Convert to € EUR"}
+        </button>
+      </div>
+      {displayAsEur && eurPreview != null && rate != null ? (
+        <div className="text-xs text-muted-foreground">
+          {getCurrencySymbol(currency)}{numAmount.toFixed(2)} → <span className="font-medium text-foreground">€{eurPreview.toFixed(2)}</span>
+          <span className="ml-1.5 opacity-60">@ {rate.toFixed(5)} · live rate</span>
+        </div>
+      ) : null}
+      {error ? <div className="text-xs text-red-400">{error}</div> : null}
+    </div>
   );
 }
 
@@ -242,7 +501,7 @@ function RecurringSettingsPanel({
         <input type="checkbox" checked={recurringAutoAdd} onChange={(e) => onRecurringAutoAddChange(e.target.checked)} disabled={disabled} className="mt-0.5" />
         <span>
           <span className="block font-medium">Auto-add at the start of each due month</span>
-          <span className="text-xs text-muted-foreground">Monthly recurring items are added at the start of each month. Yearly recurring items are added when that month comes around again.</span>
+          <span className="text-xs text-muted-foreground">Monthly recurring items are added at the start of each month. Yearly and custom-interval items are added when their due month comes around.</span>
         </span>
       </label>
       {recurringVariable && recurringAutoAdd ? (
@@ -278,8 +537,18 @@ export default function NewExpensePage() {
   const [statementSuccess, setStatementSuccess] = useState<string | null>(null);
   const [uploadingStatement, setUploadingStatement] = useState(false);
   const [finalizingStatement, setFinalizingStatement] = useState(false);
+  const [itemsCurrency, setItemsCurrency] = useState(DEFAULT_CURRENCY);
+  const [manualDisplayAsEur, setManualDisplayAsEur] = useState(false);
+  const [manualEurRate, setManualEurRate] = useState<number | null>(null);
+  const [receiptDisplayAsEur, setReceiptDisplayAsEur] = useState(false);
+  const [receiptEurRate, setReceiptEurRate] = useState<number | null>(null);
+  const [statementDisplayAsEur, setStatementDisplayAsEur] = useState(false);
+  const [statementEurRate, setStatementEurRate] = useState<number | null>(null);
 
   const activeTab = [RECEIPT_TAB, STATEMENT_TAB].includes(searchParams.get("tab") || "") ? searchParams.get("tab") as string : MANUAL_TAB;
+
+  useEffect(() => { setReceiptDisplayAsEur(false); setReceiptEurRate(null); }, [receiptDraft.currency]);
+  useEffect(() => { setStatementDisplayAsEur(false); setStatementEurRate(null); }, [statementDraft.currency]);
 
   useEffect(() => {
     listCategories().then(setCategories).catch(() => {});
@@ -313,6 +582,7 @@ export default function NewExpensePage() {
     const preview = selectedReceipt?.preview;
     if (!isReceiptPreview(preview)) return;
     setReceiptDraft(createReceiptDraftFromPreview(preview, categories));
+    setItemsCurrency(preview.currency ?? DEFAULT_CURRENCY);
   }, [categories, selectedReceipt]);
 
   const receiptPreview = useMemo(() => (isReceiptPreview(selectedReceipt?.preview) ? selectedReceipt.preview : null), [selectedReceipt]);
@@ -327,6 +597,9 @@ export default function NewExpensePage() {
       amount: currentStatementEntry.amount != null ? String(currentStatementEntry.amount) : "",
       transaction_type: currentStatementEntry.transaction_type ?? "debit",
       cadence: currentStatementEntry.cadence ?? "one_time",
+      cadence_interval: 3,
+      prepaid_months: 12,
+      prepaid_start_date: currentStatementEntry.expense_date ?? new Date().toISOString().slice(0, 10),
       recurring_variable: currentStatementEntry.recurring_variable ?? false,
       recurring_auto_add: currentStatementEntry.recurring_auto_add ?? false,
       is_major_purchase: currentStatementEntry.is_major_purchase ?? false,
@@ -378,7 +651,7 @@ export default function NewExpensePage() {
   }
 
   function addReceiptItem() {
-    setReceiptDraft((current) => ({ ...current, items: [...current.items, { description: "", quantity: null, unit_price: null, total: null, subcategory: null }] }));
+    setReceiptDraft((current) => ({ ...current, items: [...current.items, { id: crypto.randomUUID(), description: "", quantity: null, unit_price: null, total: null, subcategory: null }] }));
   }
 
   function resetReceiptDraft() {
@@ -386,6 +659,7 @@ export default function NewExpensePage() {
     setLastReceiptFile(null);
     setReceiptDraft(createEmptyReceiptDraft());
     setReceiptSuccess(null);
+    setItemsCurrency(DEFAULT_CURRENCY);
     draftRestoredFromStorageRef.current = false;
     localStorage.removeItem("spendhound_receipt_draft");
   }
@@ -405,21 +679,27 @@ export default function NewExpensePage() {
     event.preventDefault();
     setSubmitting(true);
     setManualError(null);
+    const manualFinalAmount = manualDisplayAsEur && manualEurRate ? Math.round(Number(manualForm.amount) * manualEurRate * 100) / 100 : Number(manualForm.amount);
+    const manualFinalCurrency = manualDisplayAsEur ? DEFAULT_CURRENCY : manualForm.currency;
+    const manualOriginalNote = manualDisplayAsEur ? `[Converted from ${manualForm.currency}: ${getCurrencySymbol(manualForm.currency)}${manualForm.amount}]` : null;
     try {
       await createExpense({
         merchant: manualForm.merchant,
         description: manualForm.description || null,
-        amount: Number(manualForm.amount),
+        amount: manualFinalAmount,
         transaction_type: manualForm.transaction_type,
         cadence: manualForm.cadence,
+        cadence_interval: manualForm.cadence === "custom" ? manualForm.cadence_interval : undefined,
+        prepaid_months: manualForm.cadence === "prepaid" ? manualForm.prepaid_months : undefined,
+        prepaid_start_date: manualForm.cadence === "prepaid" ? manualForm.prepaid_start_date : undefined,
         recurring_variable: manualForm.recurring_variable,
         recurring_auto_add: manualForm.recurring_auto_add,
         is_major_purchase: manualForm.is_major_purchase,
-        currency: manualForm.currency,
+        currency: manualFinalCurrency,
         expense_date: manualForm.expense_date,
         category_id: manualForm.category_id || null,
         category_name: manualForm.category_id ? null : manualForm.category_name || null,
-        notes: manualForm.notes || null,
+        notes: manualOriginalNote ? [manualOriginalNote, manualForm.notes].filter(Boolean).join("\n") : manualForm.notes || null,
         items: null,
       });
       router.push("/expenses");
@@ -474,22 +754,28 @@ export default function NewExpensePage() {
     setFinalizingReceipt(true);
     setReceiptError(null);
     setReceiptSuccess(null);
+    const receiptFinalAmount = receiptDisplayAsEur && receiptEurRate ? Math.round(Number(receiptDraft.amount) * receiptEurRate * 100) / 100 : Number(receiptDraft.amount);
+    const receiptFinalCurrency = receiptDisplayAsEur ? DEFAULT_CURRENCY : receiptDraft.currency;
+    const receiptOriginalNote = receiptDisplayAsEur ? `[Converted from ${receiptDraft.currency}: ${getCurrencySymbol(receiptDraft.currency)}${receiptDraft.amount}]` : null;
     try {
       const savedExpense = await createExpenseFromReceipt({
         receipt_id: selectedReceipt.id,
         merchant: receiptDraft.merchant,
         description: receiptDraft.description || null,
-        amount: Number(receiptDraft.amount),
+        amount: receiptFinalAmount,
         transaction_type: receiptDraft.transaction_type,
         cadence: receiptDraft.cadence,
+        cadence_interval: receiptDraft.cadence === "custom" ? receiptDraft.cadence_interval : undefined,
+        prepaid_months: receiptDraft.cadence === "prepaid" ? receiptDraft.prepaid_months : undefined,
+        prepaid_start_date: receiptDraft.cadence === "prepaid" ? receiptDraft.prepaid_start_date : undefined,
         recurring_variable: receiptDraft.recurring_variable,
         recurring_auto_add: receiptDraft.recurring_auto_add,
         is_major_purchase: receiptDraft.is_major_purchase,
-        currency: receiptDraft.currency,
+        currency: receiptFinalCurrency,
         expense_date: receiptDraft.expense_date,
         category_id: receiptDraft.category_id || null,
         category_name: receiptDraft.category_id ? null : receiptDraft.category_name || null,
-        notes: receiptDraft.notes || null,
+        notes: receiptOriginalNote ? [receiptOriginalNote, receiptDraft.notes].filter(Boolean).join("\n") : receiptDraft.notes || null,
         items: receiptDraft.items,
         confidence: Number(receiptDraft.confidence),
       });
@@ -509,23 +795,29 @@ export default function NewExpensePage() {
     setFinalizingStatement(true);
     setStatementError(null);
     setStatementSuccess(null);
+    const stmtFinalAmount = statementDisplayAsEur && statementEurRate ? Math.round(Number(statementDraft.amount) * statementEurRate * 100) / 100 : Number(statementDraft.amount);
+    const stmtFinalCurrency = statementDisplayAsEur ? DEFAULT_CURRENCY : statementDraft.currency;
+    const stmtOriginalNote = statementDisplayAsEur ? `[Converted from ${statementDraft.currency}: ${getCurrencySymbol(statementDraft.currency)}${statementDraft.amount}]` : null;
     try {
       const result = await createExpenseFromStatementEntry({
         receipt_id: selectedStatement.id,
         entry_index: statementIndex,
         merchant: statementDraft.merchant,
         description: statementDraft.description || null,
-        amount: Number(statementDraft.amount),
+        amount: stmtFinalAmount,
         transaction_type: statementDraft.transaction_type,
         cadence: statementDraft.cadence,
+        cadence_interval: statementDraft.cadence === "custom" ? statementDraft.cadence_interval : undefined,
+        prepaid_months: statementDraft.cadence === "prepaid" ? statementDraft.prepaid_months : undefined,
+        prepaid_start_date: statementDraft.cadence === "prepaid" ? statementDraft.prepaid_start_date : undefined,
         recurring_variable: statementDraft.recurring_variable,
         recurring_auto_add: statementDraft.recurring_auto_add,
         is_major_purchase: statementDraft.is_major_purchase,
-        currency: statementDraft.currency,
+        currency: stmtFinalCurrency,
         expense_date: statementDraft.expense_date,
         category_id: statementDraft.category_id || null,
         category_name: statementDraft.category_id ? null : statementDraft.category_name || null,
-        notes: statementDraft.notes || null,
+        notes: stmtOriginalNote ? [stmtOriginalNote, statementDraft.notes].filter(Boolean).join("\n") : statementDraft.notes || null,
         confidence: Number(statementDraft.confidence),
       });
       setSelectedStatement(result.statement);
@@ -562,6 +854,18 @@ export default function NewExpensePage() {
           {manualError ? <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{manualError}</div> : null}
           <TransactionTypeSelector value={manualForm.transaction_type} onChange={(transaction_type) => setManualForm({ ...manualForm, transaction_type, category_id: "", category_name: "" })} />
           <CadenceSelector value={manualForm.cadence} onChange={(cadence) => setManualForm(applyCadenceSelection(manualForm, cadence))} />
+          <CustomIntervalPanel
+            cadence={manualForm.cadence}
+            interval={manualForm.cadence_interval}
+            onIntervalChange={(cadence_interval) => setManualForm({ ...manualForm, cadence_interval })}
+          />
+          <PrepaidSettingsPanel
+            cadence={manualForm.cadence}
+            prepaidMonths={manualForm.prepaid_months}
+            prepaidStartDate={manualForm.prepaid_start_date}
+            onPrepaidMonthsChange={(prepaid_months) => setManualForm({ ...manualForm, prepaid_months })}
+            onPrepaidStartDateChange={(prepaid_start_date) => setManualForm({ ...manualForm, prepaid_start_date })}
+          />
           <RecurringSettingsPanel
             cadence={manualForm.cadence}
             recurringVariable={manualForm.recurring_variable}
@@ -574,8 +878,14 @@ export default function NewExpensePage() {
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">{manualForm.transaction_type === "credit" ? "Source / payer" : "Merchant"}</span><input required value={manualForm.merchant} onChange={(e) => setManualForm({ ...manualForm, merchant: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">Amount</span><input required type="number" step="0.01" value={manualForm.amount} onChange={(e) => setManualForm({ ...manualForm, amount: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">Date</span><input required type="date" value={manualForm.expense_date} onChange={(e) => setManualForm({ ...manualForm, expense_date: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
-            <label className="text-sm"><span className="mb-1 block text-muted-foreground">Currency</span><input value={manualForm.currency} onChange={(e) => setManualForm({ ...manualForm, currency: e.target.value.toUpperCase() })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
+            <label className="text-sm">
+              <span className="mb-1 block text-muted-foreground">Currency</span>
+              <CurrencySelector value={manualForm.currency} onChange={(currency) => { setManualForm({ ...manualForm, currency }); if (currency === DEFAULT_CURRENCY) { setManualDisplayAsEur(false); setManualEurRate(null); } }} />
+            </label>
           </div>
+          {manualForm.currency !== DEFAULT_CURRENCY ? (
+            <CurrencyDisplayToggle currency={manualForm.currency} amount={manualForm.amount} displayAsEur={manualDisplayAsEur} rate={manualEurRate} onToggle={(dae, r) => { setManualDisplayAsEur(dae); setManualEurRate(r); }} />
+          ) : null}
           <label className="text-sm"><span className="mb-1 block text-muted-foreground">Description</span><input value={manualForm.description} onChange={(e) => setManualForm({ ...manualForm, description: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
           <div className="grid gap-4 md:grid-cols-2">
             <label className="text-sm">
@@ -623,6 +933,20 @@ export default function NewExpensePage() {
                 {finalizingReceipt ? <div className="rounded-lg border border-primary/30 bg-primary/10 px-4 py-3 text-sm text-primary">Saving approved receipt… Please wait.</div> : null}
                 <TransactionTypeSelector value={receiptDraft.transaction_type} onChange={(transaction_type) => setReceiptDraft({ ...receiptDraft, transaction_type, category_id: "", category_name: "" })} disabled={finalizingReceipt} />
                 <CadenceSelector value={receiptDraft.cadence} onChange={(cadence) => setReceiptDraft(applyCadenceSelection(receiptDraft, cadence))} disabled={finalizingReceipt} />
+                <CustomIntervalPanel
+                  cadence={receiptDraft.cadence}
+                  interval={receiptDraft.cadence_interval}
+                  onIntervalChange={(cadence_interval) => setReceiptDraft({ ...receiptDraft, cadence_interval })}
+                  disabled={finalizingReceipt}
+                />
+                <PrepaidSettingsPanel
+                  cadence={receiptDraft.cadence}
+                  prepaidMonths={receiptDraft.prepaid_months}
+                  prepaidStartDate={receiptDraft.prepaid_start_date}
+                  onPrepaidMonthsChange={(prepaid_months) => setReceiptDraft({ ...receiptDraft, prepaid_months })}
+                  onPrepaidStartDateChange={(prepaid_start_date) => setReceiptDraft({ ...receiptDraft, prepaid_start_date })}
+                  disabled={finalizingReceipt}
+                />
                 <RecurringSettingsPanel
                   cadence={receiptDraft.cadence}
                   recurringVariable={receiptDraft.recurring_variable}
@@ -645,35 +969,51 @@ export default function NewExpensePage() {
               <div className="rounded-2xl border border-border bg-card p-4">
                 <div className="mb-3 flex items-center justify-between gap-2 text-sm font-medium">
                   <span>Extracted items</span>
-                  <button type="button" onClick={addReceiptItem} className="rounded-lg border border-border px-3 py-1 text-xs hover:bg-accent">Add item</button>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span>Currency</span>
+                      <select value={itemsCurrency} onChange={(e) => setItemsCurrency(e.target.value)} className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground">
+                        {COMMON_CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>)}
+                      </select>
+                    </label>
+                    <button type="button" onClick={addReceiptItem} className="rounded-lg border border-border px-3 py-1 text-xs hover:bg-accent">Add item</button>
+                  </div>
                 </div>
-                <table className="w-full text-sm border-collapse">
+                <table className="w-full text-sm border-collapse table-fixed">
                   <thead>
                     <tr className="border-b border-border text-left text-xs text-muted-foreground">
                       <th className="pb-2 font-medium">Item</th>
-                      <th className="pb-2 font-medium w-20 text-center">Qty</th>
+                      <th className="pb-2 font-medium w-12 text-center">Qty</th>
                       <th className="pb-2 font-medium w-24">Total</th>
-                      <th className="pb-2 font-medium w-52">Subcategory</th>
+                      <th className="pb-2 font-medium w-32">Subcategory</th>
                       <th className="pb-2 w-8" />
                     </tr>
                   </thead>
                   <tbody>
                     {extractedItems.map((item, index) => (
-                      <tr key={`${item.description ?? "item"}-${index}`} className="border-b border-border/40 last:border-0">
-                        <td className="py-2 pr-4 text-sm">{item.description || `Item ${index + 1}`}</td>
-                        <td className="py-2 pr-3 text-center">
-                          <select value={quantityModeForItem(item)} onChange={(e) => updateReceiptItem(index, "quantity", e.target.value === "custom" ? "" : e.target.value)} className="w-16 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground">
+                      <tr key={item.id ?? index} className="border-b border-border/40 last:border-0">
+                        <td className="py-2 pr-4 min-w-0">
+                          <input
+                            type="text"
+                            value={item.description ?? ""}
+                            onChange={(e) => updateReceiptItem(index, "description", e.target.value)}
+                            placeholder={`Item ${index + 1}`}
+                            className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                          />
+                        </td>
+                        <td className="py-2 pr-3 text-center w-12">
+                          <select value={quantityModeForItem(item)} onChange={(e) => updateReceiptItem(index, "quantity", e.target.value === "custom" ? "" : e.target.value)} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground">
                             {ITEM_QUANTITY_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                             <option value="custom">…</option>
                           </select>
                         </td>
-                        <td className="py-2 pr-3">
-                          <div className="flex items-center rounded-md border border-border bg-background px-2 py-1.5 w-20">
-                            <span className="text-xs text-muted-foreground select-none mr-1">€</span>
+                        <td className="py-2 pr-3 w-24">
+                          <div className="flex items-center rounded-md border border-border bg-background px-2 py-1.5 w-full">
+                            <span className="text-xs text-muted-foreground select-none mr-1">{getCurrencySymbol(itemsCurrency)}</span>
                             <input type="number" step="0.01" value={item.total ?? ""} onChange={(e) => updateReceiptItem(index, "total", e.target.value)} className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none" />
                           </div>
                         </td>
-                        <td className="py-2 pr-3">
+                        <td className="py-2 pr-3 w-32">
                           <select value={ITEM_SUBCATEGORY_OPTIONS.includes(item.subcategory ?? "") ? item.subcategory ?? "" : item.subcategory ? "__custom__" : ""} onChange={(e) => updateReceiptItem(index, "subcategory", e.target.value === "__custom__" ? (item.subcategory && !ITEM_SUBCATEGORY_OPTIONS.includes(item.subcategory) ? item.subcategory : "") : e.target.value)} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground">
                             <option value="">None</option>
                             {ITEM_SUBCATEGORY_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
@@ -683,7 +1023,7 @@ export default function NewExpensePage() {
                             <input value={item.subcategory} onChange={(e) => updateReceiptItem(index, "subcategory", e.target.value)} className="mt-1.5 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground" placeholder="Custom subcategory" />
                           ) : null}
                         </td>
-                        <td className="py-2">
+                        <td className="py-2 w-8">
                           <button type="button" onClick={() => removeReceiptItem(index)} aria-label={`Remove item ${index + 1}`} className="flex h-6 w-6 items-center justify-center rounded-md bg-red-600 text-xs font-bold text-white hover:bg-red-700">×</button>
                         </td>
                       </tr>
@@ -701,8 +1041,14 @@ export default function NewExpensePage() {
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">{receiptDraft.transaction_type === "credit" ? "Source / payer" : "Merchant"}</span><input value={receiptDraft.merchant} onChange={(e) => setReceiptDraft({ ...receiptDraft, merchant: e.target.value })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Amount</span><input type="number" step="0.01" value={receiptDraft.amount} onChange={(e) => setReceiptDraft({ ...receiptDraft, amount: e.target.value })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Date</span><input type="date" value={receiptDraft.expense_date} onChange={(e) => setReceiptDraft({ ...receiptDraft, expense_date: e.target.value })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
-                  <label className="text-sm"><span className="mb-1 block text-muted-foreground">Currency</span><input value={receiptDraft.currency} onChange={(e) => setReceiptDraft({ ...receiptDraft, currency: e.target.value.toUpperCase() })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
+                  <label className="text-sm">
+                    <span className="mb-1 block text-muted-foreground">Currency</span>
+                    <CurrencySelector value={receiptDraft.currency} onChange={(currency) => setReceiptDraft({ ...receiptDraft, currency })} disabled={finalizingReceipt} />
+                  </label>
                 </div>
+                {receiptDraft.currency !== DEFAULT_CURRENCY ? (
+                  <CurrencyDisplayToggle currency={receiptDraft.currency} amount={receiptDraft.amount} displayAsEur={receiptDisplayAsEur} rate={receiptEurRate} onToggle={(dae, r) => { setReceiptDisplayAsEur(dae); setReceiptEurRate(r); }} disabled={finalizingReceipt} />
+                ) : null}
                 <label className="text-sm"><span className="mb-1 block text-muted-foreground">Description</span><input value={receiptDraft.description} onChange={(e) => setReceiptDraft({ ...receiptDraft, description: e.target.value })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="text-sm">
@@ -835,6 +1181,20 @@ export default function NewExpensePage() {
 
                 <TransactionTypeSelector value={statementDraft.transaction_type} onChange={(transaction_type) => setStatementDraft({ ...statementDraft, transaction_type, category_id: "", category_name: "" })} disabled={finalizingStatement} />
                 <CadenceSelector value={statementDraft.cadence} onChange={(cadence) => setStatementDraft(applyCadenceSelection(statementDraft, cadence))} disabled={finalizingStatement} />
+                <CustomIntervalPanel
+                  cadence={statementDraft.cadence}
+                  interval={statementDraft.cadence_interval}
+                  onIntervalChange={(cadence_interval) => setStatementDraft({ ...statementDraft, cadence_interval })}
+                  disabled={finalizingStatement}
+                />
+                <PrepaidSettingsPanel
+                  cadence={statementDraft.cadence}
+                  prepaidMonths={statementDraft.prepaid_months}
+                  prepaidStartDate={statementDraft.prepaid_start_date}
+                  onPrepaidMonthsChange={(prepaid_months) => setStatementDraft({ ...statementDraft, prepaid_months })}
+                  onPrepaidStartDateChange={(prepaid_start_date) => setStatementDraft({ ...statementDraft, prepaid_start_date })}
+                  disabled={finalizingStatement}
+                />
                 <RecurringSettingsPanel
                   cadence={statementDraft.cadence}
                   recurringVariable={statementDraft.recurring_variable}
@@ -849,8 +1209,14 @@ export default function NewExpensePage() {
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">{statementDraft.transaction_type === "credit" ? "Source / payer" : "Merchant"}</span><input value={statementDraft.merchant} onChange={(e) => setStatementDraft({ ...statementDraft, merchant: e.target.value })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Amount</span><input type="number" step="0.01" value={statementDraft.amount} onChange={(e) => setStatementDraft({ ...statementDraft, amount: e.target.value })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Date</span><input type="date" value={statementDraft.expense_date} onChange={(e) => setStatementDraft({ ...statementDraft, expense_date: e.target.value })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
-                  <label className="text-sm"><span className="mb-1 block text-muted-foreground">Currency</span><input value={statementDraft.currency} onChange={(e) => setStatementDraft({ ...statementDraft, currency: e.target.value.toUpperCase() })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
+                  <label className="text-sm">
+                    <span className="mb-1 block text-muted-foreground">Currency</span>
+                    <CurrencySelector value={statementDraft.currency} onChange={(currency) => setStatementDraft({ ...statementDraft, currency })} disabled={finalizingStatement} />
+                  </label>
                 </div>
+                {statementDraft.currency !== DEFAULT_CURRENCY ? (
+                  <CurrencyDisplayToggle currency={statementDraft.currency} amount={statementDraft.amount} displayAsEur={statementDisplayAsEur} rate={statementEurRate} onToggle={(dae, r) => { setStatementDisplayAsEur(dae); setStatementEurRate(r); }} disabled={finalizingStatement} />
+                ) : null}
 
                 <label className="text-sm"><span className="mb-1 block text-muted-foreground">Description</span><input value={statementDraft.description} onChange={(e) => setStatementDraft({ ...statementDraft, description: e.target.value })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                 <div className="grid gap-4 md:grid-cols-2">

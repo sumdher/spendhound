@@ -29,12 +29,16 @@ export function transactionTypeLabel(transactionType: string | null | undefined)
   return transactionType === "credit" ? "Money in" : "Money out";
 }
 
-export function transactionCadenceLabel(cadence: string | null | undefined) {
+export function transactionCadenceLabel(cadence: string | null | undefined, cadenceInterval?: number | null) {
   switch (cadence) {
     case "monthly":
       return "Monthly recurring";
     case "yearly":
       return "Yearly recurring";
+    case "custom":
+      return cadenceInterval ? `Every ${cadenceInterval} months` : "Custom interval";
+    case "prepaid":
+      return "Prepaid subscription";
     default:
       return "One-time / irregular";
   }

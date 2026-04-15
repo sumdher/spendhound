@@ -31,6 +31,8 @@ TRANSACTION_TYPE_CREDIT = "credit"
 CADENCE_ONE_TIME = "one_time"
 CADENCE_MONTHLY = "monthly"
 CADENCE_YEARLY = "yearly"
+CADENCE_CUSTOM = "custom"    # every N months, interval stored in cadence_interval
+CADENCE_PREPAID = "prepaid"  # single lump-sum payment covering N months
 
 DEFAULT_CATEGORIES: list[tuple[str, str, str, str]] = [
     ("Groceries", "#34d399", "shopping-cart", TRANSACTION_TYPE_DEBIT),
@@ -284,12 +286,18 @@ def normalize_cadence(value: str | None, default: str = CADENCE_ONE_TIME) -> str
         "annual": CADENCE_YEARLY,
         "annually": CADENCE_YEARLY,
         "recurring_yearly": CADENCE_YEARLY,
+        "custom": CADENCE_CUSTOM,
+        "every_n_months": CADENCE_CUSTOM,
+        "custom_interval": CADENCE_CUSTOM,
+        "prepaid": CADENCE_PREPAID,
+        "prepaid_subscription": CADENCE_PREPAID,
+        "lump_sum": CADENCE_PREPAID,
     }
     return mapping.get(normalized, default)
 
 
 def cadence_is_recurring(value: str | None) -> bool:
-    return normalize_cadence(value) in {CADENCE_MONTHLY, CADENCE_YEARLY}
+    return normalize_cadence(value) in {CADENCE_MONTHLY, CADENCE_YEARLY, CADENCE_CUSTOM}
 
 
 def normalize_recurring_settings(cadence: str | None, *, recurring_variable: bool | None = None, recurring_auto_add: bool | None = None) -> tuple[bool, bool]:
@@ -698,6 +706,21 @@ def serialize_expense_item(item: ExpenseItem) -> dict:
     }
 
 
+def _compute_prepaid_end_date(expense: Expense) -> str | None:
+    """Return the last day of the final prepaid month, or None if not applicable."""
+    if expense.cadence != CADENCE_PREPAID:
+        return None
+    start = expense.prepaid_start_date or expense.expense_date
+    months = expense.prepaid_months
+    if not start or not months:
+        return None
+    total = start.month - 1 + months
+    end_year = start.year + total // 12
+    end_month = total % 12 + 1
+    last_day = calendar.monthrange(end_year, end_month)[1]
+    return date(end_year, end_month, last_day).isoformat()
+
+
 def serialize_expense(
     expense: Expense,
     *,
@@ -730,6 +753,10 @@ def serialize_expense(
         "recurring_source_expense_id": str(expense.recurring_source_expense_id) if expense.recurring_source_expense_id else None,
         "auto_generated": expense.auto_generated,
         "generated_for_month": expense.generated_for_month.isoformat() if expense.generated_for_month else None,
+        "cadence_interval": expense.cadence_interval,
+        "prepaid_months": expense.prepaid_months,
+        "prepaid_start_date": expense.prepaid_start_date.isoformat() if expense.prepaid_start_date else None,
+        "prepaid_end_date": _compute_prepaid_end_date(expense),
         "is_major_purchase": expense.is_major_purchase,
         "category_id": str(expense.category_id) if expense.category_id else None,
         "category_name": category_name,
@@ -866,6 +893,10 @@ def recurring_expense_is_due_for_month(expense: Expense, target_month: date) -> 
         return True
     if cadence == CADENCE_YEARLY:
         return expense.expense_date.month == target_month.month
+    if cadence == CADENCE_CUSTOM:
+        interval = expense.cadence_interval or 1
+        months_since = (target_month.year - template_month.year) * 12 + (target_month.month - template_month.month)
+        return months_since % interval == 0
     return False
 
 
@@ -917,6 +948,7 @@ async def generate_recurring_expenses_for_month(db: AsyncSession, user_id: uuid.
             is_recurring=True,
             cadence=cadence,
             cadence_override=template.cadence_override or cadence,
+            cadence_interval=template.cadence_interval,
             recurring_variable=template.recurring_variable,
             recurring_auto_add=template.recurring_auto_add,
             recurring_source_expense_id=template.id,

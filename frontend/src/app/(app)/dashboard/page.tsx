@@ -1,18 +1,68 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell, Line, LineChart } from "recharts";
-import { getDashboardAnalytics, sendMonthlyReportEmail, type DashboardAnalytics } from "@/lib/api";
+import { getDashboardAnalytics, listExpenses, sendMonthlyReportEmail, type DashboardAnalytics, type Expense } from "@/lib/api";
 import { DASHBOARD_CHART_COLORS, getDashboardSummaryStats } from "@/lib/dashboard-report";
-import { currentMonthString, formatCurrency, formatDate, formatSignedCurrency, monthLabel, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
+import { convertToEur, fetchAndStoreRates, getStoredRates, getStoredRatesUpdatedAt } from "@/lib/fx-rates";
+import { currentMonthString, formatCurrency, formatDate, monthLabel, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
 
-function StatCard({ label, value }: { label: string; value: string }) {
+import type { DashboardSummaryStat } from "@/lib/dashboard-report";
+
+function StatCard({ label, value, lines }: DashboardSummaryStat) {
   return (
     <div className="rounded-2xl border border-border bg-card p-5">
       <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="mt-2 text-2xl font-semibold">{value}</p>
+      {lines && lines.length > 0 ? (
+        <div className="mt-2">
+          {lines.map((line, i) => (
+            <p key={i} className={`font-semibold ${line.primary ? "text-2xl" : "mt-0.5 text-sm opacity-70"} ${line.colorClass}`}>{line.value}</p>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-2 text-2xl font-semibold">{value}</p>
+      )}
     </div>
   );
+}
+
+function RefreshIcon({ spinning }: { spinning: boolean }) {
+  return spinning ? (
+    <svg className="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  ) : (
+    <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+  );
+}
+
+/**
+ * Formats a currency amount with an optional EUR approximation suffix for non-EUR currencies.
+ * e.g. for INR: "₹1,234.56 ~ €11.21". For EUR (or missing rate): "€11.21".
+ */
+function formatFxHint(amount: number, currency: string, fxRates: Record<string, number>): string {
+  const native = formatCurrency(amount, currency);
+  if (!currency || currency === "EUR") return native;
+  const rate = fxRates[currency];
+  if (!rate) return native;
+  return `${native} ~ ${formatCurrency(convertToEur(amount, currency, fxRates))}`;
+}
+
+/**
+ * Same as formatFxHint but applies the debit/credit sign before formatting.
+ */
+function formatSignedFxHint(
+  amount: number,
+  transactionType: string | null | undefined,
+  currency: string,
+  fxRates: Record<string, number>,
+): string {
+  const signed = transactionType === "credit" ? amount : -amount;
+  return formatFxHint(signed, currency, fxRates);
 }
 
 export default function DashboardPage() {
@@ -23,6 +73,15 @@ export default function DashboardPage() {
   const [emailPending, setEmailPending] = useState(false);
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
+
+  // FX rate state — initialised from localStorage (or defaults) synchronously
+  const [fxRates, setFxRates] = useState<Record<string, number>>(() => getStoredRates());
+  const [fxUpdatedAt, setFxUpdatedAt] = useState<string | null>(() => getStoredRatesUpdatedAt());
+  const [fxLoading, setFxLoading] = useState(false);
+  const [fxError, setFxError] = useState<string | null>(null);
+
+  // Raw per-expense data for the selected month (for FX-aware re-aggregation)
+  const [monthExpenses, setMonthExpenses] = useState<Expense[]>([]);
 
   useEffect(() => {
     setLoading(true);
@@ -35,6 +94,14 @@ export default function DashboardPage() {
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load dashboard"))
       .finally(() => setLoading(false));
+  }, [month]);
+
+  // Fetch raw expenses for the month so we can re-aggregate with FX rates
+  useEffect(() => {
+    setMonthExpenses([]);
+    listExpenses({ month })
+      .then((res) => setMonthExpenses(res.items))
+      .catch(() => { /* silently degrade — charts fall back to backend totals */ });
   }, [month]);
 
   async function handleSendMonthlyEmail() {
@@ -54,6 +121,106 @@ export default function DashboardPage() {
     }
   }
 
+  // All non-EUR currencies detected from the current month's analytics summary maps
+  const detectedCurrencies = useMemo<string[]>(() => {
+    if (!data) return [];
+    const seen = new Set<string>();
+    Object.keys(data.summary.money_out_by_currency ?? {}).forEach((c) => seen.add(c));
+    Object.keys(data.summary.money_in_by_currency ?? {}).forEach((c) => seen.add(c));
+    seen.delete("EUR");
+    return Array.from(seen).sort();
+  }, [data]);
+
+  // FX-aware "spend by category" — re-aggregated from raw debit expenses converted to EUR.
+  // Falls back to the backend-provided totals when raw expenses are not yet loaded.
+  const fxSpendByCategory = useMemo(() => {
+    const debits = monthExpenses.filter((e) => e.transaction_type === "debit");
+    if (debits.length === 0) return data?.spend_by_category ?? [];
+
+    const map = new Map<string, number>();
+    for (const expense of debits) {
+      const name = expense.category_name ?? "Uncategorised";
+      map.set(name, (map.get(name) ?? 0) + convertToEur(expense.amount, expense.currency, fxRates));
+    }
+    return Array.from(map.entries())
+      .map(([name, amount]) => ({ name, amount }))
+      .sort((a, b) => b.amount - a.amount);
+  }, [monthExpenses, fxRates, data?.spend_by_category]);
+
+  // FX-aware "top merchants" — same approach, top 10 by EUR-equivalent spend.
+  const fxTopMerchants = useMemo(() => {
+    const debits = monthExpenses.filter((e) => e.transaction_type === "debit");
+    if (debits.length === 0) return data?.top_merchants ?? [];
+
+    const map = new Map<string, number>();
+    for (const expense of debits) {
+      const merchant = expense.merchant ?? "Unknown";
+      map.set(merchant, (map.get(merchant) ?? 0) + convertToEur(expense.amount, expense.currency, fxRates));
+    }
+    return Array.from(map.entries())
+      .map(([merchant, amount]) => ({ merchant, amount }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 10);
+  }, [monthExpenses, fxRates, data?.top_merchants]);
+
+  // FX-aware "grocery subcategory insights" — re-aggregated from expense items converted to EUR.
+  // Each item's total is converted using its parent expense's currency. Falls back to the
+  // backend-provided grocery_insights when no expenses with items are available yet.
+  const fxGroceryInsights = useMemo(() => {
+    const expensesWithItems = monthExpenses.filter((e) => e.items && e.items.length > 0);
+    if (expensesWithItems.length === 0) return data?.grocery_insights ?? null;
+
+    const subcategoryMap = new Map<string, { amount: number; item_count: number }>();
+    let totalItemizedSpend = 0;
+    let uncategorizedCount = 0;
+
+    for (const expense of expensesWithItems) {
+      for (const item of expense.items ?? []) {
+        const total = item.total ?? 0;
+        const eurAmount = convertToEur(total, expense.currency, fxRates);
+        totalItemizedSpend += eurAmount;
+        const subcategory = item.subcategory ?? null;
+        if (!subcategory) { uncategorizedCount++; continue; }
+        const existing = subcategoryMap.get(subcategory) ?? { amount: 0, item_count: 0 };
+        subcategoryMap.set(subcategory, {
+          amount: existing.amount + eurAmount,
+          item_count: existing.item_count + 1,
+        });
+      }
+    }
+
+    const sorted = Array.from(subcategoryMap.entries())
+      .map(([name, stats]) => ({ name, ...stats }))
+      .sort((a, b) => b.amount - a.amount);
+
+    return {
+      item_count: sorted.reduce((s, c) => s + c.item_count, 0) + uncategorizedCount,
+      total_itemized_spend: totalItemizedSpend,
+      summary: data?.grocery_insights.summary ?? "",
+      top_subcategories: sorted.slice(0, 5),
+      least_subcategories: [...sorted].reverse().slice(0, 5),
+      uncategorized_count: uncategorizedCount,
+    };
+  }, [monthExpenses, fxRates, data?.grocery_insights]);
+
+  // Stable grocery data reference: prefers FX-re-aggregated data, falls back to backend totals.
+  const groceryData = fxGroceryInsights ?? data?.grocery_insights ?? null;
+
+  async function handleUpdateRates() {
+    if (detectedCurrencies.length === 0) return;
+    setFxLoading(true);
+    setFxError(null);
+    try {
+      const newRates = await fetchAndStoreRates(detectedCurrencies);
+      setFxRates(newRates);
+      setFxUpdatedAt(getStoredRatesUpdatedAt());
+    } catch {
+      setFxError("Could not fetch rates");
+    } finally {
+      setFxLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
@@ -62,10 +229,18 @@ export default function DashboardPage() {
           <p className="text-sm text-muted-foreground">Monthly visibility into cashflow, spending, income, budgets, and recurring transactions.</p>
         </div>
         <div className="flex flex-col gap-3 md:items-end">
-          <label className="text-sm">
-            <span className="mb-1 block text-muted-foreground">Month</span>
-            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="rounded-lg border border-border bg-card px-3 py-2" />
-          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-sm">
+              <span className="mb-1 block text-muted-foreground">Month</span>
+              <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="rounded-lg border border-border bg-card px-3 py-2" />
+            </label>
+            <div className="flex flex-col justify-end">
+              <span className="mb-1 block text-muted-foreground text-sm opacity-0 select-none">x</span>
+              <Link href="/expenses/new" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
+                + Add Expense
+              </Link>
+            </div>
+          </div>
           <div className="flex flex-col gap-2 md:items-end">
             <button
               type="button"
@@ -91,7 +266,41 @@ export default function DashboardPage() {
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-5">
-            {getDashboardSummaryStats(data).map((item) => <StatCard key={item.label} label={item.label} value={item.value} />)}
+            {getDashboardSummaryStats(data).map((item) => <StatCard key={item.label} label={item.label} value={item.value} lines={item.lines} />)}
+          </div>
+
+          {/* FX conversion toolbar — affects the "Spend by category" and "Top merchants" charts below */}
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-2.5">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span>Spend charts — EUR-equivalent totals</span>
+              {detectedCurrencies.length > 0 && (
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tracking-wide">
+                  {detectedCurrencies.join(" · ")}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                {fxUpdatedAt ? (
+                  <p className="text-xs text-muted-foreground">
+                    Rates updated {new Date(fxUpdatedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Using default rates</p>
+                )}
+                {fxError && <p className="text-xs text-red-400 mt-0.5">{fxError}</p>}
+              </div>
+              <button
+                type="button"
+                onClick={handleUpdateRates}
+                disabled={fxLoading || detectedCurrencies.length === 0}
+                title={detectedCurrencies.length === 0 ? "No non-EUR currencies detected in this month's expenses" : "Fetch live ECB rates for detected currencies"}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshIcon spinning={fxLoading} />
+                Update rates
+              </button>
+            </div>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
@@ -100,20 +309,20 @@ export default function DashboardPage() {
                 <h2 className="font-semibold">Spend by category</h2>
                 <p className="text-sm text-muted-foreground">Where your money went this month.</p>
               </div>
-              {data.spend_by_category.length === 0 ? <div className="py-16 text-center text-muted-foreground">No expenses yet for this month.</div> : (
+              {fxSpendByCategory.length === 0 ? <div className="py-16 text-center text-muted-foreground">No expenses yet for this month.</div> : (
                 <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
                   <div className="h-72">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
-                        <Pie data={data.spend_by_category} dataKey="amount" nameKey="name" innerRadius={70} outerRadius={100}>
-                          {data.spend_by_category.map((item, index) => <Cell key={item.name} fill={DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length]} />)}
+                        <Pie data={fxSpendByCategory} dataKey="amount" nameKey="name" innerRadius={70} outerRadius={100}>
+                          {fxSpendByCategory.map((item, index) => <Cell key={item.name} fill={DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length]} />)}
                         </Pie>
                         <Tooltip formatter={(value: number) => formatCurrency(value)} />
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
                   <div className="space-y-2">
-                    {data.spend_by_category.map((item, index) => (
+                    {fxSpendByCategory.map((item, index) => (
                       <div key={item.name} className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-sm">
                         <div className="flex items-center gap-2"><span className="h-3 w-3 rounded-full" style={{ backgroundColor: DASHBOARD_CHART_COLORS[index % DASHBOARD_CHART_COLORS.length] }} />{item.name}</div>
                         <span>{formatCurrency(item.amount)}</span>
@@ -131,7 +340,7 @@ export default function DashboardPage() {
               </div>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={data.top_merchants} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
+                  <BarChart data={fxTopMerchants} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(110,231,183,0.12)" />
                     <XAxis dataKey="merchant" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
                     <YAxis tickFormatter={(value) => `${value}`} />
@@ -176,14 +385,14 @@ export default function DashboardPage() {
                 <h2 className="font-semibold">Grocery subcategory insights</h2>
                 <p className="text-sm text-muted-foreground">LLM-assisted grouping of stored receipt line items to show what grocery things you buy most and least.</p>
               </div>
-              {data.grocery_insights.item_count === 0 ? <div className="py-16 text-center text-muted-foreground">No itemized grocery receipts yet for this month.</div> : (
+              {!groceryData || groceryData.item_count === 0 ? <div className="py-16 text-center text-muted-foreground">No itemized grocery receipts yet for this month.</div> : (
                 <div className="space-y-4">
-                  <div className="rounded-xl border border-border bg-background p-4 text-sm text-muted-foreground">{data.grocery_insights.summary}</div>
+                  <div className="rounded-xl border border-border bg-background p-4 text-sm text-muted-foreground">{groceryData.summary}</div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
                       <div className="mb-2 text-sm font-medium">Top grocery subcategories</div>
                       <div className="space-y-2">
-                        {data.grocery_insights.top_subcategories.map((item) => (
+                        {groceryData.top_subcategories.map((item) => (
                           <div key={item.name} className="flex items-center justify-between rounded-xl border border-border px-3 py-3 text-sm">
                             <div>
                               <div className="font-medium">{item.name}</div>
@@ -197,7 +406,7 @@ export default function DashboardPage() {
                     <div>
                       <div className="mb-2 text-sm font-medium">Lowest-spend grocery subcategories</div>
                       <div className="space-y-2">
-                        {data.grocery_insights.least_subcategories.map((item) => (
+                        {groceryData.least_subcategories.map((item) => (
                           <div key={item.name} className="flex items-center justify-between rounded-xl border border-border px-3 py-3 text-sm">
                             <div>
                               <div className="font-medium">{item.name}</div>
@@ -211,7 +420,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex items-center justify-between rounded-xl border border-border bg-background px-4 py-3 text-sm">
                     <span>Itemized grocery spend</span>
-                    <span className="font-medium">{formatCurrency(data.grocery_insights.total_itemized_spend)}</span>
+                    <span className="font-medium">{formatCurrency(groceryData.total_itemized_spend)}</span>
                   </div>
                 </div>
               )}
@@ -249,12 +458,47 @@ export default function DashboardPage() {
                   <div key={expense.id} className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
                     <div>
                       <div className="font-medium">{expense.merchant}</div>
-                      <div className="text-sm text-muted-foreground">{expense.category_name} · {formatDate(expense.expense_date)} · {transactionTypeLabel(expense.transaction_type)} · {transactionCadenceLabel(expense.cadence)}</div>
+                      <div className="text-sm text-muted-foreground">{expense.category_name} · {formatDate(expense.expense_date)} · {transactionTypeLabel(expense.transaction_type)} · {transactionCadenceLabel(expense.cadence, (expense as { cadence_interval?: number | null }).cadence_interval)}</div>
                     </div>
-                    <div className={`text-right font-medium ${expense.transaction_type === "credit" ? "text-emerald-400" : "text-red-400"}`}>{formatSignedCurrency(expense.amount, expense.transaction_type, expense.currency)}</div>
+                    <div className={`text-right font-medium ${expense.transaction_type === "credit" ? "text-emerald-400" : "text-red-400"}`}>{formatSignedFxHint(expense.amount, expense.transaction_type, expense.currency, fxRates)}</div>
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <div className="mb-4">
+              <h2 className="font-semibold">Prepaid subscriptions</h2>
+              <p className="text-sm text-muted-foreground">Lump-sum payments covering a fixed window of service. Coverage status is computed relative to today.</p>
+            </div>
+            <div className="space-y-3">
+              {data.prepaid_subscriptions.length === 0 ? (
+                <div className="py-12 text-center text-muted-foreground">No prepaid subscriptions recorded.</div>
+              ) : data.prepaid_subscriptions.map((sub) => {
+                const statusClasses = sub.status === "active" ? "bg-blue-500/15 text-blue-300" : sub.status === "expiring_soon" ? "bg-amber-500/15 text-amber-300" : "bg-gray-500/15 text-gray-400";
+                const statusLabel = sub.status === "expired"
+                  ? `Expired ${new Date(sub.prepaid_end_date).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}`
+                  : sub.days_remaining === 0
+                    ? "Expires today"
+                    : sub.status === "expiring_soon"
+                      ? `Expires in ${sub.days_remaining}d`
+                      : `${sub.days_remaining}d remaining`;
+                return (
+                  <div key={sub.id} className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
+                    <div>
+                      <div className="font-medium">{sub.merchant}</div>
+                      <div className="text-sm text-muted-foreground">
+                        {sub.category_name} · {sub.prepaid_months}mo coverage · starts {new Date(sub.prepaid_start_date).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <div className="font-medium text-red-400">{formatFxHint(sub.amount, sub.currency, fxRates)}</div>
+                      <span className={`rounded-full px-2 py-0.5 text-xs ${statusClasses}`}>{statusLabel}</span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -270,7 +514,7 @@ export default function DashboardPage() {
                     <div className="font-medium">{expense.merchant}</div>
                     <div className="text-sm text-muted-foreground">{expense.category_name} · {formatDate(expense.expense_date)} · {transactionCadenceLabel(expense.cadence)}</div>
                   </div>
-                  <div className="text-right font-medium text-red-400">{formatSignedCurrency(expense.amount, expense.transaction_type, expense.currency)}</div>
+                  <div className="text-right font-medium text-red-400">{formatSignedFxHint(expense.amount, expense.transaction_type, expense.currency, fxRates)}</div>
                 </div>
               ))}
             </div>

@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Numeric, String, Text, Uuid, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -35,6 +35,9 @@ class Expense(Base):
     is_recurring: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     cadence: Mapped[str] = mapped_column(String(20), nullable=False, server_default="one_time", index=True)
     cadence_override: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    cadence_interval: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    prepaid_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prepaid_start_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     recurring_variable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     recurring_auto_add: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     recurring_source_expense_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("expenses.id", ondelete="SET NULL"), nullable=True, index=True)

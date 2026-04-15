@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createCategory, createItemKeywordRule, createMerchantRule, deleteCategory, deleteItemKeywordRule, deleteKnowledgeBaseEntry, deleteMerchantRule, getCurrentUserProfile, listCategories, listItemKeywordRules, listKnowledgeBase, listMerchantRules, updateReceiptPrompt, uploadKnowledgeBase, type Category, type ItemKeywordRule, type KnowledgeBaseEntry, type MerchantRule } from "@/lib/api";
+import { createCategory, createItemKeywordRule, createMerchantRule, deleteCategory, deleteItemKeywordRule, deleteKnowledgeBaseEntry, deleteMerchantRule, getCurrentUserProfile, listCategories, listItemKeywordRules, listKnowledgeBase, listLearntEntries, listMerchantRules, updateReceiptPrompt, uploadKnowledgeBase, type Category, type ItemKeywordRule, type KnowledgeBaseEntry, type MerchantRule } from "@/lib/api";
 
 const DEFAULT_RECEIPT_SYSTEM_PROMPT = "You extract receipt fields from images into validated JSON for a transaction draft. The JSON may represent either a debit expense or a credit refund, but default to debit when unsure. Receipt text can be in Italian. Merchant should be the store name, not a random footer or tax line. Never return prose, markdown, or code fences. Return JSON only.";
 
@@ -26,6 +26,7 @@ export default function RulesPage() {
   const [merchantRules, setMerchantRules] = useState<MerchantRule[]>([]);
   const [itemRules, setItemRules] = useState<ItemKeywordRule[]>([]);
   const [kbEntries, setKbEntries] = useState<KnowledgeBaseEntry[]>([]);
+  const [learntEntries, setLearntEntries] = useState<KnowledgeBaseEntry[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [categoryForm, setCategoryForm] = useState({ name: "", color: "#34d399", description: "", transaction_type: "debit", is_system: false });
   const [merchantForm, setMerchantForm] = useState({ merchant_pattern: "", category_id: "", pattern_type: "fuzzy", priority: "100", is_global: false });
@@ -47,17 +48,19 @@ export default function RulesPage() {
   const visibleCategories = categoriesExpanded ? categories : categories.slice(0, 2);
 
   async function load() {
-    const [categoryData, merchantRuleData, itemRuleData, profile, kbData] = await Promise.all([
+    const [categoryData, merchantRuleData, itemRuleData, profile, kbData, learntData] = await Promise.all([
       listCategories(),
       listMerchantRules(),
       listItemKeywordRules(),
       getCurrentUserProfile(),
-      listKnowledgeBase(),
+      listKnowledgeBase(undefined, "document"),
+      listLearntEntries(),
     ]);
     setCategories(categoryData);
     setMerchantRules(merchantRuleData);
     setItemRules(itemRuleData);
     setKbEntries(kbData);
+    setLearntEntries(learntData);
     setIsAdmin(profile.is_admin ?? false);
     setReceiptPrompt(profile.receipt_prompt_override || DEFAULT_RECEIPT_SYSTEM_PROMPT);
   }
@@ -339,6 +342,38 @@ export default function RulesPage() {
           </div>
         ) : (
           <div className="rounded-xl border border-border bg-background px-4 py-8 text-center text-sm text-muted-foreground">No knowledge-base entries yet. Upload a CSV to get started.</div>
+        )}
+      </div>
+
+      {/* Learnt from user — full width */}
+      <div className="rounded-2xl border border-border bg-card p-6 space-y-4">
+        <div>
+          <h2 className="text-xl font-semibold">Learnt from user <span className="ml-2 rounded bg-secondary px-2 py-0.5 text-sm font-normal text-muted-foreground">Auto</span></h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Subcategory mappings auto-created when you corrected receipt items. Used for semantic matching of future similar items.
+          </p>
+        </div>
+
+        {learntEntries.length > 0 ? (
+          <div className="space-y-2 border-t border-border pt-4">
+            <p className="text-xs text-muted-foreground">{learntEntries.length} learnt entries</p>
+            <div className="max-h-64 overflow-y-auto space-y-1">
+              {learntEntries.map((entry) => (
+                <div key={entry.id} className="flex items-center justify-between rounded-xl border border-border px-4 py-2 text-sm">
+                  <div>
+                    <span className="font-medium">{entry.description_text}</span>
+                    <span className="ml-2 text-muted-foreground">→ {entry.subcategory_label}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground">{new Date(entry.created_at).toLocaleDateString()}</span>
+                    <button type="button" onClick={() => deleteKnowledgeBaseEntry(entry.id).then(load)} className="rounded-lg border border-border px-3 py-1 text-xs hover:bg-accent">Delete</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-border bg-background px-4 py-8 text-center text-sm text-muted-foreground">No learnt entries yet. Correct a receipt item subcategory and it will appear here automatically.</div>
         )}
       </div>
     </div>

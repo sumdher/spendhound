@@ -9,9 +9,11 @@ import { currentMonthString, formatCurrency, formatDate, formatSignedCurrency, m
 function cadenceBadgeClasses(cadence: string) {
   switch (cadence) {
     case "monthly":
-      return "bg-red-500/15 text-red-300";
     case "yearly":
+    case "custom":
       return "bg-red-500/15 text-red-300";
+    case "prepaid":
+      return "bg-blue-500/15 text-blue-300";
     default:
       return "bg-orange-500/15 text-orange-300";
   }
@@ -71,10 +73,21 @@ export default function ExpensesPage() {
     load();
   }, [load]);
 
-  const totals = useMemo(() => {
-    const moneyIn = expenses.filter((item) => item.transaction_type === "credit").reduce((sum, item) => sum + item.amount, 0);
-    const moneyOut = expenses.filter((item) => item.transaction_type !== "credit").reduce((sum, item) => sum + item.amount, 0);
-    return { moneyIn, moneyOut, net: moneyIn - moneyOut };
+  const byCurrency = useMemo(() => {
+    const map: Record<string, { moneyIn: number; moneyOut: number }> = {};
+    for (const item of expenses) {
+      const cur = item.currency || "EUR";
+      if (!map[cur]) map[cur] = { moneyIn: 0, moneyOut: 0 };
+      if (item.transaction_type === "credit") map[cur].moneyIn += item.amount;
+      else map[cur].moneyOut += item.amount;
+    }
+    // EUR first, then descending by total volume
+    const sorted = Object.entries(map).sort(([a], [b]) => a === "EUR" ? -1 : b === "EUR" ? 1 : 0);
+    return {
+      moneyOutEntries: sorted.filter(([, v]) => v.moneyOut > 0),
+      moneyInEntries: sorted.filter(([, v]) => v.moneyIn > 0),
+      netEntries: sorted.map(([currency, { moneyIn, moneyOut }]) => ({ currency, net: moneyIn - moneyOut })).filter(({ net }) => net !== 0 || sorted.length === 1),
+    };
   }, [expenses]);
 
   async function handleDelete(id: string) {
@@ -147,6 +160,8 @@ export default function ExpensesPage() {
               <option value="">All cadences</option>
               <option value="monthly">Monthly recurring</option>
               <option value="yearly">Yearly recurring</option>
+              <option value="custom">Custom interval</option>
+              <option value="prepaid">Prepaid subscription</option>
               <option value="one_time">One-time / irregular</option>
             </select>
           </label>
@@ -169,15 +184,33 @@ export default function ExpensesPage() {
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="rounded-xl border border-border bg-background px-4 py-3">
               <div className="text-sm text-muted-foreground">Money out</div>
-              <div className="text-2xl font-semibold text-red-400">{formatCurrency(totals.moneyOut)}</div>
+              {byCurrency.moneyOutEntries.length === 0
+                ? <div className="text-2xl font-semibold text-red-400">{formatCurrency(0)}</div>
+                : byCurrency.moneyOutEntries.map(([currency, amounts], i) => (
+                  <div key={currency} className={`font-semibold text-red-400 ${i === 0 ? "text-2xl" : "mt-0.5 text-sm opacity-70"}`}>
+                    {formatCurrency(amounts.moneyOut, currency)}
+                  </div>
+                ))}
             </div>
             <div className="rounded-xl border border-border bg-background px-4 py-3">
               <div className="text-sm text-muted-foreground">Money in</div>
-              <div className="text-2xl font-semibold text-emerald-400">{formatCurrency(totals.moneyIn)}</div>
+              {byCurrency.moneyInEntries.length === 0
+                ? <div className="text-2xl font-semibold text-emerald-400">{formatCurrency(0)}</div>
+                : byCurrency.moneyInEntries.map(([currency, amounts], i) => (
+                  <div key={currency} className={`font-semibold text-emerald-400 ${i === 0 ? "text-2xl" : "mt-0.5 text-sm opacity-70"}`}>
+                    {formatCurrency(amounts.moneyIn, currency)}
+                  </div>
+                ))}
             </div>
             <div className="rounded-xl border border-border bg-background px-4 py-3">
               <div className="text-sm text-muted-foreground">Net</div>
-              <div className={`text-2xl font-semibold ${totals.net >= 0 ? "text-emerald-400" : "text-red-400"}`}>{formatCurrency(totals.net)}</div>
+              {byCurrency.netEntries.length === 0
+                ? <div className="text-2xl font-semibold text-emerald-400">{formatCurrency(0)}</div>
+                : byCurrency.netEntries.map(({ currency, net }, i) => (
+                  <div key={currency} className={`font-semibold ${net >= 0 ? "text-emerald-400" : "text-red-400"} ${i === 0 ? "text-2xl" : "mt-0.5 text-sm opacity-70"}`}>
+                    {formatCurrency(net, currency)}
+                  </div>
+                ))}
             </div>
           </div>
           <div className="text-right">
@@ -204,36 +237,48 @@ export default function ExpensesPage() {
                 </tr>
               </thead>
               <tbody>
-                {expenses.map((expense) => (
-                  <tr key={expense.id} className="border-b border-border/50">
-                    <td className="py-3 pr-4">{formatDate(expense.expense_date)}</td>
-                    <td className="py-3 pr-4">
-                      <Link href={detailMonthParam ? `/expenses/${expense.id}?month=${detailMonthParam}` : `/expenses/${expense.id}`} className="-m-1 block rounded-lg p-1 hover:bg-accent">
+                {expenses.map((expense) => {
+                  const detailHref = detailMonthParam ? `/expenses/${expense.id}?month=${detailMonthParam}` : `/expenses/${expense.id}`;
+                  const editHref = detailMonthParam ? `/expenses/${expense.id}?month=${detailMonthParam}&mode=edit` : `/expenses/${expense.id}?mode=edit`;
+                  return (
+                    <tr
+                      key={expense.id}
+                      className="cursor-pointer border-b border-border/50 hover:bg-accent/40 transition-colors"
+                      onClick={() => router.push(detailHref)}
+                    >
+                      <td className="py-3 pr-4">{formatDate(expense.expense_date)}</td>
+                      <td className="py-3 pr-4">
                         <div className="font-medium">{expense.merchant}</div>
                         <div className="mt-1 flex flex-wrap gap-2 text-xs text-muted-foreground">
                           <span>{expense.description || expense.receipt_filename || "—"}</span>
                           {expense.auto_generated ? <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-[11px] text-red-300">{expense.needs_review ? "Auto-added draft" : "Auto-added"}</span> : null}
                           {expense.recurring_variable ? <span className="rounded-full bg-yellow-500/15 px-2 py-0.5 text-[11px] text-yellow-300">Variable recurring</span> : null}
                           {expense.is_major_purchase ? <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] text-amber-300">Major purchase</span> : null}
+                          {expense.cadence === "prepaid" && expense.prepaid_end_date ? (() => {
+                            const daysLeft = Math.floor((new Date(expense.prepaid_end_date).getTime() - Date.now()) / 86400000);
+                            const cls = daysLeft < 0 ? "bg-gray-500/15 text-gray-400" : daysLeft <= 30 ? "bg-amber-500/15 text-amber-300" : "bg-blue-500/15 text-blue-300";
+                            const label = daysLeft < 0 ? `Expired` : daysLeft === 0 ? "Expires today" : daysLeft <= 30 ? `Expires in ${daysLeft}d` : `Until ${new Date(expense.prepaid_end_date).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}`;
+                            return <span className={`rounded-full px-2 py-0.5 text-[11px] ${cls}`}>{label}</span>;
+                          })() : null}
                         </div>
-                      </Link>
-                    </td>
-                    <td className="py-3 pr-4"><span className={`rounded-full px-2 py-1 text-xs ${transactionTypeBadgeClasses(expense.transaction_type)}`}>{transactionTypeLabel(expense.transaction_type)}</span></td>
-                    <td className="py-3 pr-4"><span className={`rounded-full px-2 py-1 text-xs ${cadenceBadgeClasses(expense.cadence)}`}>{transactionCadenceLabel(expense.cadence)}</span></td>
-                    <td className="py-3 pr-4">{expense.category_name ?? "Uncategorized"}</td>
-                    <td className="py-3 pr-4 capitalize">{expense.source}</td>
-                    <td className={`py-3 pr-4 font-medium ${expense.transaction_type === "credit" ? "text-emerald-400" : "text-red-400"}`}>{formatSignedCurrency(expense.amount, expense.transaction_type, expense.currency)}</td>
-                    <td className="py-3 pr-4">
-                      {expense.needs_review ? <span className="rounded-full bg-yellow-500/15 px-2 py-1 text-xs text-yellow-400">Needs review</span> : <span className="rounded-full bg-green-500/15 px-2 py-1 text-xs text-green-400">Tracked</span>}
-                    </td>
-                    <td className="py-3 pr-0 text-right">
-                      <div className="flex justify-end gap-2">
-                        <Link href={detailMonthParam ? `/expenses/${expense.id}?month=${detailMonthParam}` : `/expenses/${expense.id}`} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">View</Link>
-                        <button onClick={() => handleDelete(expense.id)} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="py-3 pr-4"><span className={`rounded-full px-2 py-1 text-xs ${transactionTypeBadgeClasses(expense.transaction_type)}`}>{transactionTypeLabel(expense.transaction_type)}</span></td>
+                      <td className="py-3 pr-4"><span className={`rounded-full px-2 py-1 text-xs ${cadenceBadgeClasses(expense.cadence)}`}>{transactionCadenceLabel(expense.cadence, expense.cadence_interval)}</span></td>
+                      <td className="py-3 pr-4">{expense.category_name ?? "Uncategorized"}</td>
+                      <td className="py-3 pr-4 capitalize">{expense.source}</td>
+                      <td className={`py-3 pr-4 font-medium ${expense.transaction_type === "credit" ? "text-emerald-400" : "text-red-400"}`}>{formatSignedCurrency(expense.amount, expense.transaction_type, expense.currency)}</td>
+                      <td className="py-3 pr-4">
+                        {expense.needs_review ? <span className="rounded-full bg-yellow-500/15 px-2 py-1 text-xs text-yellow-400">Needs review</span> : <span className="rounded-full bg-green-500/15 px-2 py-1 text-xs text-green-400">Tracked</span>}
+                      </td>
+                      <td className="py-3 pr-0 text-right">
+                        <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                          <Link href={editHref} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">Edit</Link>
+                          <button onClick={() => void handleDelete(expense.id)} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
