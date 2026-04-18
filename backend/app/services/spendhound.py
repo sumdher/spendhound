@@ -730,6 +730,8 @@ def serialize_expense(
     receipt_preview: dict | None = None,
     receipt_document_kind: str | None = None,
     receipt_ocr_text: str | None = None,
+    ledger_name: str | None = None,
+    added_by: dict | None = None,
 ) -> dict:
     payload = {
         "id": str(expense.id),
@@ -762,6 +764,9 @@ def serialize_expense(
         "category_name": category_name,
         "receipt_id": str(expense.receipt_id) if expense.receipt_id else None,
         "receipt_filename": receipt_filename,
+        "ledger_id": str(expense.ledger_id) if expense.ledger_id else None,
+        "ledger_name": ledger_name,
+        "added_by": added_by,
         "created_at": expense.created_at.isoformat(),
         "updated_at": expense.updated_at.isoformat(),
     }
@@ -968,7 +973,7 @@ async def generate_recurring_expenses_for_month(db: AsyncSession, user_id: uuid.
 def apply_expense_filters(
     statement,
     *,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None,
     month: str | None = None,
     category_id: uuid.UUID | None = None,
     transaction_type: str | None = None,
@@ -976,7 +981,8 @@ def apply_expense_filters(
     review_only: bool = False,
     search: str | None = None,
 ):
-    statement = statement.where(Expense.user_id == user_id)
+    if user_id is not None:
+        statement = statement.where(Expense.user_id == user_id)
     if month and month not in {"all", "all_time"}:
         start = month_start_from_string(month)
         statement = statement.where(Expense.expense_date >= start, Expense.expense_date < next_month(start))

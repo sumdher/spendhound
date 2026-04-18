@@ -32,6 +32,10 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
+    created_ledgers: Mapped[list["Ledger"]] = relationship("Ledger", foreign_keys="Ledger.created_by", back_populates="creator", cascade="all, delete-orphan")
+    ledger_memberships: Mapped[list["LedgerMembership"]] = relationship("LedgerMembership", back_populates="user", cascade="all, delete-orphan")
+    sent_partner_requests: Mapped[list["PartnerRequest"]] = relationship("PartnerRequest", foreign_keys="PartnerRequest.requester_id", back_populates="requester", cascade="all, delete-orphan")
+    received_partner_requests: Mapped[list["PartnerRequest"]] = relationship("PartnerRequest", foreign_keys="PartnerRequest.recipient_id", back_populates="recipient")
     categories: Mapped[list["Category"]] = relationship("Category", back_populates="user", cascade="all, delete-orphan")
     merchant_rules: Mapped[list["MerchantRule"]] = relationship("MerchantRule", back_populates="user", cascade="all, delete-orphan")
     item_keyword_rules: Mapped[list["ItemKeywordRule"]] = relationship("ItemKeywordRule", back_populates="user", cascade="all, delete-orphan")

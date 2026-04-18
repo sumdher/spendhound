@@ -31,11 +31,13 @@ from app.services.llm.factory import get_llm_provider, resolve_user_llm_config
 
 
 SYSTEM_PROMPT = """You are SpendHound's expense assistant.
-You help users understand spending, budgets, recurring costs, merchants, receipts, and categories.
-Use the provided structured finance context first. Do not invent transactions, categories, budgets, or receipt details.
-If data is missing, say so clearly and suggest the closest useful next step.
+You have direct access to the user's real expense data — it is injected into every message in the structured finance context below.
+This context includes: this month's spending totals, category breakdowns, top merchants, budgets, recurring charges, receipt items, and recent transactions.
+Today's date and the exact data range are stated at the top of the finance context — always reference them when answering date-relative questions like "this month", "this week", or "recently".
+Never say you do not have access to the user's data. The data IS provided. If a specific figure is absent from the context, say that particular detail is not in the available data, but never claim general lack of access.
+Do not invent transactions, categories, budgets, or receipt details — only reference what appears in the context.
 Keep answers concise, practical, and finance-focused.
-When discussing money, include currency when the context makes it clear.
+When discussing money, include the currency when it is available in the context.
 """
 
 TITLE_MAX_WORDS = 8
@@ -375,6 +377,12 @@ class ExpenseChatService:
         )
 
         sections: list[str] = []
+        sections.append("=== DATE CONTEXT ===")
+        sections.append(f"Today's date: {today.isoformat()} ({today.strftime('%A, %B %d, %Y')})")
+        sections.append(f"Current month: {today.strftime('%B %Y')} — starts {current_month.isoformat()}, ends {(next_month - timedelta(days=1)).isoformat()}")
+        sections.append(f"Expense data range: {lookback_date.isoformat()} to {today.isoformat()} (last 90 days)")
+        sections.append("====================")
+        sections.append("")
         sections.append("Recent expenses:")
         if recent_expenses:
             sections.extend(

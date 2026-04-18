@@ -110,6 +110,43 @@ async def send_monthly_report_email(
     return response.get("id")
 
 
+async def send_partner_request_email(
+    *,
+    requester_name: str | None,
+    requester_email: str,
+    recipient_email: str,
+    accept_url: str,
+    reject_url: str,
+) -> None:
+    try:
+        response = await send_email(
+            to=[recipient_email],
+            subject=f"[SpendHound] {requester_name or requester_email} wants to add you as an expense partner",
+            html=_partner_request_email_html(requester_name, requester_email, accept_url, reject_url),
+        )
+        if response is not None:
+            logger.info("Partner request email sent", to=recipient_email, resend_email_id=response.get("id"))
+    except Exception as error:
+        logger.error("Failed to send partner request email", error=str(error))
+
+
+def _partner_request_email_html(requester_name: str | None, requester_email: str, accept_url: str, reject_url: str) -> str:
+    name = requester_name or requester_email
+    return f"""<!DOCTYPE html>
+<html>
+<body style='font-family: sans-serif; color: #111827; max-width: 600px; margin: 0 auto; padding: 32px;'>
+  <h2 style='color: #3b82f6; margin-bottom: 8px;'>SpendHound — Expense Partner Request</h2>
+  <p><strong>{name}</strong> ({requester_email}) wants to add you as an expense partner on SpendHound.</p>
+  <p style='color: #6b7280;'>Expense partners can share ledgers and collaborate on expenses together.</p>
+  <div style='margin: 28px 0;'>
+    <a href='{accept_url}' style='background: #22c55e; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; margin-right: 12px; display: inline-block;'>✓ Accept</a>
+    <a href='{reject_url}' style='background: #ef4444; color: white; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-block;'>✗ Decline</a>
+  </div>
+  <p style='color: #9ca3af; font-size: 12px; margin-top: 32px;'>If you don't have a SpendHound account, you'll need to sign up first to accept. Sent by SpendHound.</p>
+</body>
+</html>"""
+
+
 def _approval_email_html(user_email: str, user_name: str | None, approve_url: str, reject_url: str) -> str:
     name = user_name or user_email
     return f"""<!DOCTYPE html>

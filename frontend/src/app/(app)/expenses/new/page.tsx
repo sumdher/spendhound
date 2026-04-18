@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createExpense, createExpenseFromReceipt, createExpenseFromStatementEntry, listCategories, uploadReceipt, uploadStatement, type Category, type Receipt, type ReceiptPreview, type ReceiptPreviewItem, type StatementImportEntry, type StatementImportPreview } from "@/lib/api";
+import { createExpense, createExpenseFromReceipt, createExpenseFromStatementEntry, createLedger, listCategories, listLedgers, listPartners, uploadReceipt, uploadStatement, type Category, type Ledger, type Partner, type Receipt, type ReceiptPreview, type ReceiptPreviewItem, type StatementImportEntry, type StatementImportPreview } from "@/lib/api";
 import { currentMonthString, formatSignedCurrency, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
 
 type ExpenseFormState = {
@@ -258,10 +258,16 @@ function CadenceSelector({ value, onChange, disabled = false }: { value: string;
           ))}
         </div>
       ) : (
-        <div className="flex items-center gap-3 rounded-xl border border-border bg-background px-4 py-2.5 text-sm">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setOpen(true)}
+          className="flex w-full items-center gap-3 rounded-xl border border-border bg-background px-4 py-2.5 text-sm text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+        >
           <span className="font-medium">{selected.label}</span>
           <span className="text-xs text-muted-foreground">{selected.description}</span>
-        </div>
+          <span className="ml-auto text-xs text-muted-foreground/60">tap to change</span>
+        </button>
       )}
     </div>
   );
@@ -513,6 +519,84 @@ function RecurringSettingsPanel({
   );
 }
 
+function LedgerSelector({
+  ledgers, selectedLedgerId, onSelect,
+  newLedgerFormOpen, onToggleNewForm,
+  newLedgerName, onNewLedgerNameChange,
+  newLedgerType, onNewLedgerTypeChange,
+  partners, selectedMemberIds, onMemberIdsChange,
+  onCreateLedger, creatingLedger, disabled = false,
+}: {
+  ledgers: Ledger[];
+  selectedLedgerId: string;
+  onSelect: (id: string) => void;
+  newLedgerFormOpen: boolean;
+  onToggleNewForm: () => void;
+  newLedgerName: string;
+  onNewLedgerNameChange: (v: string) => void;
+  newLedgerType: "personal" | "shared";
+  onNewLedgerTypeChange: (v: "personal" | "shared") => void;
+  partners: Partner[];
+  selectedMemberIds: string[];
+  onMemberIdsChange: (ids: string[]) => void;
+  onCreateLedger: () => void;
+  creatingLedger: boolean;
+  disabled?: boolean;
+}) {
+  function toggleMember(userId: string) {
+    onMemberIdsChange(
+      selectedMemberIds.includes(userId)
+        ? selectedMemberIds.filter((id) => id !== userId)
+        : [...selectedMemberIds, userId]
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-border bg-background p-4 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-medium">Save to ledger</div>
+        <button type="button" disabled={disabled} onClick={onToggleNewForm} className="text-xs text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-60">
+          {newLedgerFormOpen ? "Cancel" : "+ New ledger"}
+        </button>
+      </div>
+      <select value={selectedLedgerId} onChange={(e) => onSelect(e.target.value)} disabled={disabled} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60">
+        <option value="">General</option>
+        {ledgers.map((l) => <option key={l.id} value={l.id}>{l.name} ({l.type})</option>)}
+      </select>
+      {newLedgerFormOpen && (
+        <div className="space-y-2 rounded-xl border border-border bg-card p-3">
+          <input placeholder="Ledger name" value={newLedgerName} onChange={(e) => onNewLedgerNameChange(e.target.value)} disabled={creatingLedger} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm disabled:opacity-60" />
+          <div className="flex gap-2">
+            {(["personal", "shared"] as const).map((t) => (
+              <button key={t} type="button" disabled={creatingLedger} onClick={() => onNewLedgerTypeChange(t)}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-medium capitalize ${newLedgerType === t ? "border-primary bg-primary/5 text-primary" : "border-border bg-background hover:bg-accent"} disabled:cursor-not-allowed disabled:opacity-60`}>
+                {t}
+              </button>
+            ))}
+          </div>
+          {newLedgerType === "shared" && partners.length > 0 && (
+            <div className="space-y-1.5">
+              <div className="text-xs text-muted-foreground font-medium">Add partners</div>
+              {partners.map((p) => (
+                <label key={p.id} className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 text-xs cursor-pointer hover:bg-accent">
+                  <input type="checkbox" checked={selectedMemberIds.includes(p.id)} onChange={() => toggleMember(p.id)} disabled={creatingLedger} className="shrink-0" />
+                  <span className="flex flex-col">
+                    <span className="font-medium">{p.name || p.email}</span>
+                    {p.name && <span className="text-muted-foreground">{p.email}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          <button type="button" onClick={onCreateLedger} disabled={creatingLedger || !newLedgerName.trim()} className="rounded-lg bg-primary px-4 py-2 text-xs font-medium text-primary-foreground disabled:opacity-60">
+            {creatingLedger ? "Creating…" : "Create ledger"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function NewExpensePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -538,6 +622,16 @@ export default function NewExpensePage() {
   const [uploadingStatement, setUploadingStatement] = useState(false);
   const [finalizingStatement, setFinalizingStatement] = useState(false);
   const [itemsCurrency, setItemsCurrency] = useState(DEFAULT_CURRENCY);
+  const [ledgers, setLedgers] = useState<Ledger[]>([]);
+  const [partners, setPartners] = useState<Partner[]>([]);
+  const [selectedLedgerId, setSelectedLedgerId] = useState("");
+  const [newLedgerFormOpen, setNewLedgerFormOpen] = useState(false);
+  const [newLedgerName, setNewLedgerName] = useState("");
+  const [newLedgerType, setNewLedgerType] = useState<"personal" | "shared">("personal");
+  const [newLedgerMemberIds, setNewLedgerMemberIds] = useState<string[]>([]);
+  const [creatingLedger, setCreatingLedger] = useState(false);
+  const [manualItems, setManualItems] = useState<ReceiptPreviewItem[]>([]);
+  const [manualItemsCurrency, setManualItemsCurrency] = useState(DEFAULT_CURRENCY);
   const [manualDisplayAsEur, setManualDisplayAsEur] = useState(false);
   const [manualEurRate, setManualEurRate] = useState<number | null>(null);
   const [receiptDisplayAsEur, setReceiptDisplayAsEur] = useState(false);
@@ -552,6 +646,8 @@ export default function NewExpensePage() {
 
   useEffect(() => {
     listCategories().then(setCategories).catch(() => {});
+    listLedgers().then((res) => setLedgers(res.ledgers)).catch(() => {});
+    listPartners().then((res) => setPartners(res.partners)).catch(() => {});
   }, []);
 
   // Restore receipt draft from localStorage on mount
@@ -630,6 +726,21 @@ export default function NewExpensePage() {
     setStatementDraft((current) => current.category_id === categoryId ? current : { ...current, category_id: categoryId, category_name: "" });
   }, [categories, currentStatementEntry]);
 
+  function addManualItem() {
+    setManualItems((current) => [...current, { id: crypto.randomUUID(), description: "", quantity: null, unit_price: null, total: null, subcategory: null }]);
+  }
+
+  function removeManualItem(index: number) {
+    setManualItems((current) => current.filter((_, i) => i !== index));
+  }
+
+  function updateManualItem(index: number, field: keyof ReceiptPreviewItem, value: string) {
+    setManualItems((current) => current.map((item, i) => i !== index ? item : {
+      ...item,
+      [field]: value === "" ? null : field === "description" || field === "subcategory" ? value : Number(value),
+    }));
+  }
+
   function updateReceiptItem(index: number, field: keyof ReceiptPreviewItem, value: string) {
     setReceiptDraft((current) => ({
       ...current,
@@ -662,6 +773,25 @@ export default function NewExpensePage() {
     setItemsCurrency(DEFAULT_CURRENCY);
     draftRestoredFromStorageRef.current = false;
     localStorage.removeItem("spendhound_receipt_draft");
+  }
+
+  async function handleCreateLedger() {
+    if (!newLedgerName.trim()) return;
+    setCreatingLedger(true);
+    try {
+      const ledger = await createLedger({
+        name: newLedgerName.trim(),
+        type: newLedgerType,
+        member_user_ids: newLedgerType === "shared" ? newLedgerMemberIds : undefined,
+      });
+      setLedgers((prev) => [...prev, ledger]);
+      setSelectedLedgerId(ledger.id);
+      setNewLedgerFormOpen(false);
+      setNewLedgerName("");
+      setNewLedgerType("personal");
+      setNewLedgerMemberIds([]);
+    } catch {}
+    finally { setCreatingLedger(false); }
   }
 
   function setTab(tab: string) {
@@ -700,7 +830,8 @@ export default function NewExpensePage() {
         category_id: manualForm.category_id || null,
         category_name: manualForm.category_id ? null : manualForm.category_name || null,
         notes: manualOriginalNote ? [manualOriginalNote, manualForm.notes].filter(Boolean).join("\n") : manualForm.notes || null,
-        items: null,
+        items: manualItems.length > 0 ? manualItems : null,
+        ledger_id: selectedLedgerId || null,
       });
       router.push("/expenses");
     } catch (err) {
@@ -778,6 +909,7 @@ export default function NewExpensePage() {
         notes: receiptOriginalNote ? [receiptOriginalNote, receiptDraft.notes].filter(Boolean).join("\n") : receiptDraft.notes || null,
         items: receiptDraft.items,
         confidence: Number(receiptDraft.confidence),
+        ledger_id: selectedLedgerId || null,
       });
       localStorage.removeItem("spendhound_receipt_draft");
       router.push(`/expenses?month=${savedExpense.expense_date.slice(0, 7)}`);
@@ -819,6 +951,7 @@ export default function NewExpensePage() {
         category_name: statementDraft.category_id ? null : statementDraft.category_name || null,
         notes: stmtOriginalNote ? [stmtOriginalNote, statementDraft.notes].filter(Boolean).join("\n") : statementDraft.notes || null,
         confidence: Number(statementDraft.confidence),
+        ledger_id: selectedLedgerId || null,
       });
       setSelectedStatement(result.statement);
       const nextEntries = result.statement.preview && isStatementPreview(result.statement.preview) ? result.statement.preview.entries : [];
@@ -897,6 +1030,73 @@ export default function NewExpensePage() {
             </label>
             <label className="text-sm"><span className="mb-1 block text-muted-foreground">Custom category name</span><input value={manualForm.category_name} onChange={(e) => setManualForm({ ...manualForm, category_name: e.target.value })} disabled={!!manualForm.category_id} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:opacity-50" /></label>
           </div>
+          <div className="rounded-2xl border border-border bg-background p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-medium">Nested items</div>
+                <p className="text-xs text-muted-foreground">Optionally break this expense into line-items (e.g. grocery products).</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {manualItems.length > 0 && (
+                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span>Currency</span>
+                    <select value={manualItemsCurrency} onChange={(e) => setManualItemsCurrency(e.target.value)} className="rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground">
+                      {COMMON_CURRENCIES.map((c) => <option key={c.code} value={c.code}>{c.symbol} {c.code}</option>)}
+                    </select>
+                  </label>
+                )}
+                <button type="button" onClick={addManualItem} className="rounded-lg border border-border px-3 py-1 text-xs hover:bg-accent">Add item</button>
+              </div>
+            </div>
+            {manualItems.length > 0 && (
+              <table className="w-full text-sm border-collapse table-fixed">
+                <thead>
+                  <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                    <th className="pb-2 font-medium">Item</th>
+                    <th className="pb-2 font-medium w-12 text-center">Qty</th>
+                    <th className="pb-2 font-medium w-24">Total</th>
+                    <th className="pb-2 font-medium w-32">Subcategory</th>
+                    <th className="pb-2 w-8" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {manualItems.map((item, index) => (
+                    <tr key={item.id ?? index} className="border-b border-border/40 last:border-0">
+                      <td className="py-2 pr-4 min-w-0">
+                        <input type="text" value={item.description ?? ""} onChange={(e) => updateManualItem(index, "description", e.target.value)} placeholder={`Item ${index + 1}`} className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground" />
+                      </td>
+                      <td className="py-2 pr-3 text-center w-12">
+                        <select value={quantityModeForItem(item)} onChange={(e) => updateManualItem(index, "quantity", e.target.value === "custom" ? "" : e.target.value)} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground">
+                          {ITEM_QUANTITY_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                          <option value="custom">…</option>
+                        </select>
+                      </td>
+                      <td className="py-2 pr-3 w-24">
+                        <div className="flex items-center rounded-md border border-border bg-background px-2 py-1.5 w-full">
+                          <span className="text-xs text-muted-foreground select-none mr-1">{getCurrencySymbol(manualItemsCurrency)}</span>
+                          <input type="number" step="0.01" value={item.total ?? ""} onChange={(e) => updateManualItem(index, "total", e.target.value)} className="min-w-0 flex-1 bg-transparent text-xs text-foreground outline-none" />
+                        </div>
+                      </td>
+                      <td className="py-2 pr-3 w-32">
+                        <select value={ITEM_SUBCATEGORY_OPTIONS.includes(item.subcategory ?? "") ? item.subcategory ?? "" : item.subcategory ? "__custom__" : ""} onChange={(e) => updateManualItem(index, "subcategory", e.target.value === "__custom__" ? (item.subcategory && !ITEM_SUBCATEGORY_OPTIONS.includes(item.subcategory) ? item.subcategory : "") : e.target.value)} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground">
+                          <option value="">None</option>
+                          {ITEM_SUBCATEGORY_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+                          <option value="__custom__">Custom…</option>
+                        </select>
+                        {!ITEM_SUBCATEGORY_OPTIONS.includes(item.subcategory ?? "") && item.subcategory ? (
+                          <input value={item.subcategory} onChange={(e) => updateManualItem(index, "subcategory", e.target.value)} className="mt-1.5 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground" placeholder="Custom subcategory" />
+                        ) : null}
+                      </td>
+                      <td className="py-2 w-8">
+                        <button type="button" onClick={() => removeManualItem(index)} aria-label={`Remove item ${index + 1}`} className="flex h-6 w-6 items-center justify-center rounded-md bg-red-600 text-xs font-bold text-white hover:bg-red-700">×</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+          <LedgerSelector ledgers={ledgers} selectedLedgerId={selectedLedgerId} onSelect={setSelectedLedgerId} newLedgerFormOpen={newLedgerFormOpen} onToggleNewForm={() => setNewLedgerFormOpen((v) => !v)} newLedgerName={newLedgerName} onNewLedgerNameChange={setNewLedgerName} newLedgerType={newLedgerType} onNewLedgerTypeChange={setNewLedgerType} partners={partners} selectedMemberIds={newLedgerMemberIds} onMemberIdsChange={setNewLedgerMemberIds} onCreateLedger={handleCreateLedger} creatingLedger={creatingLedger} />
           <label className="text-sm"><span className="mb-1 block text-muted-foreground">Notes</span><textarea value={manualForm.notes} onChange={(e) => setManualForm({ ...manualForm, notes: e.target.value })} rows={4} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => router.push("/expenses")} className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-accent">Cancel</button>
@@ -1060,6 +1260,7 @@ export default function NewExpensePage() {
                   </label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Custom category name</span><input value={receiptDraft.category_name} onChange={(e) => setReceiptDraft({ ...receiptDraft, category_name: e.target.value })} disabled={finalizingReceipt || !!receiptDraft.category_id} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                 </div>
+                <LedgerSelector ledgers={ledgers} selectedLedgerId={selectedLedgerId} onSelect={setSelectedLedgerId} newLedgerFormOpen={newLedgerFormOpen} onToggleNewForm={() => setNewLedgerFormOpen((v) => !v)} newLedgerName={newLedgerName} onNewLedgerNameChange={setNewLedgerName} newLedgerType={newLedgerType} onNewLedgerTypeChange={setNewLedgerType} partners={partners} selectedMemberIds={newLedgerMemberIds} onMemberIdsChange={setNewLedgerMemberIds} onCreateLedger={handleCreateLedger} creatingLedger={creatingLedger} disabled={finalizingReceipt} />
                 <label className="text-sm"><span className="mb-1 block text-muted-foreground">Confidence override</span><input type="number" min="0" max="1" step="0.01" value={receiptDraft.confidence} onChange={(e) => setReceiptDraft({ ...receiptDraft, confidence: e.target.value })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                 <label className="text-sm"><span className="mb-1 block text-muted-foreground">Notes</span><textarea rows={3} value={receiptDraft.notes} onChange={(e) => setReceiptDraft({ ...receiptDraft, notes: e.target.value })} disabled={finalizingReceipt} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
 
@@ -1229,6 +1430,7 @@ export default function NewExpensePage() {
                   </label>
                   <label className="text-sm"><span className="mb-1 block text-muted-foreground">Custom category name</span><input value={statementDraft.category_name} onChange={(e) => setStatementDraft({ ...statementDraft, category_name: e.target.value })} disabled={finalizingStatement || !!statementDraft.category_id} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                 </div>
+                <LedgerSelector ledgers={ledgers} selectedLedgerId={selectedLedgerId} onSelect={setSelectedLedgerId} newLedgerFormOpen={newLedgerFormOpen} onToggleNewForm={() => setNewLedgerFormOpen((v) => !v)} newLedgerName={newLedgerName} onNewLedgerNameChange={setNewLedgerName} newLedgerType={newLedgerType} onNewLedgerTypeChange={setNewLedgerType} partners={partners} selectedMemberIds={newLedgerMemberIds} onMemberIdsChange={setNewLedgerMemberIds} onCreateLedger={handleCreateLedger} creatingLedger={creatingLedger} disabled={finalizingStatement} />
                 <label className="text-sm"><span className="mb-1 block text-muted-foreground">Confidence override</span><input type="number" min="0" max="1" step="0.01" value={statementDraft.confidence} onChange={(e) => setStatementDraft({ ...statementDraft, confidence: e.target.value })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
                 <label className="text-sm"><span className="mb-1 block text-muted-foreground">Notes</span><textarea rows={4} value={statementDraft.notes} onChange={(e) => setStatementDraft({ ...statementDraft, notes: e.target.value })} disabled={finalizingStatement} className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-60" /></label>
 

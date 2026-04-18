@@ -1,7 +1,20 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createCategory, createItemKeywordRule, createMerchantRule, deleteCategory, deleteItemKeywordRule, deleteKnowledgeBaseEntry, deleteMerchantRule, getCurrentUserProfile, listCategories, listItemKeywordRules, listKnowledgeBase, listLearntEntries, listMerchantRules, updateReceiptPrompt, uploadKnowledgeBase, type Category, type ItemKeywordRule, type KnowledgeBaseEntry, type MerchantRule } from "@/lib/api";
+import { createCategory, createItemKeywordRule, createMerchantRule, deleteCategory, deleteItemKeywordRule, deleteKnowledgeBaseEntry, deleteMerchantRule, getCurrentUserProfile, listCategories, listItemKeywordRules, listKnowledgeBase, listLearntEntries, listMerchantRules, updateCategory, updateReceiptPrompt, uploadKnowledgeBase, type Category, type ItemKeywordRule, type KnowledgeBaseEntry, type MerchantRule } from "@/lib/api";
+
+function normalizeName(s: string) { return s.trim().toLowerCase().replace(/\s+/g, " "); }
+function isFuzzyDuplicate(a: string, b: string): boolean {
+  const na = normalizeName(a), nb = normalizeName(b);
+  if (na === nb) return true;
+  if (na.includes(nb) || nb.includes(na)) return true;
+  // simple bigram overlap
+  function bigrams(s: string) { const r = new Set<string>(); for (let i = 0; i < s.length - 1; i++) r.add(s.slice(i, i + 2)); return r; }
+  const bg1 = bigrams(na), bg2 = bigrams(nb);
+  let shared = 0; bg1.forEach((g) => { if (bg2.has(g)) shared++; });
+  const union = bg1.size + bg2.size - shared;
+  return union > 0 && shared / union > 0.6;
+}
 
 const DEFAULT_RECEIPT_SYSTEM_PROMPT = "You extract receipt fields from images into validated JSON for a transaction draft. The JSON may represent either a debit expense or a credit refund, but default to debit when unsure. Receipt text can be in Italian. Merchant should be the store name, not a random footer or tax line. Never return prose, markdown, or code fences. Return JSON only.";
 
@@ -29,6 +42,8 @@ export default function RulesPage() {
   const [learntEntries, setLearntEntries] = useState<KnowledgeBaseEntry[]>([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [categoryForm, setCategoryForm] = useState({ name: "", color: "#34d399", description: "", transaction_type: "debit", is_system: false });
+  const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
+  const [editingCategory, setEditingCategory] = useState({ name: "", color: "#34d399" });
   const [merchantForm, setMerchantForm] = useState({ merchant_pattern: "", category_id: "", pattern_type: "fuzzy", priority: "100", is_global: false });
   const [itemForm, setItemForm] = useState({ keyword: "", subcategory_label: "", pattern_type: "fuzzy", priority: "100", is_global: false });
   const [receiptPrompt, setReceiptPrompt] = useState(DEFAULT_RECEIPT_SYSTEM_PROMPT);
@@ -113,45 +128,100 @@ export default function RulesPage() {
 
       <div className="grid gap-6 xl:grid-cols-2">
         {/* Categories */}
-        <form onSubmit={async (event) => {
-          event.preventDefault();
-          await createCategory({ name: categoryForm.name, color: categoryForm.color, description: categoryForm.description || null, transaction_type: categoryForm.transaction_type, is_system: categoryForm.is_system });
-          setCategoryForm({ name: "", color: "#34d399", description: "", transaction_type: "debit", is_system: false });
-          await load();
-        }} className="flex h-full flex-col space-y-4 rounded-2xl border border-border bg-card p-6">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl font-semibold">Categories</h2>
-              {isAdmin ? <p className="mt-0.5 text-xs text-muted-foreground">As admin you can mark categories as global defaults (visible to all users).</p> : null}
-            </div>
-            {categories.length > 2 ? (
-              <button type="button" onClick={() => setCategoriesExpanded((current) => !current)} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">
-                {categoriesExpanded ? "Collapse" : `Show all (${categories.length})`}
-              </button>
-            ) : null}
-          </div>
-          <div className="grid gap-4 md:grid-cols-3">
-            <label className="text-sm"><span className="mb-1 block text-muted-foreground">Name</span><input required value={categoryForm.name} onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
-            <label className="text-sm"><span className="mb-1 block text-muted-foreground">Color</span><input type="color" value={categoryForm.color} onChange={(e) => setCategoryForm({ ...categoryForm, color: e.target.value })} className="h-11 w-full rounded-lg border border-border bg-background px-2 py-2" /></label>
-            <label className="text-sm"><span className="mb-1 block text-muted-foreground">Type</span><select value={categoryForm.transaction_type} onChange={(e) => setCategoryForm({ ...categoryForm, transaction_type: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2"><option value="debit">Money out</option><option value="credit">Money in</option></select></label>
-          </div>
-          <label className="text-sm"><span className="mb-1 block text-muted-foreground">Description</span><input value={categoryForm.description} onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
-          {isAdmin ? (
-            <label className="flex cursor-pointer items-center gap-3 text-sm">
-              <input type="checkbox" checked={categoryForm.is_system} onChange={(e) => setCategoryForm({ ...categoryForm, is_system: e.target.checked })} className="h-4 w-4 rounded" />
-              <span>Mark as global <span className="text-muted-foreground">(system default — visible to all users)</span></span>
-            </label>
-          ) : null}
-          <button className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">Add category</button>
-          <div className="space-y-2 border-t border-border pt-4">
-            {visibleCategories.map((category) => (
-              <div key={category.id} className="flex items-center justify-between rounded-xl border border-border px-4 py-3">
-                <div className="flex items-center gap-3"><span className="h-4 w-4 rounded-full" style={{ backgroundColor: category.color }} /><div><div className="flex items-center gap-2 font-medium">{category.name}{category.is_system ? <span className="rounded bg-primary/20 px-1.5 py-0.5 text-xs text-primary">global</span> : null}</div><div className="text-xs text-muted-foreground">{category.description || (category.is_system ? "System default" : "Custom")} · {category.transaction_type === "credit" ? "Money in" : "Money out"}</div></div></div>
-                <button type="button" onClick={() => deleteCategory(category.id).then(load)} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">Delete</button>
+        {(() => {
+          const dupMatch = categoryForm.name.trim().length >= 2
+            ? categories.find((c) => isFuzzyDuplicate(c.name, categoryForm.name))
+            : null;
+          const isExactDup = dupMatch && normalizeName(dupMatch.name) === normalizeName(categoryForm.name);
+          return (
+            <form onSubmit={async (event) => {
+              event.preventDefault();
+              if (isExactDup) return;
+              await createCategory({ name: categoryForm.name, color: categoryForm.color, description: categoryForm.description || null, transaction_type: categoryForm.transaction_type, is_system: categoryForm.is_system });
+              setCategoryForm({ name: "", color: "#34d399", description: "", transaction_type: "debit", is_system: false });
+              await load();
+            }} className="flex h-full flex-col space-y-4 rounded-2xl border border-border bg-card p-6">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-xl font-semibold">Categories</h2>
+                  {isAdmin ? <p className="mt-0.5 text-xs text-muted-foreground">As admin you can mark categories as global defaults (visible to all users).</p> : null}
+                </div>
+                {categories.length > 2 ? (
+                  <button type="button" onClick={() => setCategoriesExpanded((current) => !current)} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">
+                    {categoriesExpanded ? "Collapse" : `Show all (${categories.length})`}
+                  </button>
+                ) : null}
               </div>
-            ))}
-          </div>
-        </form>
+              <div className="grid gap-4 md:grid-cols-3">
+                <label className="text-sm md:col-span-1">
+                  <span className="mb-1 block text-muted-foreground">Name</span>
+                  <input required value={categoryForm.name} onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })} className={`w-full rounded-lg border bg-background px-3 py-2 ${dupMatch ? "border-amber-500/60" : "border-border"}`} />
+                  {dupMatch && (
+                    <p className={`mt-1 text-xs ${isExactDup ? "text-red-400" : "text-amber-400"}`}>
+                      {isExactDup ? `"${dupMatch.name}" already exists.` : `Similar to existing: "${dupMatch.name}"`}
+                    </p>
+                  )}
+                </label>
+                <label className="text-sm"><span className="mb-1 block text-muted-foreground">Color</span><input type="color" value={categoryForm.color} onChange={(e) => setCategoryForm({ ...categoryForm, color: e.target.value })} className="h-11 w-full rounded-lg border border-border bg-background px-2 py-2" /></label>
+                <label className="text-sm"><span className="mb-1 block text-muted-foreground">Type</span><select value={categoryForm.transaction_type} onChange={(e) => setCategoryForm({ ...categoryForm, transaction_type: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2"><option value="debit">Money out</option><option value="credit">Money in</option></select></label>
+              </div>
+              <label className="text-sm"><span className="mb-1 block text-muted-foreground">Description</span><input value={categoryForm.description} onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })} className="w-full rounded-lg border border-border bg-background px-3 py-2" /></label>
+              {isAdmin ? (
+                <label className="flex cursor-pointer items-center gap-3 text-sm">
+                  <input type="checkbox" checked={categoryForm.is_system} onChange={(e) => setCategoryForm({ ...categoryForm, is_system: e.target.checked })} className="h-4 w-4 rounded" />
+                  <span>Mark as global <span className="text-muted-foreground">(system default — visible to all users)</span></span>
+                </label>
+              ) : null}
+              <button disabled={!!isExactDup} className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50">Add category</button>
+              <div className="space-y-2 border-t border-border pt-4">
+                {visibleCategories.map((category) => (
+                  <div key={category.id} className="rounded-xl border border-border px-4 py-3">
+                    {editingCategoryId === category.id ? (
+                      <div className="flex flex-col gap-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            value={editingCategory.name}
+                            onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
+                            className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+                            autoFocus
+                          />
+                          <input
+                            type="color"
+                            value={editingCategory.color}
+                            onChange={(e) => setEditingCategory({ ...editingCategory, color: e.target.value })}
+                            className="h-9 w-12 rounded-lg border border-border bg-background px-1 py-1"
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => setEditingCategoryId(null)} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">Cancel</button>
+                          <button type="button" onClick={async () => {
+                            await updateCategory(category.id, { name: editingCategory.name.trim(), color: editingCategory.color });
+                            setEditingCategoryId(null);
+                            await load();
+                          }} className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground">Save</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="h-4 w-4 rounded-full shrink-0" style={{ backgroundColor: category.color }} />
+                          <div>
+                            <div className="flex items-center gap-2 font-medium">{category.name}{category.is_system ? <span className="rounded bg-primary/20 px-1.5 py-0.5 text-xs text-primary">global</span> : null}</div>
+                            <div className="text-xs text-muted-foreground">{category.description || (category.is_system ? "System default" : "Custom")} · {category.transaction_type === "credit" ? "Money in" : "Money out"}</div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => { setEditingCategoryId(category.id); setEditingCategory({ name: category.name, color: category.color }); }} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">Edit</button>
+                          <button type="button" onClick={() => deleteCategory(category.id).then(load)} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">Delete</button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </form>
+          );
+        })()}
 
         {/* Merchant rules */}
         <form onSubmit={async (event) => {

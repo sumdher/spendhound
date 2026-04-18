@@ -49,8 +49,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
             </svg>
           </button>
-          <Image src="/icon.svg" alt="SpendHound" width={24} height={24} unoptimized />
-          <span className="text-base font-bold tracking-tight">SpendHound</span>
+          <a href="/dashboard" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+            <Image src="/icon.svg" alt="SpendHound" width={24} height={24} unoptimized />
+            <span className="text-base font-bold tracking-tight">SpendHound</span>
+          </a>
         </header>
 
         <main className={isChatRoute ? "flex-1 min-h-0 overflow-hidden" : "flex-1 overflow-y-auto"}>

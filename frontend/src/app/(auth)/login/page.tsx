@@ -1,6 +1,7 @@
 "use client";
 
 import { signIn, useSession } from "next-auth/react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect } from "react";
 
@@ -22,7 +23,7 @@ function LoginContent() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-md space-y-6 rounded-2xl border border-border bg-card p-8 shadow-2xl">
         <div className="text-center">
-          <div className="mb-4 text-5xl">💸</div>
+          <div className="mb-4 flex justify-center"><Image src="/icon.svg" alt="SpendHound" width={64} height={64} /></div>
           <h1 className="text-3xl font-bold">SpendHound</h1>
           <p className="mt-2 text-sm text-muted-foreground">Track spending, review receipts, and stay on budget.</p>
         </div>

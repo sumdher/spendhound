@@ -256,6 +256,9 @@ export interface Expense {
   receipt_preview?: ReceiptPreview | StatementImportPreview | null;
   receipt_ocr_text?: string | null;
   items?: ExpenseItem[];
+  ledger_id?: string | null;
+  ledger_name?: string | null;
+  added_by?: { id: string; name: string | null; email: string; avatar_url: string | null } | null;
   created_at: string;
   updated_at: string;
 }
@@ -890,6 +893,151 @@ export async function sendMonthlyReportEmail(data: MonthlyReportSendRequest): Pr
     method: "POST",
     body: JSON.stringify(data),
   });
+}
+
+// ---- Partners ----
+
+export interface Partner {
+  id: string;
+  email: string;
+  name: string | null;
+  avatar_url: string | null;
+}
+
+export interface PartnerRequest {
+  id: string;
+  direction: "sent" | "received";
+  status: "pending" | "accepted" | "rejected";
+  email: string;
+  name: string | null;
+  avatar_url: string | null;
+  created_at: string;
+}
+
+export interface PartnersResponse {
+  partners: Partner[];
+  pending_requests: PartnerRequest[];
+}
+
+export async function listPartners(): Promise<PartnersResponse> {
+  return apiFetch<PartnersResponse>("/api/partners");
+}
+
+export async function sendPartnerRequest(email: string): Promise<{ id: string; status: string; recipient_email: string; recipient_exists: boolean }> {
+  return apiFetch("/api/partners/request", { method: "POST", body: JSON.stringify({ email }) });
+}
+
+export async function acceptPartnerRequest(requestId: string): Promise<{ status: string }> {
+  return apiFetch(`/api/partners/requests/${requestId}/accept`, { method: "POST" });
+}
+
+export async function rejectPartnerRequest(requestId: string): Promise<{ status: string }> {
+  return apiFetch(`/api/partners/requests/${requestId}/reject`, { method: "POST" });
+}
+
+export async function cancelPartnerRequest(requestId: string): Promise<{ deleted: boolean }> {
+  return apiFetch(`/api/partners/requests/${requestId}`, { method: "DELETE" });
+}
+
+export async function handlePartnerToken(token: string, action: "accept" | "reject"): Promise<{ status: string }> {
+  return apiFetch(`/api/partners/token/${token}?action=${action}`, { method: "GET" });
+}
+
+// ---- Ledgers ----
+
+export interface LedgerMember {
+  user_id: string;
+  role: string;
+  name: string | null;
+  email: string | null;
+  avatar_url: string | null;
+}
+
+export interface Ledger {
+  id: string;
+  name: string;
+  type: "personal" | "shared";
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  members: LedgerMember[];
+}
+
+export interface LedgersResponse {
+  ledgers: Ledger[];
+}
+
+export async function listLedgers(): Promise<LedgersResponse> {
+  return apiFetch<LedgersResponse>("/api/ledgers");
+}
+
+export async function createLedger(data: { name: string; type: "personal" | "shared"; member_user_ids?: string[] }): Promise<Ledger> {
+  return apiFetch<Ledger>("/api/ledgers", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function updateLedger(ledgerId: string, data: { name: string }): Promise<Ledger> {
+  return apiFetch<Ledger>(`/api/ledgers/${ledgerId}`, { method: "PATCH", body: JSON.stringify(data) });
+}
+
+export async function deleteLedger(ledgerId: string): Promise<{ deleted: boolean }> {
+  return apiFetch<{ deleted: boolean }>(`/api/ledgers/${ledgerId}`, { method: "DELETE" });
+}
+
+export async function getLedgerAuditLog(ledgerId: string): Promise<{ logs: unknown[] }> {
+  return apiFetch<{ logs: unknown[] }>(`/api/ledgers/${ledgerId}/audit-log`);
+}
+
+export async function addLedgerMembers(ledgerId: string, memberUserIds: string[]): Promise<Ledger> {
+  return apiFetch<Ledger>(`/api/ledgers/${ledgerId}/members`, { method: "POST", body: JSON.stringify({ member_user_ids: memberUserIds }) });
+}
+
+export async function leaveLedger(ledgerId: string): Promise<{ left: boolean }> {
+  return apiFetch<{ left: boolean }>(`/api/ledgers/${ledgerId}/leave`, { method: "DELETE" });
+}
+
+export async function moveExpenses(data: { expense_ids: string[]; target_ledger_id: string | null }): Promise<{ moved: number }> {
+  return apiFetch<{ moved: number }>("/api/ledgers/expenses/move", { method: "POST", body: JSON.stringify(data) });
+}
+
+export async function copyExpenses(data: { expense_ids: string[]; target_ledger_ids: (string | null)[] }): Promise<{ copied: number }> {
+  return apiFetch<{ copied: number }>("/api/ledgers/expenses/copy", { method: "POST", body: JSON.stringify(data) });
+}
+
+// ---- Data management ----
+
+export interface UserSearchResult {
+  id: string;
+  name: string | null;
+  email: string;
+  avatar_url: string | null;
+}
+
+export async function searchUsers(q: string): Promise<UserSearchResult[]> {
+  return apiFetch<UserSearchResult[]>(`/api/auth/users/search?q=${encodeURIComponent(q)}`);
+}
+
+export async function getMyStats(): Promise<{ created_at: string; expense_count: number; needs_review_count: number }> {
+  return apiFetch<{ created_at: string; expense_count: number; needs_review_count: number }>("/api/auth/me/stats");
+}
+
+export async function clearMyData(filters: {
+  period?: "all" | "this_month" | "month";
+  month?: string;
+  merchant?: string;
+  transaction_type?: string;
+  category_id?: string;
+}): Promise<{ deleted: number }> {
+  const params = new URLSearchParams();
+  if (filters.period) params.set("period", filters.period);
+  if (filters.month) params.set("month", filters.month);
+  if (filters.merchant) params.set("merchant", filters.merchant);
+  if (filters.transaction_type) params.set("transaction_type", filters.transaction_type);
+  if (filters.category_id) params.set("category_id", filters.category_id);
+  return apiFetch<{ deleted: number }>(`/api/auth/me/data?${params.toString()}`, { method: "DELETE" });
+}
+
+export async function deleteMyAccount(): Promise<{ deleted: boolean }> {
+  return apiFetch<{ deleted: boolean }>("/api/auth/me", { method: "DELETE" });
 }
 
 export async function listAllUsers(): Promise<AdminUser[]> {

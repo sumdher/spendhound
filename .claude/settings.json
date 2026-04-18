@@ -6,7 +6,11 @@
       "Bash(python -c \"from app.services.spendhound import CADENCE_CUSTOM, CADENCE_PREPAID, normalize_cadence, cadence_is_recurring, _compute_prepaid_end_date; print\\('imports OK'\\); print\\(normalize_cadence\\('custom'\\)\\); print\\(normalize_cadence\\('prepaid'\\)\\); print\\(cadence_is_recurring\\('custom'\\)\\); print\\(cadence_is_recurring\\('prepaid'\\)\\)\")",
       "Bash(npm run *)",
       "Bash(npx tsc *)",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "Bash(python3 -c \"from app.api.auth import router; print\\('auth.py OK'\\)\")",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('app/api/auth.py'\\).read\\(\\)\\); print\\('auth.py syntax OK'\\)\")",
+      "Bash(python3 -c ' *)",
+      "Bash(npx next *)"
     ]
   }
 }

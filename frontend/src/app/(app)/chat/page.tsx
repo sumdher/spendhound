@@ -18,6 +18,8 @@ import {
   subscribeAppEvent,
 } from "@/lib/app-events";
 import { cn } from "@/lib/utils";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const CHAT_DRAFTS_STORAGE_KEY = "spendhound_chat_drafts_v1";
 const MAX_TEXTAREA_HEIGHT = 180;
@@ -531,7 +533,11 @@ export default function ChatPage() {
                           )
                         ) : message.content ? (
                           <>
-                            <div className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</div>
+                            <div className="prose prose-sm dark:prose-invert max-w-none">
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                {message.content}
+                              </ReactMarkdown>
+                            </div>
                             {message.client_id === streamingAssistantClientId && (
                               <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-current" />
                             )}

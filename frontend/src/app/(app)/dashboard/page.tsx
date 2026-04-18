@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, Cell, Line, LineChart } from "recharts";
-import { getDashboardAnalytics, listExpenses, sendMonthlyReportEmail, type DashboardAnalytics, type Expense } from "@/lib/api";
+import { getDashboardAnalytics, listExpenses, listLedgers, sendMonthlyReportEmail, type DashboardAnalytics, type Expense, type Ledger } from "@/lib/api";
 import { DASHBOARD_CHART_COLORS, getDashboardSummaryStats } from "@/lib/dashboard-report";
 import { convertToBase, fetchAndStoreRates, getDefaultCurrency, getStoredRates, getStoredRatesUpdatedAt } from "@/lib/fx-rates";
 import { currentMonthString, formatCurrency, formatDate, monthLabel, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
@@ -82,6 +82,9 @@ export default function DashboardPage() {
   const [fxError, setFxError] = useState<string | null>(null);
   const [defaultCurrency] = useState<string>(() => getDefaultCurrency());
 
+  const [ledgers, setLedgers] = useState<Ledger[]>([]);
+  const [dashLedgerIds, setDashLedgerIds] = useState<string[]>([]);
+
   // Raw per-expense data for the selected month (for FX-aware re-aggregation)
   const [monthExpenses, setMonthExpenses] = useState<Expense[]>([]);
 
@@ -98,13 +101,19 @@ export default function DashboardPage() {
       .finally(() => setLoading(false));
   }, [month]);
 
+  useEffect(() => {
+    listLedgers().then((res) => setLedgers(res.ledgers)).catch(() => {});
+  }, []);
+
   // Fetch raw expenses for the month so we can re-aggregate with FX rates
   useEffect(() => {
     setMonthExpenses([]);
-    listExpenses({ month })
+    const filters: Record<string, string | boolean | undefined> = { month };
+    if (dashLedgerIds.length > 0) filters.ledger_ids = dashLedgerIds.join(",");
+    listExpenses(filters)
       .then((res) => setMonthExpenses(res.items))
       .catch(() => { /* silently degrade — charts fall back to backend totals */ });
-  }, [month]);
+  }, [month, dashLedgerIds]);
 
   async function handleSendMonthlyEmail() {
     setEmailPending(true);
@@ -225,12 +234,18 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Dashboard</h1>
+          {/* Mobile: h1 left, My Account right */}
+          <div className="flex items-baseline justify-between md:block">
+            <h1 className="text-3xl font-bold">Dashboard</h1>
+            <Link href="/account" className="text-sm text-muted-foreground hover:text-foreground transition-colors md:hidden">My Account</Link>
+          </div>
           <p className="text-sm text-muted-foreground">Monthly visibility into cashflow, spending, income, budgets, and recurring transactions.</p>
         </div>
         <div className="flex flex-col gap-3 md:items-end">
+          {/* Desktop: My Account above month selector */}
+          <Link href="/account" className="hidden self-end text-sm text-muted-foreground hover:text-foreground transition-colors md:block">My Account</Link>
           <div className="flex flex-wrap items-center gap-2">
             <label className="text-sm">
               <span className="mb-1 block text-muted-foreground">Month</span>
@@ -248,7 +263,7 @@ export default function DashboardPage() {
               type="button"
               onClick={handleSendMonthlyEmail}
               disabled={emailPending}
-              className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+              className="self-start rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70 md:self-auto"
             >
               {emailPending ? "Sending digest..." : "Email me charts + data"}
             </button>
@@ -267,8 +282,42 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
-          <div className="grid gap-4 md:grid-cols-5">
+          {/* Desktop: 5-column stat cards */}
+          <div className="hidden gap-4 md:grid md:grid-cols-5">
             {getDashboardSummaryStats(data).map((item) => <StatCard key={item.label} label={item.label} value={item.value} lines={item.lines} />)}
+          </div>
+
+          {/* Mobile: compact layout */}
+          <div className="space-y-2 md:hidden">
+            {/* Transactions + Needs review as small info row */}
+            <div className="flex items-center gap-4 rounded-xl border border-border bg-card px-4 py-2.5">
+              <div className="text-sm"><span className="text-muted-foreground">Transactions </span><span className="font-semibold">{data.summary.transaction_count}</span></div>
+              <div className="w-px h-4 bg-border" />
+              <div className="text-sm"><span className="text-muted-foreground">Needs review </span><span className={`font-semibold ${data.summary.review_count > 0 ? "text-yellow-400" : ""}`}>{data.summary.review_count}</span></div>
+            </div>
+            {/* 3 money boxes in a row */}
+            <div className="grid grid-cols-3 gap-2">
+              {([
+                { label: `Money out · ${data.month.slice(0, 7)}`, byCurrency: data.summary.money_out_by_currency, colorClass: "text-red-400" },
+                { label: "Money in", byCurrency: data.summary.money_in_by_currency, colorClass: "text-emerald-400" },
+                { label: "Net", byCurrency: data.summary.net_by_currency, colorClass: "" },
+              ] as const).map(({ label, byCurrency, colorClass }) => {
+                const entries = Object.entries(byCurrency).sort(([a], [b]) => a === defaultCurrency ? -1 : b === defaultCurrency ? 1 : 0);
+                const primaryEntry = entries.find(([c]) => c === defaultCurrency) ?? entries[0];
+                const primaryVal = primaryEntry?.[1] ?? 0;
+                const primaryCur = primaryEntry?.[0] ?? defaultCurrency;
+                const netColor = label === "Net" ? (primaryVal >= 0 ? "text-emerald-400" : "text-red-400") : colorClass;
+                return (
+                  <div key={label} className="rounded-xl border border-border bg-card px-2 py-2">
+                    <div className="text-[10px] text-muted-foreground leading-tight">{label.includes("·") ? label.split("·")[0].trim() : label}</div>
+                    <div className={`text-base font-semibold ${netColor}`}>{formatCurrency(primaryVal, primaryCur)}</div>
+                    {entries.filter(([c]) => c !== primaryCur).map(([c, v]) => (
+                      <div key={c} className={`text-[10px] opacity-70 ${netColor}`}>{formatCurrency(v, c)}</div>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* FX conversion toolbar — affects the "Spend by category" and "Top merchants" charts below */}
@@ -302,6 +351,24 @@ export default function DashboardPage() {
                   Update rates
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* Ledger filter chips — scope the spend charts to specific ledgers */}
+          {ledgers.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Spend charts:</span>
+              <button type="button" onClick={() => setDashLedgerIds([])}
+                className={`rounded-full border px-2.5 py-0.5 text-xs ${dashLedgerIds.length === 0 ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-accent"}`}>
+                General
+              </button>
+              {ledgers.map((l) => (
+                <button key={l.id} type="button"
+                  onClick={() => setDashLedgerIds((prev) => prev.includes(l.id) ? prev.filter((id) => id !== l.id) : [...prev, l.id])}
+                  className={`rounded-full border px-2.5 py-0.5 text-xs ${dashLedgerIds.includes(l.id) ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-accent"}`}>
+                  {l.name}
+                </button>
+              ))}
             </div>
           )}
 

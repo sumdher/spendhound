@@ -325,27 +325,30 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         {session?.user && (
           <div className="border-t border-border p-3">
             <div className="space-y-2">
-              <div className="flex items-center gap-3 rounded-lg px-2 py-2">
-                {avatarUrl ? (
-                  <img
-                    src={avatarUrl}
-                    alt={session.user.name ?? session.user.email ?? "User"}
-                    className="h-8 w-8 shrink-0 rounded-full object-cover"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-sm font-bold text-primary">
-                    {initials || "SH"}
+              <Link
+                href="/account"
+                className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-accent transition-colors"
+                title="My account"
+              >
+                  {avatarUrl ? (
+                    <img
+                      src={avatarUrl}
+                      alt={session.user.name ?? session.user.email ?? "User"}
+                      className="h-8 w-8 shrink-0 rounded-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-sm font-bold text-primary">
+                      {initials || "SH"}
+                    </div>
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium">{session.user.name || session.user.email}</p>
+                    <p className="truncate text-xs text-muted-foreground">{session.user.email}</p>
                   </div>
-                )}
-
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{session.user.name || session.user.email}</p>
-                  <p className="truncate text-xs text-muted-foreground">{session.user.email}</p>
-                </div>
 
                 <button
-                  onClick={() => setShowSignOutConfirm((current) => !current)}
+                  onClick={(e) => { e.preventDefault(); setShowSignOutConfirm((current) => !current); }}
                   className={cn(
                     "shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors",
                     showSignOutConfirm ? "bg-destructive/10 text-destructive" : "hover:bg-accent hover:text-foreground",
@@ -363,7 +366,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                     />
                   </svg>
                 </button>
-              </div>
+              </Link>
 
               {showSignOutConfirm && (
                 <div className="rounded-xl border border-border bg-muted/40 p-3 shadow-sm">
