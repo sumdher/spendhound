@@ -1,19 +1,23 @@
 """Authentication API router for SpendHound."""
 
-from datetime import datetime, timezone
+import asyncio
+import calendar
+import uuid
+from datetime import date, datetime, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin import create_action_token, is_admin_email
 from app.config import settings
 from app.database import get_db
 from app.middleware.auth import create_access_token, get_any_user, get_current_user
+from app.models.expense import Expense
 from app.models.user import User
 from app.schemas.user import LLMTestRequest, LLMTestResponse, UserLLMSettingsUpdateRequest, UserReceiptPromptUpdateRequest, UserResponse, UserUpdateRequest
 from app.services.email import send_approval_request_email
@@ -204,3 +208,98 @@ async def test_llm_settings(
 @router.get("/status")
 async def get_status(current_user: User = Depends(get_any_user)) -> dict:
     return {"status": current_user.status, "is_admin": is_admin_email(current_user.email)}
+
+
+@router.get("/me/stats")
+async def get_me_stats(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return current user's join date, expense count, and needs-review count."""
+    expense_count_result, needs_review_result = await asyncio.gather(
+        db.execute(select(func.count(Expense.id)).where(Expense.user_id == current_user.id)),
+        db.execute(select(func.count(Expense.id)).where(Expense.user_id == current_user.id, Expense.needs_review.is_(True))),
+    )
+    return {
+        "created_at": current_user.created_at.isoformat(),
+        "expense_count": expense_count_result.scalar() or 0,
+        "needs_review_count": needs_review_result.scalar() or 0,
+    }
+
+
+@router.get("/users/search")
+async def search_users(
+    q: str = Query("", description="Name or email substring to search"),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """Search approved users by name or email for partner invite autocomplete."""
+    q = q.strip().lower()
+    if len(q) < 1:
+        return []
+    from sqlalchemy import or_
+    result = await db.execute(
+        select(User).where(
+            User.status == "approved",
+            User.id != current_user.id,
+            or_(
+                func.lower(User.email).contains(q),
+                func.lower(User.name).contains(q),
+            ),
+        ).limit(10)
+    )
+    users = result.scalars().all()
+    return [{"id": str(u.id), "name": u.name, "email": u.email, "avatar_url": u.avatar_url} for u in users]
+
+
+@router.delete("/me/data")
+async def clear_my_data(
+    period: str = Query("all", description="all | this_month | month"),
+    month: str | None = Query(None, description="YYYY-MM format, used when period=month"),
+    merchant: str | None = Query(None),
+    transaction_type: str | None = Query(None),
+    category_id: str | None = Query(None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Delete the current user's expense data with optional filters."""
+    stmt = delete(Expense).where(Expense.user_id == current_user.id)
+
+    if period == "this_month":
+        today = date.today()
+        first = date(today.year, today.month, 1)
+        last = date(today.year, today.month, calendar.monthrange(today.year, today.month)[1])
+        stmt = stmt.where(Expense.expense_date >= first).where(Expense.expense_date <= last)
+    elif period == "month" and month:
+        try:
+            year, m = int(month[:4]), int(month[5:7])
+            first = date(year, m, 1)
+            last = date(year, m, calendar.monthrange(year, m)[1])
+            stmt = stmt.where(Expense.expense_date >= first).where(Expense.expense_date <= last)
+        except (ValueError, IndexError) as e:
+            raise HTTPException(status_code=400, detail="Invalid month format, use YYYY-MM") from e
+
+    if merchant:
+        stmt = stmt.where(func.lower(Expense.merchant).contains(merchant.strip().lower()))
+    if transaction_type and transaction_type in ("debit", "credit"):
+        stmt = stmt.where(Expense.transaction_type == transaction_type)
+    if category_id:
+        try:
+            stmt = stmt.where(Expense.category_id == uuid.UUID(category_id))
+        except ValueError:
+            pass
+
+    result = await db.execute(stmt)
+    await db.commit()
+    return {"deleted": result.rowcount}
+
+
+@router.delete("/me")
+async def delete_my_account(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Permanently delete the current user's account and all associated data."""
+    await db.delete(current_user)
+    await db.commit()
+    return {"deleted": True}

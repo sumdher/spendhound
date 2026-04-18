@@ -684,11 +684,11 @@ export default function ExpenseDetailPage() {
               </label>
             </div>
 
-            {/* Receipt-derived items (edit mode) — always visible in edit mode */}
+            {/* Nested items (edit mode) — always visible in edit mode */}
             <div className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4 flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold">Receipt-derived items</h2>
+                  <h2 className="text-lg font-semibold">Nested items</h2>
                   <p className="text-sm text-muted-foreground">
                     Edit item details. Use ✕ to remove a row, or &ldquo;+ Add item&rdquo; to add a new one.
                   </p>
@@ -993,12 +993,12 @@ export default function ExpenseDetailPage() {
             </dl>
           </div>
 
-          {/* Receipt-derived items — only rendered when there is at least 1 item */}
+          {/* Nested items — only rendered when there is at least 1 item */}
           {items.length > 0 && (
             <div className="rounded-2xl border border-border bg-card p-5">
               <div className="mb-4 flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-semibold">Receipt-derived items</h2>
+                  <h2 className="text-lg font-semibold">Nested items</h2>
                   <p className="text-sm text-muted-foreground">
                     Click any subcategory to correct it — the system will learn from your correction.
                   </p>

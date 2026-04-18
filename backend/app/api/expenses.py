@@ -19,6 +19,7 @@ from app.middleware.auth import get_current_user
 from app.models.category import Category
 from app.models.expense import Expense
 from app.models.expense_item import ExpenseItem
+from app.models.ledger import Ledger, LedgerAuditLog, LedgerMembership
 from app.models.receipt import Receipt
 from app.models.user import User
 from app.services.item_rag import upsert_item_embedding
@@ -106,6 +107,7 @@ class ExpenseCreate(BaseModel):
     recurring_variable: bool = False
     recurring_auto_add: bool = False
     is_major_purchase: bool = False
+    ledger_id: uuid.UUID | None = None
 
 
 class ExpenseUpdate(BaseModel):
@@ -140,15 +142,91 @@ class StatementExpenseCreate(ExpenseCreate):
 
 
 @router.get("")
-async def list_expenses(month: str | None = Query(default=None), category_id: uuid.UUID | None = Query(default=None), transaction_type: str | None = Query(default=None), cadence: str | None = Query(default=None), review_only: bool = Query(default=False), search: str | None = Query(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    statement = select(Expense, Category.name, Receipt.original_filename).outerjoin(Category, Category.id == Expense.category_id).outerjoin(Receipt, Receipt.id == Expense.receipt_id)
-    statement = apply_expense_filters(statement, user_id=current_user.id, month=month, category_id=category_id, transaction_type=transaction_type, cadence=cadence, review_only=review_only, search=search).order_by(Expense.expense_date.desc(), Expense.created_at.desc())
-    result = await db.execute(statement)
-    items = [serialize_expense(expense, category_name=category_name, receipt_filename=receipt_filename) for expense, category_name, receipt_filename in result.all()]
+async def list_expenses(
+    month: str | None = Query(default=None),
+    category_id: uuid.UUID | None = Query(default=None),
+    transaction_type: str | None = Query(default=None),
+    cadence: str | None = Query(default=None),
+    review_only: bool = Query(default=False),
+    search: str | None = Query(default=None),
+    ledger_ids: str | None = Query(default=None),
+    show_duplicates: bool = Query(default=False),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    ledger_ids: comma-separated list; use "general" for expenses with ledger_id IS NULL.
+    If omitted, defaults to general.
+    show_duplicates: filter to only expenses with same merchant+amount+date across >1 ledger.
+    """
+    parsed_ledger_ids: list[uuid.UUID | None] = []
+    include_general = True
 
-    count_statement = apply_expense_filters(select(func.count(Expense.id)), user_id=current_user.id, month=month, category_id=category_id, transaction_type=transaction_type, cadence=cadence, review_only=review_only, search=search)
-    total = (await db.execute(count_statement)).scalar_one()
-    return {"items": items, "total": int(total)}
+    if ledger_ids:
+        parts = [p.strip() for p in ledger_ids.split(",") if p.strip()]
+        include_general = False
+        for p in parts:
+            if p.lower() == "general":
+                include_general = True
+            else:
+                try:
+                    lid = uuid.UUID(p)
+                    # Verify membership
+                    m = await db.execute(select(LedgerMembership).where(LedgerMembership.ledger_id == lid, LedgerMembership.user_id == current_user.id))
+                    if m.scalar_one_or_none():
+                        parsed_ledger_ids.append(lid)
+                except ValueError:
+                    pass
+
+    # Build base query
+    base = (
+        select(Expense, Category.name, Receipt.original_filename, Ledger.name)
+        .outerjoin(Category, Category.id == Expense.category_id)
+        .outerjoin(Receipt, Receipt.id == Expense.receipt_id)
+        .outerjoin(Ledger, Ledger.id == Expense.ledger_id)
+    )
+
+    from sqlalchemy import or_ as sql_or, and_ as sql_and
+
+    conditions = []
+    if include_general:
+        conditions.append(sql_and(Expense.user_id == current_user.id, Expense.ledger_id.is_(None)))
+    for lid in parsed_ledger_ids:
+        conditions.append(Expense.ledger_id == lid)
+
+    if not conditions:
+        conditions.append(sql_and(Expense.user_id == current_user.id, Expense.ledger_id.is_(None)))
+
+    base = base.where(sql_or(*conditions))
+    base = apply_expense_filters(base, user_id=None, month=month, category_id=category_id, transaction_type=transaction_type, cadence=cadence, review_only=review_only, search=search).order_by(Expense.expense_date.desc(), Expense.created_at.desc())
+    result = await db.execute(base)
+    rows = result.all()
+
+    if show_duplicates:
+        from collections import defaultdict
+        key_map: dict[tuple, list] = defaultdict(list)
+        for row in rows:
+            exp = row[0]
+            k = (exp.merchant.lower().strip(), float(exp.amount), str(exp.expense_date))
+            key_map[k].append(row)
+        rows = [r for group in key_map.values() if len(group) > 1 for r in group]
+
+    # Fetch user info for shared ledger expenses (user who added each expense)
+    shared_user_ids = list({row[0].user_id for row in rows if row[0].user_id != current_user.id})
+    shared_user_map: dict[uuid.UUID, User] = {}
+    if shared_user_ids:
+        ur = await db.execute(select(User).where(User.id.in_(shared_user_ids)))
+        shared_user_map = {u.id: u for u in ur.scalars().all()}
+
+    items = []
+    for expense, category_name, receipt_filename, ledger_name in rows:
+        added_by = None
+        if expense.user_id != current_user.id and expense.user_id in shared_user_map:
+            u = shared_user_map[expense.user_id]
+            added_by = {"id": str(u.id), "name": u.name, "email": u.email, "avatar_url": u.avatar_url}
+        items.append(serialize_expense(expense, category_name=category_name, receipt_filename=receipt_filename, ledger_name=ledger_name, added_by=added_by))
+
+    return {"items": items, "total": len(items)}
 
 
 @router.get("/review-queue")
@@ -212,6 +290,24 @@ async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_c
         recurring_auto_add=body.recurring_auto_add,
     )
     category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
+
+    # Validate ledger membership if a ledger is specified
+    ledger_id = body.ledger_id
+    ledger_name: str | None = None
+    if ledger_id:
+        ledger_result = await db.execute(
+            select(Ledger).where(Ledger.id == ledger_id)
+        )
+        ledger = ledger_result.scalar_one_or_none()
+        if not ledger:
+            raise HTTPException(status_code=404, detail="Ledger not found")
+        membership = await db.execute(
+            select(LedgerMembership).where(LedgerMembership.ledger_id == ledger_id, LedgerMembership.user_id == current_user.id)
+        )
+        if not membership.scalar_one_or_none():
+            raise HTTPException(status_code=403, detail="You are not a member of this ledger")
+        ledger_name = ledger.name
+
     expense = Expense(
         user_id=current_user.id,
         merchant=body.merchant.strip(),
@@ -233,13 +329,16 @@ async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_c
         recurring_variable=recurring_variable,
         recurring_auto_add=recurring_auto_add,
         is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
+        ledger_id=ledger_id,
     )
     db.add(expense)
     await db.flush()
     await replace_expense_items(db, expense, body.items, category_name=category.name if category else body.category_name)
+    if ledger_id:
+        db.add(LedgerAuditLog(ledger_id=ledger_id, expense_id=expense.id, user_id=current_user.id, action="created"))
     await recompute_recurring_expenses(db, current_user.id)
     await db.refresh(expense)
-    return serialize_expense(expense, category_name=category.name if category else None)
+    return serialize_expense(expense, category_name=category.name if category else None, ledger_name=ledger_name)
 
 
 @router.post("/from-receipt")

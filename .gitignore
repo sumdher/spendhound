@@ -5,7 +5,7 @@
 .commands*
 deploy/cloudflared/config.yaml
 plans
-.claude
+.claude*
 CLAUDE.md
 
 # ── Python ───────────────────────────────────────────────────────────────────

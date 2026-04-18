@@ -39,10 +39,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    from app.api import admin, analytics, auth, budgets, categories, chat, expenses, llm_models, monthly_reports, ollama, receipts
+    from app.api import admin, analytics, auth, budgets, categories, chat, expenses, ledgers, llm_models, monthly_reports, ollama, partners, receipts
 
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
     app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
+    app.include_router(partners.router, prefix="/api/partners", tags=["partners"])
+    app.include_router(ledgers.router, prefix="/api/ledgers", tags=["ledgers"])
     app.include_router(categories.router, prefix="/api/categories", tags=["categories"])
     app.include_router(budgets.router, prefix="/api/budgets", tags=["budgets"])
     app.include_router(expenses.router, prefix="/api/expenses", tags=["expenses"])
