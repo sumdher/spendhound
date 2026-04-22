@@ -8,24 +8,7 @@ import { DASHBOARD_CHART_COLORS, getDashboardSummaryStats } from "@/lib/dashboar
 import { convertToBase, fetchAndStoreRates, getDefaultCurrency, getStoredRates, getStoredRatesUpdatedAt } from "@/lib/fx-rates";
 import { currentMonthString, formatCurrency, formatDate, monthLabel, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
 
-import type { DashboardSummaryStat } from "@/lib/dashboard-report";
 
-function StatCard({ label, value, lines }: DashboardSummaryStat) {
-  return (
-    <div className="rounded-2xl border border-border bg-card p-5">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      {lines && lines.length > 0 ? (
-        <div className="mt-2">
-          {lines.map((line, i) => (
-            <p key={i} className={`font-semibold ${line.primary ? "text-2xl" : "mt-0.5 text-sm opacity-70"} ${line.colorClass}`}>{line.value}</p>
-          ))}
-        </div>
-      ) : (
-        <p className="mt-2 text-2xl font-semibold">{value}</p>
-      )}
-    </div>
-  );
-}
 
 function RefreshIcon({ spinning }: { spinning: boolean }) {
   return spinning ? (
@@ -233,41 +216,77 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          {/* Mobile: h1 left, My Account right */}
+    <div className="space-y-4">
+      <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        {/* LEFT — title + description + desktop controls */}
+        <div className="flex flex-col gap-2">
           <div className="flex items-baseline justify-between md:block">
             <h1 className="text-3xl font-bold">Dashboard</h1>
             <Link href="/account" className="text-sm text-muted-foreground hover:text-foreground transition-colors md:hidden">My Account</Link>
           </div>
           <p className="text-sm text-muted-foreground">Monthly visibility into cashflow, spending, income, budgets, and recurring transactions.</p>
-        </div>
-        <div className="flex flex-col gap-3 md:items-end">
-          {/* Desktop: My Account above month selector */}
-          <Link href="/account" className="hidden self-end text-sm text-muted-foreground hover:text-foreground transition-colors md:block">My Account</Link>
-          <div className="flex flex-wrap items-center gap-2">
+
+          {/* Desktop: month + email below description */}
+          <div className="hidden md:flex items-end gap-2 mt-1">
             <label className="text-sm">
               <span className="mb-1 block text-muted-foreground">Month</span>
               <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="rounded-lg border border-border bg-card px-3 py-2" />
             </label>
-            <div className="flex flex-col justify-end">
-              <span className="mb-1 block text-muted-foreground text-sm opacity-0 select-none">x</span>
-              <Link href="/expenses/new" className="rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground">
-                + Add Expense
-              </Link>
-            </div>
-          </div>
-          <div className="flex flex-col gap-2 md:items-end">
             <button
               type="button"
               onClick={handleSendMonthlyEmail}
               disabled={emailPending}
-              className="self-start rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70 md:self-auto"
+              className="rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70"
             >
               {emailPending ? "Sending digest..." : "Email me charts + data"}
             </button>
-            <p className="text-xs text-muted-foreground">Immediately sends the selected month&apos;s digest email.</p>
+          </div>
+
+          {/* Mobile: compact single-row controls */}
+          <div className="flex items-center gap-1.5 flex-wrap md:hidden">
+            <input type="month" value={month} onChange={(e) => setMonth(e.target.value)} className="rounded-lg border border-border bg-card px-2 py-1.5 text-sm w-32 shrink-0" />
+            <Link href="/expenses/new" className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground whitespace-nowrap">
+              + Add
+            </Link>
+            <Link href="/expenses" className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm font-medium hover:bg-accent whitespace-nowrap">
+              Expenses
+            </Link>
+            <button
+              type="button"
+              onClick={handleSendMonthlyEmail}
+              disabled={emailPending}
+              className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-70 whitespace-nowrap"
+            >
+              {emailPending ? "Sending..." : "Email digest"}
+            </button>
+          </div>
+        </div>
+
+        {/* RIGHT (desktop) — My Account + stats card + action buttons */}
+        <div className="hidden md:flex md:shrink-0 md:flex-col md:items-end md:gap-3">
+          <Link href="/account" className="text-sm text-muted-foreground hover:text-foreground transition-colors">My Account</Link>
+          {data ? (
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-2.5">
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Transactions</p>
+                <p className="font-semibold leading-tight">{data.summary.transaction_count}</p>
+              </div>
+              <div className="w-px h-6 bg-border" />
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide">Review</p>
+                <p className={`font-semibold leading-tight ${data.summary.review_count > 0 ? "text-yellow-400" : ""}`}>{data.summary.review_count}</p>
+              </div>
+            </div>
+          ) : (
+            <div className="h-14 w-40 animate-pulse rounded-xl bg-card" />
+          )}
+          <div className="flex flex-col items-end gap-1.5">
+            <Link href="/expenses/new" className="w-full rounded-lg bg-primary px-4 py-2 text-center text-sm font-medium text-primary-foreground">
+              + Add Expense
+            </Link>
+            <Link href="/expenses" className="w-full rounded-lg border border-border bg-card px-4 py-2 text-center text-sm font-medium hover:bg-accent">
+              Expenses
+            </Link>
           </div>
         </div>
       </div>
@@ -277,14 +296,45 @@ export default function DashboardPage() {
       {emailSuccess ? <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-400">{emailSuccess}</div> : null}
 
       {loading || !data ? (
-        <div className="grid gap-4 md:grid-cols-5">
-          {Array.from({ length: 5 }).map((_, index) => <div key={index} className="h-28 animate-pulse rounded-2xl bg-card" />)}
+        <div className="flex flex-wrap gap-2">
+          {Array.from({ length: 5 }).map((_, index) => <div key={index} className="h-16 w-36 animate-pulse rounded-xl bg-card" />)}
         </div>
       ) : (
         <>
-          {/* Desktop: 5-column stat cards */}
-          <div className="hidden gap-4 md:grid md:grid-cols-5">
-            {getDashboardSummaryStats(data).map((item) => <StatCard key={item.label} label={item.label} value={item.value} lines={item.lines} />)}
+          {/* Desktop: single-row KPI strip — cards shrink to natural width */}
+          <div className="hidden md:flex flex-wrap items-stretch gap-2">
+            {getDashboardSummaryStats(data).slice(0, 3).map((item) => (
+              <div key={item.label} className="flex shrink-0 flex-col rounded-xl border border-border bg-card px-4 py-2.5">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide whitespace-nowrap">{item.label}</p>
+                {item.lines && item.lines.length > 0 ? (
+                  <div className="mt-0.5">
+                    {item.lines.map((line, i) => (
+                      <p key={i} className={`font-semibold whitespace-nowrap ${line.primary ? "text-xl leading-tight" : "text-[10px] opacity-70"} ${line.colorClass}`}>{line.value}</p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-0.5 text-xl font-semibold">{item.value}</p>
+                )}
+              </div>
+            ))}
+            {detectedCurrencies.length > 0 && (
+              <>
+                <div className="w-px self-stretch bg-border" />
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleUpdateRates}
+                    disabled={fxLoading}
+                    title={fxUpdatedAt ? `Rates updated ${new Date(fxUpdatedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}` : "Fetch live ECB rates"}
+                    className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <RefreshIcon spinning={fxLoading} />
+                    Update exchange rates
+                  </button>
+                  {fxError && <p className="text-xs text-red-400">{fxError}</p>}
+                </div>
+              </>
+            )}
           </div>
 
           {/* Mobile: compact layout */}
@@ -320,37 +370,20 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* FX conversion toolbar — affects the "Spend by category" and "Top merchants" charts below */}
+          {/* FX rate refresh — mobile only; desktop has it inline in the KPI strip above */}
           {detectedCurrencies.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-2.5">
-              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                <span>Spend charts — {defaultCurrency}-equivalent totals</span>
-                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tracking-wide">
-                  {detectedCurrencies.join(" · ")}
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="text-right">
-                  {fxUpdatedAt ? (
-                    <p className="text-xs text-muted-foreground">
-                      Rates updated {new Date(fxUpdatedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}
-                    </p>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">Using default rates</p>
-                  )}
-                  {fxError && <p className="text-xs text-red-400 mt-0.5">{fxError}</p>}
-                </div>
-                <button
-                  type="button"
-                  onClick={handleUpdateRates}
-                  disabled={fxLoading}
-                  title="Fetch live ECB rates for detected currencies"
-                  className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  <RefreshIcon spinning={fxLoading} />
-                  Update rates
-                </button>
-              </div>
+            <div className="flex items-center gap-2 md:hidden">
+              <button
+                type="button"
+                onClick={handleUpdateRates}
+                disabled={fxLoading}
+                title={fxUpdatedAt ? `Rates updated ${new Date(fxUpdatedAt).toLocaleString("en-GB", { dateStyle: "short", timeStyle: "short" })}` : "Fetch live ECB rates for detected currencies"}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <RefreshIcon spinning={fxLoading} />
+                Update exchange rates
+              </button>
+              {fxError && <p className="text-xs text-red-400">{fxError}</p>}
             </div>
           )}
 

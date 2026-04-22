@@ -13,8 +13,10 @@ engine_kwargs: dict[str, object] = {
 }
 
 if not settings.database_url.startswith("sqlite"):
-    engine_kwargs["pool_size"] = 10
-    engine_kwargs["max_overflow"] = 20
+    engine_kwargs["pool_size"] = settings.db_pool_size
+    engine_kwargs["max_overflow"] = settings.db_max_overflow
+    engine_kwargs["pool_timeout"] = 30       # fail fast if pool exhausted instead of blocking
+    engine_kwargs["pool_recycle"] = 1800     # recycle stale connections every 30 min
 
 # Create async engine with connection pooling where supported.
 engine = create_async_engine(settings.database_url, **engine_kwargs)

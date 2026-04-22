@@ -40,6 +40,7 @@ dependencies = [
     "pypdf>=4.0.0",
     "pgvector>=0.3.0",
     "cryptography>=42.0.0",
+    "slowapi>=0.1.9",
 ]
 
 [project.optional-dependencies]

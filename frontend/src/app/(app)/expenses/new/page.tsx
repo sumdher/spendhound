@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createExpense, createExpenseFromReceipt, createExpenseFromStatementEntry, createLedger, listCategories, listLedgers, listPartners, uploadReceipt, uploadStatement, type Category, type Ledger, type Partner, type Receipt, type ReceiptPreview, type ReceiptPreviewItem, type StatementImportEntry, type StatementImportPreview } from "@/lib/api";
+import { useSession } from "next-auth/react";
+import { createExpense, createExpenseFromReceipt, createExpenseFromStatementEntry, createLedger, getCurrentUserProfile, getReceipt, listCategories, listLedgers, listPartners, uploadReceipt, uploadStatement, type Category, type Ledger, type Partner, type Receipt, type ReceiptPreview, type ReceiptPreviewItem, type StatementImportEntry, type StatementImportPreview } from "@/lib/api";
 import { currentMonthString, formatSignedCurrency, transactionCadenceLabel, transactionTypeLabel } from "@/lib/utils";
 
 type ExpenseFormState = {
@@ -266,7 +267,6 @@ function CadenceSelector({ value, onChange, disabled = false }: { value: string;
         >
           <span className="font-medium">{selected.label}</span>
           <span className="text-xs text-muted-foreground">{selected.description}</span>
-          <span className="ml-auto text-xs text-muted-foreground/60">tap to change</span>
         </button>
       )}
     </div>
@@ -600,15 +600,20 @@ function LedgerSelector({
 export default function NewExpensePage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { data: session } = useSession();
+  const [hasLlmApiKey, setHasLlmApiKey] = useState<boolean | null>(null);
   const receiptFinalizeInFlightRef = useRef(false);
   const statementFinalizeInFlightRef = useRef(false);
   const draftRestoredFromStorageRef = useRef(false);
+  const uploadAbortRef = useRef<AbortController | null>(null);
+  const pollingCancelledRef = useRef(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
   const [receiptError, setReceiptError] = useState<string | null>(null);
   const [receiptSuccess, setReceiptSuccess] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [extracting, setExtracting] = useState(false);
   const [finalizingReceipt, setFinalizingReceipt] = useState(false);
   const [lastReceiptFile, setLastReceiptFile] = useState<File | null>(null);
   const [manualForm, setManualForm] = useState<ExpenseFormState>(createEmptyExpenseForm);
@@ -648,7 +653,10 @@ export default function NewExpensePage() {
     listCategories().then(setCategories).catch(() => {});
     listLedgers().then((res) => setLedgers(res.ledgers)).catch(() => {});
     listPartners().then((res) => setPartners(res.partners)).catch(() => {});
-  }, []);
+    if (!session?.isAdmin) {
+      getCurrentUserProfile().then((p) => setHasLlmApiKey(p.has_llm_api_key)).catch(() => {});
+    }
+  }, [session?.isAdmin]);
 
   // Restore receipt draft from localStorage on mount
   useEffect(() => {
@@ -680,6 +688,21 @@ export default function NewExpensePage() {
     setReceiptDraft(createReceiptDraftFromPreview(preview, categories));
     setItemsCurrency(preview.currency ?? DEFAULT_CURRENCY);
   }, [categories, selectedReceipt]);
+
+  useEffect(() => {
+    if (activeTab !== RECEIPT_TAB) return;
+    function handlePaste(e: ClipboardEvent) {
+      if (uploading) return;
+      const imageItem = Array.from(e.clipboardData?.items ?? []).find((item) => item.type.startsWith("image/"));
+      if (!imageItem) return;
+      const file = imageItem.getAsFile();
+      if (!file) return;
+      void uploadFile(file);
+    }
+    document.addEventListener("paste", handlePaste);
+    return () => document.removeEventListener("paste", handlePaste);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, uploading]);
 
   const receiptPreview = useMemo(() => (isReceiptPreview(selectedReceipt?.preview) ? selectedReceipt.preview : null), [selectedReceipt]);
   const extractedItems = useMemo(() => receiptDraft.items ?? [], [receiptDraft.items]);
@@ -737,7 +760,7 @@ export default function NewExpensePage() {
   function updateManualItem(index: number, field: keyof ReceiptPreviewItem, value: string) {
     setManualItems((current) => current.map((item, i) => i !== index ? item : {
       ...item,
-      [field]: value === "" ? null : field === "description" || field === "subcategory" ? value : Number(value),
+      [field]: field === "subcategory" ? value : value === "" ? null : field === "description" ? value : Number(value),
     }));
   }
 
@@ -746,7 +769,7 @@ export default function NewExpensePage() {
       ...current,
       items: current.items.map((item, itemIndex) => itemIndex !== index ? item : {
         ...item,
-        [field]: value === "" ? null : field === "description" || field === "subcategory" ? value : Number(value),
+        [field]: field === "subcategory" ? value : value === "" ? null : field === "description" ? value : Number(value),
       }),
     }));
   }
@@ -766,6 +789,7 @@ export default function NewExpensePage() {
   }
 
   function resetReceiptDraft() {
+    cancelUpload();
     setSelectedReceipt(null);
     setLastReceiptFile(null);
     setReceiptDraft(createEmptyReceiptDraft());
@@ -841,42 +865,84 @@ export default function NewExpensePage() {
     }
   }
 
-  async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  function cancelUpload() {
+    uploadAbortRef.current?.abort();
+    uploadAbortRef.current = null;
+    pollingCancelledRef.current = true;
+    setUploading(false);
+    setExtracting(false);
+  }
+
+  async function uploadFile(file: File) {
+    cancelUpload();
+    const controller = new AbortController();
+    uploadAbortRef.current = controller;
+    pollingCancelledRef.current = false;
+
     setLastReceiptFile(file);
     setUploading(true);
+    setExtracting(false);
     setReceiptError(null);
     setReceiptSuccess(null);
+
+    let receipt: Receipt;
     try {
-      const receipt = await uploadReceipt(file);
+      receipt = await uploadReceipt(file, controller.signal);
       draftRestoredFromStorageRef.current = false;
       setSelectedReceipt(receipt);
+    } catch (err) {
+      if ((err as { name?: string }).name === "AbortError") return;
+      setReceiptError(err instanceof Error ? err.message : "Upload failed");
+      setUploading(false);
+      uploadAbortRef.current = null;
+      return;
+    }
+    setUploading(false);
+
+    // Poll until the background extraction finishes
+    if (receipt.extraction_status === "pending") {
+      setExtracting(true);
+      let polled = receipt;
+      try {
+        while (polled.extraction_status === "pending" && !pollingCancelledRef.current) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+          if (pollingCancelledRef.current) break;
+          polled = await getReceipt(receipt.id);
+          setSelectedReceipt(polled);
+        }
+        if (!pollingCancelledRef.current) {
+          if (polled.extraction_status === "error") {
+            setReceiptError("Receipt extraction failed. You can still fill in the details manually.");
+          } else {
+            setReceiptSuccess(`Uploaded ${polled.original_filename}. Review the extracted fields before saving.`);
+            setTab(RECEIPT_TAB);
+          }
+        }
+      } catch (err) {
+        if ((err as { name?: string }).name !== "AbortError" && !pollingCancelledRef.current) {
+          setReceiptError(err instanceof Error ? err.message : "Extraction polling failed");
+        }
+      } finally {
+        setExtracting(false);
+        uploadAbortRef.current = null;
+      }
+    } else {
       setReceiptSuccess(`Uploaded ${receipt.original_filename}. Review the extracted fields before saving.`);
       setTab(RECEIPT_TAB);
-    } catch (err) {
-      setReceiptError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
-      setUploading(false);
-      event.target.value = "";
+      uploadAbortRef.current = null;
     }
   }
 
-  async function retryReceiptUpload() {
+  async function handleUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    event.target.value = "";
+    await uploadFile(file);
+  }
+
+  function retryReceiptUpload() {
     if (!lastReceiptFile) return;
-    setUploading(true);
-    setReceiptError(null);
-    setReceiptSuccess(null);
-    try {
-      const receipt = await uploadReceipt(lastReceiptFile);
-      setSelectedReceipt(receipt);
-      setReceiptSuccess(`Retried ${receipt.original_filename}. Review the refreshed extraction before saving.`);
-      setTab(RECEIPT_TAB);
-    } catch (err) {
-      setReceiptError(err instanceof Error ? err.message : "Retry failed");
-    } finally {
-      setUploading(false);
-    }
+    void uploadFile(lastReceiptFile);
   }
 
   async function handleReceiptFinalize() {
@@ -976,6 +1042,15 @@ export default function NewExpensePage() {
         <h1 className="text-3xl font-bold">Add transaction</h1>
         <p className="text-sm text-muted-foreground">Add money out or money in manually, or review imported receipt and statement drafts before anything is saved.</p>
       </div>
+      {!session?.isAdmin && hasLlmApiKey === false && (
+        <div className="flex items-start gap-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400">
+          <span className="shrink-0">⚠️</span>
+          <span>
+            You haven&apos;t configured an LLM provider API key yet — AI-powered receipt extraction will use the server defaults.{" "}
+            <a href="/settings" className="font-medium underline underline-offset-2">Set up your API key in Settings.</a>
+          </span>
+        </div>
+      )}
       <div className="flex gap-2 border-b border-border">
         <button type="button" onClick={() => setTab(MANUAL_TAB)} className={`rounded-t-xl px-4 py-2 text-sm font-medium ${activeTab === MANUAL_TAB ? "bg-card text-foreground" : "text-muted-foreground hover:text-foreground"}`}>Manual</button>
         <button type="button" onClick={() => setTab(RECEIPT_TAB)} className={`rounded-t-xl px-4 py-2 text-sm font-medium ${activeTab === RECEIPT_TAB ? "bg-card text-foreground" : "text-muted-foreground hover:text-foreground"}`}>Upload receipt</button>
@@ -1111,17 +1186,30 @@ export default function NewExpensePage() {
             <div className="rounded-2xl border border-border bg-card p-4">
               <h2 className="text-xl font-semibold">Upload receipt</h2>
               <p className="mt-1 text-sm text-muted-foreground">Receipt import stays expense-focused by default, but you can switch the reviewed draft to money in if the document is clearly a refund or reimbursement.</p>
-              <label className="mt-4 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm hover:bg-accent">
-                <input type="file" accept="image/*,.pdf" className="hidden" onChange={handleUpload} />
-                {uploading ? "Uploading…" : "Choose a receipt image or PDF"}
-              </label>
+              {uploading || extracting ? (
+                <div className="mt-4 space-y-3">
+                  <div className="flex cursor-not-allowed items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm opacity-70">
+                    <svg className="h-4 w-4 animate-spin text-primary" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    {uploading ? "Uploading…" : "Extracting receipt data… (this can take a minute with large models)"}
+                  </div>
+                  <button type="button" onClick={cancelUpload} className="w-full rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent">Cancel</button>
+                </div>
+              ) : (
+                <label className="mt-4 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm hover:bg-accent">
+                  <input type="file" accept="image/*,.pdf" className="hidden" onChange={handleUpload} />
+                  Choose a receipt image or PDF · or paste (Ctrl+V)
+                </label>
+              )}
               {selectedReceipt ? (
                 <div className="mt-4 rounded-xl border border-border bg-background p-3 text-sm">
                   <div className="font-medium">Current receipt</div>
                   <div className="mt-1 text-muted-foreground">{selectedReceipt.original_filename}</div>
                   <div className="mt-2 text-xs text-muted-foreground">Confidence: {Math.round((selectedReceipt.extraction_confidence ?? 0) * 100)}% · Status: {selectedReceipt.extraction_status}</div>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <button type="button" onClick={retryReceiptUpload} disabled={uploading || finalizingReceipt || !lastReceiptFile} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60">{uploading ? "Retrying…" : "Try again"}</button>
+                    <button type="button" onClick={retryReceiptUpload} disabled={uploading || extracting || finalizingReceipt || !lastReceiptFile} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60">{uploading || extracting ? "Processing…" : "Try again"}</button>
                     <button type="button" onClick={resetReceiptDraft} disabled={finalizingReceipt} className="rounded-lg border border-border px-3 py-1.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60">Cancel</button>
                   </div>
                 </div>
@@ -1179,7 +1267,8 @@ export default function NewExpensePage() {
                     <button type="button" onClick={addReceiptItem} className="rounded-lg border border-border px-3 py-1 text-xs hover:bg-accent">Add item</button>
                   </div>
                 </div>
-                <table className="w-full text-sm border-collapse table-fixed">
+                <div className="overflow-x-auto">
+                <table className="w-full min-w-[480px] text-sm border-collapse table-fixed">
                   <thead>
                     <tr className="border-b border-border text-left text-xs text-muted-foreground">
                       <th className="pb-2 font-medium">Item</th>
@@ -1214,13 +1303,26 @@ export default function NewExpensePage() {
                           </div>
                         </td>
                         <td className="py-2 pr-3 w-32">
-                          <select value={ITEM_SUBCATEGORY_OPTIONS.includes(item.subcategory ?? "") ? item.subcategory ?? "" : item.subcategory ? "__custom__" : ""} onChange={(e) => updateReceiptItem(index, "subcategory", e.target.value === "__custom__" ? (item.subcategory && !ITEM_SUBCATEGORY_OPTIONS.includes(item.subcategory) ? item.subcategory : "") : e.target.value)} className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground">
+                          <select
+                            value={item.subcategory == null ? "" : ITEM_SUBCATEGORY_OPTIONS.includes(item.subcategory) ? item.subcategory : "__custom__"}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              if (v === "") {
+                                setReceiptDraft((cur) => ({ ...cur, items: cur.items.map((it, i) => i !== index ? it : { ...it, subcategory: null }) }));
+                              } else if (v === "__custom__") {
+                                setReceiptDraft((cur) => ({ ...cur, items: cur.items.map((it, i) => i !== index ? it : { ...it, subcategory: it.subcategory != null && !ITEM_SUBCATEGORY_OPTIONS.includes(it.subcategory) ? it.subcategory : "" }) }));
+                              } else {
+                                updateReceiptItem(index, "subcategory", v);
+                              }
+                            }}
+                            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+                          >
                             <option value="">None</option>
                             {ITEM_SUBCATEGORY_OPTIONS.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
                             <option value="__custom__">Custom…</option>
                           </select>
-                          {!ITEM_SUBCATEGORY_OPTIONS.includes(item.subcategory ?? "") && item.subcategory ? (
-                            <input value={item.subcategory} onChange={(e) => updateReceiptItem(index, "subcategory", e.target.value)} className="mt-1.5 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground" placeholder="Custom subcategory" />
+                          {item.subcategory != null && !ITEM_SUBCATEGORY_OPTIONS.includes(item.subcategory) ? (
+                            <input value={item.subcategory ?? ""} onChange={(e) => updateReceiptItem(index, "subcategory", e.target.value)} className="mt-1.5 w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground" placeholder="Custom subcategory" />
                           ) : null}
                         </td>
                         <td className="py-2 w-8">
@@ -1230,6 +1332,7 @@ export default function NewExpensePage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
             ) : null}
 

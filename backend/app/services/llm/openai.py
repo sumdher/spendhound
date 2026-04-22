@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+import httpx
+
 from app.config import settings
 from app.services.llm.base import BaseLLMProvider, LLMConfig, Message
 
@@ -30,7 +32,13 @@ class OpenAIProvider(BaseLLMProvider):
         if not api_key:
             raise ValueError("OPENAI_API_KEY is not configured.")
 
-        kwargs: dict = {"api_key": api_key}
+        timeout = httpx.Timeout(
+            connect=30.0,
+            read=float(settings.llm_timeout_seconds),
+            write=30.0,
+            pool=10.0,
+        )
+        kwargs: dict = {"api_key": api_key, "timeout": timeout}
         if base_url:
             kwargs["base_url"] = base_url
 

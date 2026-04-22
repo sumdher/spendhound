@@ -67,6 +67,35 @@ class Settings(BaseSettings):
     embedding_dimensions: int = Field(default=768, description="Vector dimensions produced by the embedding model")
     rag_similarity_threshold: float = Field(default=0.22, description="Cosine distance threshold for RAG match (lower = stricter; 0.0=identical, 2.0=opposite)")
 
+    # ── LLM concurrency ──────────────────────────────────────────────────────────
+    ollama_max_concurrent: int = Field(
+        default=1,
+        description="Max concurrent Ollama calls. 1 = single GPU; increase only for CPU or multi-GPU.",
+    )
+    llm_semaphore_wait_timeout: float = Field(
+        default=5.0,
+        description="Seconds to wait for the LLM semaphore before returning 503. Fail fast rather than queue.",
+    )
+    llm_timeout_seconds: int = Field(
+        default=120,
+        description="Total timeout in seconds for any LLM provider call (connect + read).",
+    )
+
+    # ── Receipt extraction queue ──────────────────────────────────────────────
+    receipt_queue_maxsize: int = Field(
+        default=10,
+        description="Max pending receipt extraction jobs. Uploads beyond this return a queued_full status.",
+    )
+
+    # ── Rate limiting ─────────────────────────────────────────────────────────
+    rate_limit_chat_per_minute: int = Field(default=20, description="Chat stream requests per user per minute")
+    rate_limit_upload_per_minute: int = Field(default=3, description="Receipt uploads per user per minute")
+    rate_limit_auth_per_minute: int = Field(default=10, description="Auth requests per IP per minute")
+
+    # ── Database connection pool ──────────────────────────────────────────────
+    db_pool_size: int = Field(default=20, description="SQLAlchemy async connection pool base size")
+    db_max_overflow: int = Field(default=40, description="Max extra connections beyond db_pool_size")
+
     debug: bool = Field(default=False, description="Enable debug mode")
     cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://127.0.0.1:3000"],

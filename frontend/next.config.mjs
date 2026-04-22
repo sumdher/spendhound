@@ -7,6 +7,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  // Disable keep-alive on the internal proxy to avoid ECONNRESET with multi-worker uvicorn
+  httpAgentOptions: { keepAlive: false },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "lh3.googleusercontent.com" },
