@@ -1,5 +1,6 @@
 """SpendHound FastAPI application entry point."""
 
+import asyncio
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -7,9 +8,13 @@ from pathlib import Path
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 import app.models  # noqa: F401
 from app.config import settings
+from app.middleware.rate_limit import limiter
+from app.services.receipt_queue import ExtractionJob, receipt_queue_worker, set_receipt_queue
 
 logger = structlog.get_logger(__name__)
 
@@ -17,8 +22,27 @@ logger = structlog.get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Path(settings.receipt_storage_dir).mkdir(parents=True, exist_ok=True)
-    logger.info("SpendHound backend starting up", llm_provider=settings.llm_provider)
+
+    # Start the bounded receipt extraction queue worker.
+    # maxsize caps simultaneous Ollama calls from uploaded receipts.
+    queue: asyncio.Queue[ExtractionJob] = asyncio.Queue(maxsize=settings.receipt_queue_maxsize)
+    set_receipt_queue(queue)
+    worker_task = asyncio.create_task(receipt_queue_worker(queue))
+
+    logger.info(
+        "SpendHound backend starting up",
+        llm_provider=settings.llm_provider,
+        receipt_queue_maxsize=settings.receipt_queue_maxsize,
+        ollama_max_concurrent=settings.ollama_max_concurrent,
+    )
     yield
+
+    # Graceful shutdown: cancel the worker, let it finish the current job.
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
     logger.info("SpendHound backend shutting down")
 
 
@@ -31,6 +55,12 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
         lifespan=lifespan,
     )
+
+    # Rate limiting — in-memory, keyed by user ID (authenticated) or IP (anonymous).
+    # Works correctly only with --workers 1 (single process = single shared limiter).
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,

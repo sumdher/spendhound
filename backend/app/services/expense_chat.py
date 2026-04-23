@@ -9,7 +9,8 @@ import uuid
 from collections.abc import AsyncGenerator
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import HTTPException
+import structlog
+from fastapi import HTTPException, Request
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -29,6 +30,8 @@ from app.services.spendhound import month_start_from_string
 from app.services.llm.base import LLMConfig, Message
 from app.services.llm.factory import get_llm_provider, resolve_user_llm_config
 
+
+logger = structlog.get_logger(__name__)
 
 SYSTEM_PROMPT = """You are SpendHound's expense assistant.
 You have direct access to the user's real expense data — it is injected into every message in the structured finance context below.
@@ -111,7 +114,12 @@ class ExpenseChatService:
         return ChatHistoryResponse(session=self._session_response(session), messages=[])
 
     async def stream_chat(
-        self, user_id: uuid.UUID, *, session_id: uuid.UUID, request: ChatStreamRequest
+        self,
+        user_id: uuid.UUID,
+        *,
+        session_id: uuid.UUID,
+        request: ChatStreamRequest,
+        http_request: Request,
     ) -> AsyncGenerator[str, None]:
         session = await self._get_session(user_id, session_id, load_messages=True)
         llm_config = self._build_llm_config(request)
@@ -159,6 +167,12 @@ class ExpenseChatService:
             async for chunk in provider.stream(prompt_messages, llm_config):
                 if not chunk:
                     continue
+                if await http_request.is_disconnected():
+                    logger.info(
+                        "chat.stream.client_disconnected",
+                        session_id=str(session_id),
+                    )
+                    return  # exits generator → finally in OllamaProvider.stream() releases semaphore
                 accumulated += chunk
                 yield self._sse_event("token", {"text": chunk, "token": chunk})
         except Exception as exc:
@@ -203,7 +217,11 @@ class ExpenseChatService:
         )
 
     async def stream_summary(
-        self, user_id: uuid.UUID, *, request: ChatSummarizeStreamRequest
+        self,
+        user_id: uuid.UUID,
+        *,
+        request: ChatSummarizeStreamRequest,
+        http_request: Request,
     ) -> AsyncGenerator[str, None]:
         llm_config = self._build_llm_config(request)
         provider_name, model_name = self._resolve_provider_and_model(llm_config)
@@ -238,6 +256,9 @@ class ExpenseChatService:
             async for chunk in provider.stream(messages, llm_config):
                 if not chunk:
                     continue
+                if await http_request.is_disconnected():
+                    logger.info("chat.summary.client_disconnected")
+                    return
                 accumulated += chunk
                 yield self._sse_event("token", {"text": chunk, "token": chunk})
         except Exception as exc:

@@ -10,7 +10,12 @@
       "Bash(python3 -c \"from app.api.auth import router; print\\('auth.py OK'\\)\")",
       "Bash(python3 -c \"import ast; ast.parse\\(open\\('app/api/auth.py'\\).read\\(\\)\\); print\\('auth.py syntax OK'\\)\")",
       "Bash(python3 -c ' *)",
-      "Bash(npx next *)"
+      "Bash(npx next *)",
+      "Bash(python3 -c \"import ast, sys; ast.parse\\(open\\('app/api/receipts.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Read(//home/zorino/repos/jobhound_hot_features/**)",
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(xargs -I {} basename {})",
+      "Bash(xargs ls *)"
     ]
   }
 }

@@ -787,10 +787,10 @@ export async function getReceipt(id: string): Promise<Receipt> {
   return apiFetch<Receipt>(`/api/receipts/${id}`);
 }
 
-export async function uploadReceipt(file: File): Promise<Receipt> {
+export async function uploadReceipt(file: File, signal?: AbortSignal): Promise<Receipt> {
   const formData = new FormData();
   formData.append("file", file);
-  return apiFetch<Receipt>("/api/receipts/upload", { method: "POST", body: formData });
+  return apiFetch<Receipt>("/api/receipts/upload", { method: "POST", body: formData, signal });
 }
 
 export async function uploadStatement(file: File): Promise<Receipt> {
@@ -833,6 +833,10 @@ export async function updateLLMSettings(settings: UserLLMSettings): Promise<User
   });
 }
 
+export async function getServerConfig(): Promise<{ admin_ollama_model: string }> {
+  return apiFetch<{ admin_ollama_model: string }>("/api/auth/server-config");
+}
+
 export interface LLMModelPricing {
   input_per_1m: number | null;
   output_per_1m: number | null;
@@ -861,10 +865,16 @@ export interface LLMTestResponse {
 }
 
 export async function testLLMSettings(payload: LLMTestRequest): Promise<LLMTestResponse> {
-  return apiFetch<LLMTestResponse>("/api/auth/me/test-llm", {
+  const response = await fetch("/api/test-llm", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({ error: response.statusText }));
+    return { success: false, error: (err as LLMTestResponse).error ?? `HTTP ${response.status}` };
+  }
+  return response.json() as Promise<LLMTestResponse>;
 }
 
 export async function getOllamaModels(): Promise<string[]> {

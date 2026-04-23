@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.middleware.auth import get_current_user
+from app.middleware.rate_limit import limiter
+from app.config import settings
 from app.models.user import User
 from app.schemas.chat import ChatHistoryResponse, ChatSessionCreate, ChatSessionResponse, ChatSessionUpdate, ChatSummarizeStreamRequest, ChatStreamRequest
 from app.services.expense_chat import ExpenseChatService
@@ -79,7 +81,9 @@ async def clear_chat_history(
 
 
 @router.post("/sessions/{session_id}/stream")
+@limiter.limit(f"{settings.rate_limit_chat_per_minute}/minute")
 async def stream_chat(
+    request: Request,
     session_id: uuid.UUID,
     body: ChatStreamRequest,
     current_user: User = Depends(get_current_user),
@@ -89,7 +93,7 @@ async def stream_chat(
         raise HTTPException(status_code=400, detail="Message is required")
     service = ExpenseChatService(db, current_user)
     return StreamingResponse(
-        service.stream_chat(current_user.id, session_id=session_id, request=body),
+        service.stream_chat(current_user.id, session_id=session_id, request=body, http_request=request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -100,14 +104,16 @@ async def stream_chat(
 
 
 @router.post("/summarize/stream")
+@limiter.limit(f"{settings.rate_limit_chat_per_minute}/minute")
 async def stream_chat_summary(
+    request: Request,
     body: ChatSummarizeStreamRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> StreamingResponse:
     service = ExpenseChatService(db, current_user)
     return StreamingResponse(
-        service.stream_summary(current_user.id, request=body),
+        service.stream_summary(current_user.id, request=body, http_request=request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

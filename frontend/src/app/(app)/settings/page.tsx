@@ -1,12 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useSession } from "next-auth/react";
 import {
   getCurrentUserProfile,
   updateCurrentUserProfile,
   updateLLMSettings,
   testLLMSettings,
   getLLMModels,
+  getServerConfig,
   LLMModelInfo,
 } from "@/lib/api";
 import { getDefaultCurrency, setDefaultCurrency } from "@/lib/fx-rates";
@@ -45,7 +47,6 @@ const SETTINGS_CURRENCIES = [
 ];
 
 const PROVIDERS = [
-  { value: "ollama",      label: "Ollama (local)" },
   { value: "openai",      label: "OpenAI" },
   { value: "anthropic",   label: "Anthropic" },
   { value: "openrouter",  label: "OpenRouter (300+ models)" },
@@ -53,6 +54,7 @@ const PROVIDERS = [
   { value: "together",    label: "Together AI" },
   { value: "mistral",     label: "Mistral" },
   { value: "nebius",      label: "Nebius" },
+  { value: "ollama",      label: "Ollama" },
 ];
 
 function buildOptionTitle(model: LLMModelInfo): string {
@@ -68,8 +70,12 @@ function buildOptionTitle(model: LLMModelInfo): string {
 }
 
 export default function SettingsPage() {
+  const { data: session } = useSession();
+  const isAdmin = session?.isAdmin === true;
+
   // ── LLM settings state (server-backed) ──────────────────────────────────
   const [llmProvider, setLlmProvider] = useState("ollama");
+  const [adminOllamaModel, setAdminOllamaModel] = useState<string>("");
   const [llmModel, setLlmModel] = useState("");
   const [llmApiKey, setLlmApiKey] = useState("");
   const [llmBaseUrl, setLlmBaseUrl] = useState("");
@@ -105,8 +111,11 @@ export default function SettingsPage() {
   useEffect(() => {
     let active = true;
 
-    getCurrentUserProfile()
-      .then((profile) => {
+    Promise.all([
+      getCurrentUserProfile(),
+      getServerConfig().catch(() => ({ admin_ollama_model: "" })),
+    ])
+      .then(([profile, serverConfig]) => {
         if (!active) return;
         setAutomaticMonthlyReports(profile.automatic_monthly_reports);
         // Use raw setters here — NOT markDirty() — to avoid dirty flag on load
@@ -114,6 +123,7 @@ export default function SettingsPage() {
         setLlmModel(profile.llm_model ?? "");
         setLlmBaseUrl(profile.llm_base_url ?? "");
         setHasLlmApiKey(profile.has_llm_api_key ?? false);
+        setAdminOllamaModel(serverConfig.admin_ollama_model ?? "");
         setReportsError(null);
         setLlmError(null);
       })
@@ -218,7 +228,6 @@ export default function SettingsPage() {
       const payload: Parameters<typeof updateLLMSettings>[0] = {
         llm_provider: llmProvider || null,
         llm_model: llmModel || null,
-        llm_base_url: llmBaseUrl || null,
       };
 
       if (clearApiKey) {
@@ -279,7 +288,10 @@ export default function SettingsPage() {
     <div className="mx-auto max-w-2xl space-y-6">
       <div>
         <h1 className="text-3xl font-bold">Settings</h1>
-        <p className="text-sm text-muted-foreground">Manage your monthly email preference, display currency, and AI provider settings.</p>
+        <p className="text-sm text-muted-foreground">
+          Manage your monthly email preference, display currency, and AI
+          provider settings.
+        </p>
       </div>
 
       {/* Monthly report emails */}
@@ -287,24 +299,38 @@ export default function SettingsPage() {
         <div>
           <h2 className="text-lg font-semibold">Monthly report emails</h2>
           <p className="text-sm text-muted-foreground">
-            Controls only whether Spendhound automatically emails your monthly report digest. It does not affect manual send actions from the dashboard.
+            Controls only whether Spendhound automatically emails your monthly
+            report digest. It does not affect manual send actions from the
+            dashboard.
           </p>
         </div>
-        {reportsError ? <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{reportsError}</div> : null}
-        {reportsSaved ? <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-400">Automatic monthly email preference updated.</div> : null}
+        {reportsError ? (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            {reportsError}
+          </div>
+        ) : null}
+        {reportsSaved ? (
+          <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+            Automatic monthly email preference updated.
+          </div>
+        ) : null}
         <label className="flex items-start justify-between gap-4 rounded-xl border border-border bg-background p-4">
           <div className="space-y-1">
             <div className="text-sm font-medium">Automatic monthly emails</div>
-            <div className="text-sm text-muted-foreground">Send the monthly digest email automatically each month.</div>
+            <div className="text-sm text-muted-foreground">
+              Send the monthly digest email automatically each month.
+            </div>
           </div>
           <button
             type="button"
             role="switch"
             aria-checked={automaticMonthlyReports}
             aria-label="Toggle automatic monthly emails"
-            onClick={() => handleAutomaticMonthlyReportsChange(!automaticMonthlyReports)}
+            onClick={() =>
+              handleAutomaticMonthlyReportsChange(!automaticMonthlyReports)
+            }
             disabled={reportsLoading || reportsSaving}
-            className={`relative inline-flex h-7 w-12 shrink-0 rounded-full border transition ${automaticMonthlyReports ? "border-primary bg-primary" : "border-border bg-muted"} ${(reportsLoading || reportsSaving) ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
+            className={`relative inline-flex h-7 w-12 shrink-0 rounded-full border transition ${automaticMonthlyReports ? "border-primary bg-primary" : "border-border bg-muted"} ${reportsLoading || reportsSaving ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
           >
             <span
               className={`inline-block h-5 w-5 translate-y-[3px] rounded-full bg-white transition ${automaticMonthlyReports ? "translate-x-6" : "translate-x-1"}`}
@@ -312,7 +338,11 @@ export default function SettingsPage() {
           </button>
         </label>
         <div className="text-xs text-muted-foreground">
-          {reportsLoading ? "Loading current preference..." : reportsSaving ? "Saving automatic monthly email preference..." : `Automatic monthly emails are currently ${automaticMonthlyReports ? "enabled" : "disabled"}.`}
+          {reportsLoading
+            ? "Loading current preference..."
+            : reportsSaving
+              ? "Saving automatic monthly email preference..."
+              : `Automatic monthly emails are currently ${automaticMonthlyReports ? "enabled" : "disabled"}.`}
         </div>
       </div>
 
@@ -321,11 +351,16 @@ export default function SettingsPage() {
         <div>
           <h2 className="text-lg font-semibold">Default currency</h2>
           <p className="text-sm text-muted-foreground">
-            The base currency used for multi-currency totals, charts, and sorting. When your expenses include multiple currencies, all amounts are converted to this currency for comparison and aggregation. The default is EUR.
+            The base currency used for multi-currency totals, charts, and
+            sorting. When your expenses include multiple currencies, all amounts
+            are converted to this currency for comparison and aggregation. The
+            default is EUR.
           </p>
         </div>
         <label className="text-sm">
-          <span className="mb-1 block text-muted-foreground">Display currency</span>
+          <span className="mb-1 block text-muted-foreground">
+            Display currency
+          </span>
           <select
             value={defaultCurrency}
             onChange={(e) => handleDefaultCurrencyChange(e.target.value)}
@@ -339,7 +374,9 @@ export default function SettingsPage() {
           </select>
         </label>
         <p className="text-xs text-muted-foreground">
-          Saved locally in your browser. After changing, visit the dashboard or expenses page and click &quot;Update rates&quot; to fetch live conversion rates relative to your new default currency.
+          Saved locally in your browser. After changing, visit the dashboard or
+          expenses page and click &quot;Update rates&quot; to fetch live
+          conversion rates relative to your new default currency.
         </p>
       </div>
 
@@ -347,14 +384,35 @@ export default function SettingsPage() {
       <div className="space-y-4 rounded-2xl border border-border bg-card p-6">
         <div>
           <h2 className="text-lg font-semibold">AI provider settings</h2>
-          <p className="text-sm text-muted-foreground">Configure your LLM provider. Settings are stored securely on the server and used for receipt extraction, expense chat, and finance summaries.</p>
+          <p className="text-sm text-muted-foreground">
+            Configure your LLM provider. Settings are stored securely on the
+            server and used for receipt extraction, expense chat, and finance
+            summaries. Looking for{" "}
+            <a
+              href="/rules"
+              className="underline underline-offset-2 hover:text-foreground"
+            >
+              categorization rules and AI auto-mappings
+            </a>
+            ?
+          </p>
         </div>
 
-        {llmError ? <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{llmError}</div> : null}
-        {llmSaved ? <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-400">AI settings saved.</div> : null}
+        {llmError ? (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            {llmError}
+          </div>
+        ) : null}
+        {llmSaved ? (
+          <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-400">
+            AI settings saved.
+          </div>
+        ) : null}
 
         {llmLoading ? (
-          <div className="text-sm text-muted-foreground">Loading AI settings…</div>
+          <div className="text-sm text-muted-foreground">
+            Loading AI settings…
+          </div>
         ) : (
           <>
             {/* Provider */}
@@ -362,95 +420,131 @@ export default function SettingsPage() {
               <span className="mb-1 block text-muted-foreground">Provider</span>
               <select
                 value={llmProvider}
-                onChange={(e) => { setLlmProvider(e.target.value); markDirty(); }}
+                onChange={(e) => {
+                  setLlmProvider(e.target.value);
+                  markDirty();
+                }}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2"
               >
                 {PROVIDERS.map((p) => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
+                  <option key={p.value} value={p.value}>
+                    {p.value === "ollama"
+                      ? `Ollama ${adminOllamaModel || "(local)"}`
+                      : p.label}
+                  </option>
                 ))}
               </select>
             </label>
 
+            {/* Model — hidden for non-admin Ollama users (admin manages the model) */}
+            {isOllama && !isAdmin ? (
+              <div className="rounded-xl border border-border bg-background p-3 text-sm text-muted-foreground">
+                Model is selected by the server admin.
+              </div>
+            ) : null}
+
             {/* Model — unified dynamic dropdown for all providers */}
-            <div className="text-sm">
-              <div className="mb-1 flex items-center gap-2">
-                <span className="text-muted-foreground">Model</span>
+            {!(isOllama && !isAdmin) && (
+              <div className="text-sm">
+                <div className="mb-1 flex items-center gap-2">
+                  <span className="text-muted-foreground">Model</span>
+                  {modelListLoading ? (
+                    <span className="text-xs text-muted-foreground animate-pulse">
+                      🔄 Loading models…
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleRefreshModels}
+                      className="text-xs text-muted-foreground underline ml-2"
+                    >
+                      🔄 Refresh
+                    </button>
+                  )}
+                </div>
+
                 {modelListLoading ? (
-                  <span className="text-xs text-muted-foreground animate-pulse">🔄 Loading models…</span>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleRefreshModels}
-                    className="text-xs text-muted-foreground underline ml-2"
+                  <select
+                    disabled
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:opacity-60"
                   >
-                    🔄 Refresh
-                  </button>
+                    <option>Loading models…</option>
+                  </select>
+                ) : modelList.length > 0 ||
+                  (llmModel !== "" && !currentModelInList) ? (
+                  <>
+                    <select
+                      value={llmModel}
+                      onChange={(e) => {
+                        setLlmModel(e.target.value);
+                        markDirty();
+                      }}
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2"
+                    >
+                      <option value="" disabled>
+                        Select a model…
+                      </option>
+                      {llmModel !== "" && !currentModelInList && (
+                        <option value={llmModel}>{llmModel} (current)</option>
+                      )}
+                      {modelList.map((m) => (
+                        <option
+                          key={m.id}
+                          value={m.id}
+                          title={buildOptionTitle(m)}
+                        >
+                          {m.name}
+                        </option>
+                      ))}
+                    </select>
+                    {selectedModelInfo && (
+                      <p className="text-xs text-muted-foreground mt-1 flex gap-2 flex-wrap">
+                        {selectedModelInfo.supports_vision && (
+                          <span>👁 Vision</span>
+                        )}
+                        {selectedModelInfo.context_length && (
+                          <span>
+                            Context:{" "}
+                            {(selectedModelInfo.context_length / 1000).toFixed(
+                              0,
+                            )}
+                            K tokens
+                          </span>
+                        )}
+                        {selectedModelInfo.pricing && (
+                          <span>
+                            $
+                            {selectedModelInfo.pricing.input_per_1m?.toFixed(2)}
+                            /1M in · $
+                            {selectedModelInfo.pricing.output_per_1m?.toFixed(
+                              2,
+                            )}
+                            /1M out
+                          </span>
+                        )}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <input
+                      value={llmModel}
+                      onChange={(e) => {
+                        setLlmModel(e.target.value);
+                        markDirty();
+                      }}
+                      placeholder="e.g. gpt-4o"
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2"
+                    />
+                    {modelListError && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {modelListError}
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
-
-              {modelListLoading ? (
-                <select disabled className="w-full rounded-lg border border-border bg-background px-3 py-2 disabled:opacity-60">
-                  <option>Loading models…</option>
-                </select>
-              ) : modelList.length > 0 || (llmModel !== "" && !currentModelInList) ? (
-                <>
-                  <select
-                    value={llmModel}
-                    onChange={(e) => { setLlmModel(e.target.value); markDirty(); }}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2"
-                  >
-                    <option value="" disabled>Select a model…</option>
-                    {llmModel !== "" && !currentModelInList && (
-                      <option value={llmModel}>{llmModel} (current)</option>
-                    )}
-                    {modelList.map((m) => (
-                      <option key={m.id} value={m.id} title={buildOptionTitle(m)}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedModelInfo && (
-                    <p className="text-xs text-muted-foreground mt-1 flex gap-2 flex-wrap">
-                      {selectedModelInfo.supports_vision && <span>👁 Vision</span>}
-                      {selectedModelInfo.context_length && (
-                        <span>Context: {(selectedModelInfo.context_length / 1000).toFixed(0)}K tokens</span>
-                      )}
-                      {selectedModelInfo.pricing && (
-                        <span>
-                          ${selectedModelInfo.pricing.input_per_1m?.toFixed(2)}/1M in ·{" "}
-                          ${selectedModelInfo.pricing.output_per_1m?.toFixed(2)}/1M out
-                        </span>
-                      )}
-                    </p>
-                  )}
-                </>
-              ) : (
-                <>
-                  <input
-                    value={llmModel}
-                    onChange={(e) => { setLlmModel(e.target.value); markDirty(); }}
-                    placeholder="e.g. gpt-4o"
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2"
-                  />
-                  {modelListError && (
-                    <p className="mt-1 text-xs text-muted-foreground">{modelListError}</p>
-                  )}
-                </>
-              )}
-            </div>
-
-            {/* Base URL — always shown, required for Ollama */}
-            <label className="text-sm">
-              <span className="mb-1 block text-muted-foreground">
-                Base URL{isOllama ? " (required for Ollama)" : " (optional custom endpoint)"}
-              </span>
-              <input
-                value={llmBaseUrl}
-                onChange={(e) => { setLlmBaseUrl(e.target.value); markDirty(); }}
-                placeholder={isOllama ? "http://localhost:11434" : "https://api.openai.com/v1"}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2"
-              />
-            </label>
+            )}
 
             {/* API Key — hidden for Ollama */}
             {!isOllama && (
@@ -473,7 +567,9 @@ export default function SettingsPage() {
                   )}
                   {clearApiKey && (
                     <span className="flex items-center gap-2">
-                      <span className="text-xs text-red-400">Key will be deleted on save</span>
+                      <span className="text-xs text-red-400">
+                        Key will be deleted on save
+                      </span>
                       <button
                         type="button"
                         onClick={() => setClearApiKey(false)}
@@ -487,16 +583,24 @@ export default function SettingsPage() {
                 <input
                   type="password"
                   value={llmApiKey}
-                  onChange={(e) => { setLlmApiKey(e.target.value); markDirty(); }}
-                  placeholder={hasLlmApiKey && !clearApiKey ? "●●●●●●●● (leave blank to keep saved key)" : "Enter API key"}
+                  onChange={(e) => {
+                    setLlmApiKey(e.target.value);
+                    markDirty();
+                  }}
+                  placeholder={
+                    hasLlmApiKey && !clearApiKey
+                      ? "●●●●●●●● (leave blank to keep saved key)"
+                      : "Enter API key"
+                  }
                   disabled={clearApiKey}
                   className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm disabled:opacity-50"
                 />
                 <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
                   <span>🔒</span>
                   <span>
-                    Your API key is encrypted at rest in our database and never returned in any response.
-                    It is used only server-side for your AI requests.
+                    Your API key is encrypted at rest in our database and never
+                    returned in any response. It is used only server-side for
+                    your AI requests.
                   </span>
                 </p>
               </div>
@@ -509,7 +613,9 @@ export default function SettingsPage() {
             )}
 
             <div className="rounded-xl border border-border bg-background p-4 text-sm text-muted-foreground">
-              Local fallback extraction still works without any LLM. Configure these fields only if you want richer receipt extraction plus AI-powered spend analysis inside expense chat.
+              Local fallback extraction still works without any LLM. Configure
+              these fields only if you want richer receipt extraction plus
+              AI-powered spend analysis inside expense chat.
             </div>
 
             {/* Test Model button + result */}
@@ -541,7 +647,8 @@ export default function SettingsPage() {
             {/* Hint shown only when dirty and test not yet passed */}
             {aiSettingsDirty && testState !== "success" && (
               <p className="text-xs text-muted-foreground">
-                Run &quot;🐾 Test Model&quot; before saving to verify your settings work.
+                Run &quot;🐾 Test Model&quot; before saving to verify your
+                settings work.
               </p>
             )}
 
@@ -556,6 +663,44 @@ export default function SettingsPage() {
             </div>
           </>
         )}
+      </div>
+
+      {/* Buy me a coffee */}
+      <div className="rounded-2xl border border-border bg-card p-6 text-center space-y-3">
+        <div className="text-2xl">☕</div>
+        <div>
+          <h2 className="text-lg font-semibold">Enjoying SpendHound?</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            If this app has saved you time (or money!), a coffee would make my day.
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-center gap-3">
+          <a
+            href="https://ko-fi.com/sumdher"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-medium transition-colors hover:bg-accent"
+          >
+            {/* Ko-fi logo */}
+            <svg className="h-4 w-4" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M23.881 8.948c-.773-4.085-4.859-4.593-4.859-4.593H.723c-.604 0-.679.798-.679.798s-.082 7.324-.022 11.822c.164 2.424 2.586 2.672 2.586 2.672s8.267-.023 11.966-.049c2.438-.426 2.683-2.566 2.658-3.734 4.352.24 7.422-2.831 6.649-6.916zm-11.062 3.511c-1.246 1.453-4.011 3.976-4.011 3.976s-.121.119-.31.023c-.076-.057-.108-.09-.108-.09-.443-.441-3.368-3.049-4.034-3.954-.709-.965-1.041-2.7-.091-3.71.951-1.01 3.005-1.086 4.363.407 0 0 1.565-1.782 3.468-.963 1.904.82 1.832 2.318.723 4.311zm6.173.478c-.928.116-1.717.14-1.717.14L19.1 9.17c.19 1.552.75 2.75-.108 3.767z" fill="#FF5E5B" />
+            </svg>
+            Ko-fi
+          </a>
+          <a
+            href="https://paypal.me/sumdher"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-background px-5 py-2.5 text-sm font-medium transition-colors hover:bg-accent"
+          >
+            {/* PayPal logo */}
+            <svg className="h-4 w-4" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M7.076 21.337H2.47a.641.641 0 0 1-.633-.74L4.944.901C5.026.382 5.474 0 5.998 0h7.46c2.57 0 4.578.543 5.69 1.81 1.01 1.15 1.304 2.42 1.012 4.287-.023.143-.047.288-.077.437-.983 5.05-4.349 6.797-8.647 6.797h-2.19c-.524 0-.968.382-1.05.9l-1.12 7.106z" fill="#009CDE" />
+              <path d="M21.17 8.26c.78 3.83-1.52 7.84-5.85 9.1-.88.26-1.84.4-2.85.4H9.26l-.85 5.41c-.06.38-.38.66-.76.66H4.77c-.47 0-.81-.44-.72-.9l.28-1.77h2.65c.38 0 .7-.27.76-.65l1.15-7.31h2.19c5.13 0 8.1-2.42 9.07-7.2.41.74.67 1.6.72 2.27z" fill="#003087" />
+            </svg>
+            PayPal
+          </a>
+        </div>
       </div>
     </div>
   );

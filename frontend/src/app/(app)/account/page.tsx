@@ -41,6 +41,32 @@ function WarningBox({ children }: { children: React.ReactNode }) {
   return <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{children}</div>;
 }
 
+function memberDuration(createdAt: string, format: "short" | "long"): string {
+  const start = new Date(createdAt);
+  const now = new Date();
+  let years = now.getFullYear() - start.getFullYear();
+  let months = now.getMonth() - start.getMonth();
+  let days = now.getDate() - start.getDate();
+  if (days < 0) {
+    months--;
+    days += new Date(now.getFullYear(), now.getMonth(), 0).getDate();
+  }
+  if (months < 0) { years--; months += 12; }
+  if (format === "short") {
+    const parts: string[] = [];
+    if (years > 0) parts.push(`${years}y`);
+    if (months > 0) parts.push(`${months}mo`);
+    parts.push(`${days}d`);
+    return parts.join(" ");
+  } else {
+    const parts: string[] = [];
+    if (years > 0) parts.push(`${years} ${years === 1 ? "year" : "years"}`);
+    if (months > 0) parts.push(`${months} ${months === 1 ? "month" : "months"}`);
+    parts.push(`${days} ${days === 1 ? "day" : "days"}`);
+    return parts.join(" ");
+  }
+}
+
 // ---- Partners section ----
 
 function PartnersSection() {
@@ -79,7 +105,7 @@ function PartnersSection() {
   }, [showSuggestions]);
 
   useEffect(() => {
-    const token = searchParams.get("partner_token");
+    const token = searchParams.get("token");
     const action = searchParams.get("partner_action") as "accept" | "reject" | null;
     if (token && action) {
       handlePartnerToken(token, action).then(() => reload()).catch(() => {});
@@ -126,9 +152,9 @@ function PartnersSection() {
   const totalPending = receivedPending.length + sentPending.length;
 
   return (
-    <section className="rounded-2xl border border-border bg-card overflow-hidden">
+    <section className="rounded-2xl border border-border bg-card">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-border rounded-t-2xl">
         <div>
           <div className="flex items-center gap-2.5">
             <h2 className="text-lg font-semibold">Expense partners</h2>
@@ -405,11 +431,17 @@ export default function AccountPage() {
         </div>
         {profileLoaded && stats && (
           <div className="space-y-4 border-t border-border pt-4">
-            {/* Activity row */}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 text-sm">
-              <div className="rounded-xl bg-background border border-border px-3 py-2.5">
-                <p className="text-muted-foreground text-xs mb-0.5">Member since</p>
-                <p className="font-medium text-xs sm:text-sm leading-tight">{new Date(stats.created_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</p>
+            {/* Activity stats — member since full-width on mobile, then 4 number boxes in one row */}
+            <div className="grid grid-cols-4 lg:grid-cols-5 gap-3 text-sm">
+              <div className="col-span-4 lg:col-span-1 rounded-xl bg-background border border-border pl-3 pr-5 py-2.5 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-muted-foreground text-xs mb-0.5">Member since</p>
+                  <p className="font-medium text-xs leading-tight">{new Date(stats.created_at).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" })}</p>
+                </div>
+                <p className="text-xs text-muted-foreground shrink-0 text-right">
+                  <span className="lg:hidden">{memberDuration(stats.created_at, "long")}</span>
+                  <span className="hidden lg:inline">{memberDuration(stats.created_at, "short")}</span>
+                </p>
               </div>
               <div className="rounded-xl bg-background border border-border px-3 py-2.5">
                 <p className="text-muted-foreground text-xs mb-0.5">Expenses</p>
@@ -418,6 +450,10 @@ export default function AccountPage() {
               <div className="rounded-xl bg-background border border-border px-3 py-2.5">
                 <p className="text-muted-foreground text-xs mb-0.5">Ledgers</p>
                 <p className="font-semibold">{ledgers.length}</p>
+              </div>
+              <div className="rounded-xl bg-background border border-border px-3 py-2.5">
+                <p className="text-muted-foreground text-xs mb-0.5">Budgets</p>
+                <p className="font-semibold">{budgets.length}</p>
               </div>
               <div className={`rounded-xl border px-3 py-2.5 ${stats.needs_review_count > 0 ? "bg-amber-500/10 border-amber-500/30" : "bg-background border-border"}`}>
                 <p className="text-muted-foreground text-xs mb-0.5">Needs review</p>
@@ -432,7 +468,6 @@ export default function AccountPage() {
                   { label: "Merchant rules", count: merchantRules.filter((r) => !r.is_global).length },
                   { label: "Item rules", count: itemRules.filter((r) => !r.is_global).length },
                   { label: "Custom categories", count: categories.filter((c) => !c.is_system).length },
-                  { label: "Budgets", count: budgets.length },
                 ].map(({ label, count }) => (
                   <div key={label} className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs ${count > 0 ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground"}`}>
                     <span>{label}</span>

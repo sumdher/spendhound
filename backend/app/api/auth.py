@@ -6,7 +6,7 @@ import uuid
 from datetime import date, datetime, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from pydantic import BaseModel
@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin import create_action_token, is_admin_email
 from app.config import settings
+from app.middleware.rate_limit import limiter
 from app.database import get_db
 from app.middleware.auth import create_access_token, get_any_user, get_current_user
 from app.models.expense import Expense
@@ -57,7 +58,8 @@ def serialize_user_profile(user: User) -> UserResponse:
 
 
 @router.post("/google", response_model=AuthResponse)
-async def google_auth(body: GoogleTokenRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+@limiter.limit(f"{settings.rate_limit_auth_per_minute}/minute")
+async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
     try:
         id_info = id_token.verify_oauth2_token(body.id_token, google_requests.Request(), settings.google_client_id)
     except ValueError as error:
@@ -203,6 +205,12 @@ async def test_llm_settings(
 
     except Exception as e:
         return LLMTestResponse(success=False, error=str(e))
+
+
+@router.get("/server-config")
+async def get_server_config(_current_user: User = Depends(get_current_user)) -> dict:
+    """Return server-level configuration visible to all authenticated users."""
+    return {"admin_ollama_model": settings.ollama_model}
 
 
 @router.get("/status")

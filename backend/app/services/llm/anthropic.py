@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
+import httpx
+
 from app.config import settings
 from app.services.llm.base import BaseLLMProvider, LLMConfig, Message
 
@@ -58,7 +60,13 @@ class AnthropicProvider(BaseLLMProvider):
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY is not configured.")
 
-        return AsyncAnthropic(api_key=api_key)
+        timeout = httpx.Timeout(
+            connect=30.0,
+            read=float(settings.llm_timeout_seconds),
+            write=30.0,
+            pool=10.0,
+        )
+        return AsyncAnthropic(api_key=api_key, timeout=timeout)
 
     def _resolve_model(self, config: LLMConfig | None) -> str:
         return (config.model if config else None) or settings.anthropic_model

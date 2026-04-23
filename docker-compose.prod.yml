@@ -18,6 +18,12 @@ services:
       retries: 5
       start_period: 10s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
   backend:
     build:
@@ -31,10 +37,18 @@ services:
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-spendhound}:${POSTGRES_PASSWORD:-change-me-in-production}@db:5432/${POSTGRES_DB:-spendhound}}
     command: >
       sh -c "alembic upgrade head &&
-             exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-2}"
+             exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+             --workers ${UVICORN_WORKERS:-1}
+             --access-log --timeout-keep-alive 30"
     depends_on:
       db:
         condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 30s
@@ -69,6 +83,12 @@ services:
       retries: 5
       start_period: 30s
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
   cloudflared:
     image: cloudflare/cloudflared:2024.11.0

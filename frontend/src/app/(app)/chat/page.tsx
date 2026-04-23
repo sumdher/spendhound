@@ -2,10 +2,12 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useSession } from "next-auth/react";
 import {
   consumeSSE,
   createChatSession,
   getChatHistory,
+  getCurrentUserProfile,
   listChatSessions,
   streamChatSession,
   type ChatHistory,
@@ -131,6 +133,8 @@ export default function ChatPage() {
   const searchParams = useSearchParams();
   const activeSessionId = searchParams.get("s");
   const wantsNewSession = searchParams.get("new") === "1";
+  const { data: session } = useSession();
+  const [hasLlmApiKey, setHasLlmApiKey] = useState<boolean | null>(null);
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [activeSession, setActiveSession] = useState<ChatSession | null>(null);
@@ -218,7 +222,10 @@ export default function ChatPage() {
 
   useEffect(() => {
     void loadSessions();
-  }, [loadSessions]);
+    if (!session?.isAdmin) {
+      getCurrentUserProfile().then((p) => setHasLlmApiKey(p.has_llm_api_key)).catch(() => {});
+    }
+  }, [loadSessions, session?.isAdmin]);
 
   useEffect(
     () => subscribeAppEvent(CHAT_SESSIONS_UPDATED_EVENT, () => {
@@ -447,6 +454,16 @@ export default function ChatPage() {
             {creatingSession ? "Creating…" : "+ New Chat"}
           </button>
         </div>
+
+        {!session?.isAdmin && hasLlmApiKey === false && (
+          <div className="mb-3 flex items-start gap-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400">
+            <span className="shrink-0">⚠️</span>
+            <span>
+              You haven&apos;t configured an LLM provider API key yet — AI chat will use the server defaults.{" "}
+              <a href="/settings" className="font-medium underline underline-offset-2">Set up your API key in Settings.</a>
+            </span>
+          </div>
+        )}
 
         {ready && (messageCount > 0 || persistedTokenCount > 0 || composer.trim().length > 0) && (
           <ContextBar tokenCount={liveTokenCount} maxTokens={maxTokens} />

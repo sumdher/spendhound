@@ -10,6 +10,7 @@ function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const approved = searchParams.get("approved") === "1";
+  const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
 
   useEffect(() => {
     if (session) router.replace("/dashboard");
@@ -37,7 +38,7 @@ function LoginContent() {
         </ul>
 
         <button
-          onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+          onClick={() => signIn("google", { callbackUrl })}
           className="flex w-full items-center justify-center gap-3 rounded-lg border border-border bg-secondary px-4 py-3 text-sm font-medium hover:bg-accent"
         >
           <svg className="h-5 w-5" viewBox="0 0 24 24">

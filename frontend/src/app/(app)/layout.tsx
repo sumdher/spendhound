@@ -18,7 +18,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (status === "unauthenticated") {
-      router.replace("/login");
+      const callbackUrl = encodeURIComponent(window.location.pathname + window.location.search);
+      router.replace(`/login?callbackUrl=${callbackUrl}`);
     } else if (status === "authenticated" && session?.userStatus !== "approved") {
       router.replace("/pending");
     }
