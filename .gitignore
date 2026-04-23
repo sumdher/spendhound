@@ -1,13 +1,14 @@
 # SpendHound .gitignore
 
 # added by sudheer
-.secrets_pette
+.rahasyala_pette
 .commands*
 deploy/cloudflared/config.yaml
 plans
 .claude
 CLAUDE.md
-temp/
+temp*
+.next_features
 
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
