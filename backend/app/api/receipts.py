@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import get_db
 from app.middleware.auth import get_current_user
+from app.middleware.bot_detect import block_bots
 from app.middleware.rate_limit import limiter
 from app.models.receipt import Receipt
 from app.models.user import User
@@ -36,7 +37,7 @@ async def list_receipts(needs_review: bool | None = Query(default=None), current
 
 @router.post("/upload")
 @limiter.limit(f"{settings.rate_limit_upload_per_minute}/minute")
-async def upload_receipt(request: Request, file: UploadFile = File(...), provider: str | None = Form(default=None), model: str | None = Form(default=None), api_key: str | None = Form(default=None), base_url: str | None = Form(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+async def upload_receipt(request: Request, file: UploadFile = File(...), provider: str | None = Form(default=None), model: str | None = Form(default=None), api_key: str | None = Form(default=None), base_url: str | None = Form(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db), _bot_check: None = Depends(block_bots)) -> dict:
     await ensure_default_categories(db, current_user.id)
     stored = await store_upload(current_user.id, file)
     filename = file.filename or stored.stored_filename
