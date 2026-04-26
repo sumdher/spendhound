@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin import create_action_token, is_admin_email
 from app.config import settings
+from app.middleware.bot_detect import block_bots
 from app.middleware.rate_limit import limiter
 from app.database import get_db
 from app.middleware.auth import create_access_token, get_any_user, get_current_user
@@ -59,7 +60,7 @@ def serialize_user_profile(user: User) -> UserResponse:
 
 @router.post("/google", response_model=AuthResponse)
 @limiter.limit(f"{settings.rate_limit_auth_per_minute}/minute")
-async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSession = Depends(get_db), _bot_check: None = Depends(block_bots)) -> AuthResponse:
     try:
         id_info = id_token.verify_oauth2_token(body.id_token, google_requests.Request(), settings.google_client_id)
     except ValueError as error:
@@ -243,7 +244,7 @@ async def search_users(
 ) -> list[dict]:
     """Search approved users by name or email for partner invite autocomplete."""
     q = q.strip().lower()
-    if len(q) < 1:
+    if len(q) < 3:
         return []
     from sqlalchemy import or_
     result = await db.execute(

@@ -19,8 +19,27 @@ from app.services.receipt_queue import ExtractionJob, receipt_queue_worker, set_
 logger = structlog.get_logger(__name__)
 
 
+_DEFAULT_JWT_SECRET = "change-me-in-production"
+
+
+def _check_startup_secrets() -> None:
+    if settings.jwt_secret == _DEFAULT_JWT_SECRET:
+        raise RuntimeError(
+            "JWT_SECRET is set to the insecure default value. "
+            "Generate a strong secret and set JWT_SECRET in your .env before starting."
+        )
+    if settings.monthly_reports_enabled and not settings.monthly_reports_frontend_token:
+        logger.warning(
+            "monthly_reports_enabled=true but MONTHLY_REPORTS_FRONTEND_TOKEN is empty — "
+            "the internal PDF endpoint is unauthenticated"
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    if not settings.debug:
+        _check_startup_secrets()
+
     Path(settings.receipt_storage_dir).mkdir(parents=True, exist_ok=True)
 
     # Start the bounded receipt extraction queue worker.
@@ -51,8 +70,9 @@ def create_app() -> FastAPI:
         title="SpendHound API",
         description="Expense tracking API with receipt extraction, budgets, analytics, and export.",
         version="0.1.0",
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url="/docs" if settings.debug else None,
+        redoc_url="/redoc" if settings.debug else None,
+        openapi_url="/openapi.json" if settings.debug else None,
         lifespan=lifespan,
     )
 
