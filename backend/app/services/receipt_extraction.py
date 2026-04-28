@@ -51,6 +51,9 @@ _GENERIC_CATEGORY_NAMES = {"misc", "miscellaneous", "other", "other expense", "s
 _ALLOWED_EXTENSIONS: frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".pdf"})
 _UPLOAD_MAX_BYTES: int = 50 * 1024 * 1024  # 50 MB hard cap before any processing
 
+# Limits to prevent resource exhaustion from crafted PDF uploads.
+_MAX_PDF_PAGES = 50    # no real receipt or statement needs more than this
+
 # First-bytes signatures for each allowed extension.
 # WebP is handled separately (RIFF....WEBP layout).
 _MAGIC_BYTES: dict[str, list[bytes]] = {
@@ -181,7 +184,7 @@ async def extract_text_from_file(storage_path: str, content_type: str | None) ->
         plumber_text: list[str] = []
         try:
             with pdfplumber.open(storage_path) as pdf:
-                for page in pdf.pages:
+                for page in pdf.pages[:_MAX_PDF_PAGES]:
                     page_text = page.extract_text(layout=True) or page.extract_text() or ""
                     if page_text.strip():
                         plumber_text.append(page_text)
@@ -191,7 +194,7 @@ async def extract_text_from_file(storage_path: str, content_type: str | None) ->
             return "\n\n".join(plumber_text).strip()
         try:
             reader = PdfReader(storage_path)
-            return "\n".join((page.extract_text() or "") for page in reader.pages).strip()
+            return "\n".join((page.extract_text() or "") for page in reader.pages[:_MAX_PDF_PAGES]).strip()
         except Exception:
             return ""
     return ""

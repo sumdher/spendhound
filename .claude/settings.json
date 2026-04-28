@@ -15,7 +15,11 @@
       "Read(//home/zorino/repos/jobhound_hot_features/**)",
       "Bash(grep -E \"\\\\.py$\")",
       "Bash(xargs -I {} basename {})",
-      "Bash(xargs ls *)"
+      "Bash(xargs ls *)",
+      "Bash(docker pull *)",
+      "Bash(docker compose *)",
+      "Bash(docker stop *)",
+      "Bash(docker rm *)"
     ]
   }
 }
