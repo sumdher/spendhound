@@ -9,6 +9,8 @@ plans
 CLAUDE.md
 temp*
 .next_features
+.envv
+.infisical.json
 
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/

@@ -9,7 +9,7 @@ services:
     container_name: spendhound_db_prod
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-spendhound}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-spendhound}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -34,9 +34,21 @@ services:
       target: production
     container_name: spendhound_backend_prod
     env_file:
-      - ./backend/.env
+      - ./backend/.env          # non-secret config only
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-spendhound}:${POSTGRES_PASSWORD:-change-me-in-production}@db:5432/${POSTGRES_DB:-spendhound}}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-spendhound}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-spendhound}
+      # Secrets — injected by `infisical run` via Makefile
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET}
+      MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
+      MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
     command: >
       sh -c "alembic upgrade head &&
              exec uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -71,12 +83,20 @@ services:
       dockerfile: Dockerfile
       target: production
     container_name: spendhound_frontend_prod
-    env_file:
-      - ./frontend/.env
     environment:
       INTERNAL_API_URL: http://backend:8000
       PORT: 3000
       HOSTNAME: 0.0.0.0
+      # Secrets — injected by `infisical run` via Makefile
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
+      MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
+      MONTHLY_REPORTS_BACKEND_JWT_SECRET: ${MONTHLY_REPORTS_BACKEND_JWT_SECRET}
+      MONTHLY_REPORTS_BACKEND_JWT_ALGORITHM: ${MONTHLY_REPORTS_BACKEND_JWT_ALGORITHM:-HS256}
+      PUPPETEER_EXECUTABLE_PATH: ${PUPPETEER_EXECUTABLE_PATH:-/usr/bin/chromium-browser}
     ports:
       - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3002}:3000"
     depends_on:

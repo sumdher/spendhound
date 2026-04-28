@@ -26,9 +26,21 @@ services:
       target: development
     container_name: spendhound_backend
     env_file:
-      - ./backend/.env
+      - ./backend/.env          # non-secret config only
     environment:
       DATABASE_URL: postgresql+asyncpg://spendhound:localdev@db:5432/spendhound
+      # Secrets — injected by `infisical run` via Makefile
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET}
+      MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
+      MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
     ports:
       - "8000:8000"
     volumes:
@@ -55,10 +67,18 @@ services:
       dockerfile: Dockerfile
       target: development
     container_name: spendhound_frontend
-    env_file:
-      - ./frontend/.env
     environment:
       INTERNAL_API_URL: http://backend:8000
+      # Secrets — injected by `infisical run` via Makefile
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
+      MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
+      MONTHLY_REPORTS_BACKEND_JWT_SECRET: ${MONTHLY_REPORTS_BACKEND_JWT_SECRET}
+      MONTHLY_REPORTS_BACKEND_JWT_ALGORITHM: ${MONTHLY_REPORTS_BACKEND_JWT_ALGORITHM:-HS256}
+      PUPPETEER_EXECUTABLE_PATH: ${PUPPETEER_EXECUTABLE_PATH:-/usr/bin/chromium-browser}
     ports:
       - "3000:3000"
     volumes:

@@ -19,7 +19,11 @@
       "Bash(docker pull *)",
       "Bash(docker compose *)",
       "Bash(docker stop *)",
-      "Bash(docker rm *)"
+      "Bash(docker rm *)",
+      "Bash(infisical --version)",
+      "Bash(infisical whoami *)",
+      "Bash(infisical user *)",
+      "Bash(infisical secrets *)"
     ]
   }
 }
