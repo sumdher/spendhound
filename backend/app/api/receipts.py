@@ -18,6 +18,7 @@ from app.middleware.rate_limit import limiter
 from app.models.receipt import Receipt
 from app.models.user import User
 from app.services.receipt_extraction import build_statement_preview, create_llm_config, store_upload
+from app.services.url_validation import validate_llm_base_url
 from app.services.receipt_queue import ExtractionJob, get_receipt_queue
 from app.services.spendhound import ensure_default_categories, serialize_receipt
 
@@ -38,6 +39,7 @@ async def list_receipts(needs_review: bool | None = Query(default=None), current
 @router.post("/upload")
 @limiter.limit(f"{settings.rate_limit_upload_per_minute}/minute")
 async def upload_receipt(request: Request, file: UploadFile = File(...), provider: str | None = Form(default=None), model: str | None = Form(default=None), api_key: str | None = Form(default=None), base_url: str | None = Form(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db), _bot_check: None = Depends(block_bots)) -> dict:
+    await validate_llm_base_url(base_url)
     await ensure_default_categories(db, current_user.id)
     stored = await store_upload(current_user.id, file)
     filename = file.filename or stored.stored_filename
@@ -86,6 +88,7 @@ async def upload_receipt(request: Request, file: UploadFile = File(...), provide
 
 @router.post("/upload-statement")
 async def upload_statement(file: UploadFile = File(...), provider: str | None = Form(default=None), model: str | None = Form(default=None), api_key: str | None = Form(default=None), base_url: str | None = Form(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+    await validate_llm_base_url(base_url)
     filename = file.filename or "statement.pdf"
     is_pdf = (file.content_type or "") == "application/pdf" or filename.lower().endswith(".pdf")
     if not is_pdf:

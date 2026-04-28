@@ -24,6 +24,7 @@ from app.models.user import User
 from app.schemas.user import LLMTestRequest, LLMTestResponse, UserLLMSettingsUpdateRequest, UserReceiptPromptUpdateRequest, UserResponse, UserUpdateRequest
 from app.services.email import send_approval_request_email
 from app.services.llm.encryption import encrypt_api_key
+from app.services.url_validation import validate_llm_base_url
 from app.services.spendhound import ensure_default_categories
 
 router = APIRouter()
@@ -152,6 +153,7 @@ async def update_llm_settings(
     db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """Update the current user's LLM provider settings and API key."""
+    await validate_llm_base_url(body.llm_base_url)
     if body.llm_provider is not None:
         current_user.llm_provider = body.llm_provider or None
     if body.llm_model is not None:
@@ -177,6 +179,7 @@ async def test_llm_settings(
     current_user: User = Depends(get_current_user),
 ) -> LLMTestResponse:
     """Test LLM settings without saving them. Used by the settings page."""
+    await validate_llm_base_url(body.base_url)
     try:
         from app.services.llm.base import LLMConfig, Message
         from app.services.llm.factory import get_llm_provider, resolve_user_llm_config

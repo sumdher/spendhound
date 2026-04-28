@@ -51,9 +51,25 @@ COPY pyproject.toml ./
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir .
 
+# Audit for known CVEs at build time. Prints findings but does not fail the
+# build — a vulnerability in a transitive dep shouldn't block a critical deploy.
+# Review the output in the build log and upgrade affected packages promptly.
+RUN pip install --no-cache-dir pip-audit && \
+    pip-audit --skip-editable --desc on || true && \
+    pip uninstall -y pip-audit
+
 COPY app/ ./app/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
+
+# Drop to a non-root user. The app writes only to storage/receipts (mounted as
+# a volume owned by this UID) and needs no system privileges.
+RUN addgroup --system --gid 1001 spendhound && \
+    adduser --system --uid 1001 --ingroup spendhound --no-create-home spendhound && \
+    mkdir -p storage/receipts && \
+    chown -R spendhound:spendhound /app
+
+USER spendhound
 
 EXPOSE 8000
 

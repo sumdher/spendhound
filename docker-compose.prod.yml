@@ -3,7 +3,9 @@
 
 services:
   db:
-    image: pgvector/pgvector:pg16
+    # Pin by digest so a tag re-push cannot silently swap the image.
+    # To update: docker pull pgvector/pgvector:pg16 && docker inspect --format='{{index .RepoDigests 0}}' pgvector/pgvector:pg16
+    image: pgvector/pgvector@sha256:7d400e340efb42f4d8c9c12c6427adb253f726881a9985d2a471bf0eed824dff
     container_name: spendhound_db_prod
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-spendhound}
@@ -43,6 +45,10 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:
@@ -76,6 +82,10 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     healthcheck:
       test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://127.0.0.1:3000 || exit 1"]
       interval: 30s
@@ -91,7 +101,9 @@ services:
           memory: 256M
 
   cloudflared:
-    image: cloudflare/cloudflared:2024.11.0
+    # Pin by digest so a tag re-push cannot silently swap the image.
+    # To update: docker pull cloudflare/cloudflared:2024.11.0 && docker inspect --format='{{index .RepoDigests 0}}' cloudflare/cloudflared:2024.11.0
+    image: cloudflare/cloudflared@sha256:2c78df02e1f23ab19d4c636921f05b9ebec163b887e946f98e22e56254a5540f
     container_name: spendhound_cloudflared_prod
     command: tunnel --no-autoupdate --config /etc/cloudflared/config.yml run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     depends_on:
@@ -99,6 +111,10 @@ services:
         condition: service_healthy
     volumes:
       - ${CLOUDFLARED_CONFIG_PATH:-./deploy/cloudflared/config.yml}:/etc/cloudflared/config.yml:ro
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
 volumes:
