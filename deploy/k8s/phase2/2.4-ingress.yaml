@@ -1,0 +1,27 @@
+---
+# Phase 2.4 — SpendHound Traefik IngressRoute
+#
+# Routes spendhound.dodecahedrons.com → spendhound-frontend:3000
+#
+# Traefik receives plain HTTP from the Cloudflare tunnel (no TLS termination here).
+# Security headers are set by Next.js headers() config — no Traefik middleware needed.
+#
+# The entryPoint "web" corresponds to port 80 in the Traefik HelmChartConfig.
+# If you later want HTTPS passthrough from Cloudflare origin certs, add a
+# "websecure" entrypoint rule with TLSPassthrough — not needed today.
+
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: spendhound
+  namespace: spendhound
+spec:
+  entryPoints:
+    - web
+
+  routes:
+    - match: Host(`spendhound.dodecahedrons.com`)
+      kind: Rule
+      services:
+        - name: spendhound-frontend
+          port: 3000

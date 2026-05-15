@@ -1,0 +1,33 @@
+---
+# Phase 0.7 — Namespaces
+#
+# Three namespaces:
+#   shared      — PostgreSQL, Ollama, local registry (infra shared by all apps)
+#   spendhound  — SpendHound backend + frontend + cloudflared
+#   jobhound    — JobHound backend + frontend + cloudflared
+#
+# Strict namespace separation: spendhound and jobhound services only talk to
+# `shared` — never to each other.
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shared
+  labels:
+    name: shared
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: spendhound
+  labels:
+    name: spendhound
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: jobhound
+  labels:
+    name: jobhound

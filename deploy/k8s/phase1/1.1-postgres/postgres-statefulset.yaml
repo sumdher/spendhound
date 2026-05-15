@@ -1,0 +1,150 @@
+---
+# Phase 1.1 — PostgreSQL 16 + pgvector StatefulSet
+#
+# Image pinned by SHA256 digest (same as docker-compose.prod.yml).
+# Runs only on zoro (nodeAffinity: storage=primary).
+# Credentials sourced from ESO → shared-infra-secrets (phase 1.3).
+#
+# Data directory: /data/postgres on zoro host (hostPath PV, 100Gi).
+# Create the host directory before applying:
+#   sudo mkdir -p /data/postgres && sudo chown 999:999 /data/postgres
+#   (999:999 is the postgres user inside the container)
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: postgres-data-pv
+spec:
+  capacity:
+    storage: 100Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /data/postgres
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: storage
+              operator: In
+              values:
+                - primary
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data-pvc
+  namespace: shared
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: ""
+  volumeName: postgres-data-pv
+
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: shared
+  labels:
+    app: postgres
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      # Must run on zoro — data volume is local to that host
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: storage
+                    operator: In
+                    values:
+                      - primary
+
+      containers:
+        - name: postgres
+          # Pinned by digest — same as docker-compose.prod.yml
+          image: pgvector/pgvector@sha256:7d400e340efb42f4d8c9c12c6427adb253f726881a9985d2a471bf0eed824dff
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 5432
+              name: postgres
+
+          env:
+            # Credentials from ESO-managed secret (phase 1.3)
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: shared-infra-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shared-infra-secrets
+                  key: POSTGRES_PASSWORD
+            # The primary database created on first init.
+            # spendhound and jobhound DBs are created by the init script.
+            - name: POSTGRES_DB
+              value: postgres
+
+          resources:
+            requests:
+              memory: 1Gi
+              cpu: 250m
+            limits:
+              memory: 2Gi
+              cpu: 1000m
+
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "pg_isready -U ${POSTGRES_USER} -d postgres"
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - "pg_isready -U ${POSTGRES_USER} -d postgres"
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: postgres-data-pvc
+        - name: initdb
+          configMap:
+            name: postgres-initdb
+            defaultMode: 0755

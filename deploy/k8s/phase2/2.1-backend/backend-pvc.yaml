@@ -1,0 +1,48 @@
+---
+# Phase 2.1 — SpendHound backend: receipt storage PVC
+#
+# Receipts uploaded by users are stored on disk (storage/receipts/{user_id}/).
+# This PVC keeps them alive across pod restarts and redeployments.
+# Stored at /data/spendhound-receipts on zoro.
+#
+# Create the host directory before applying:
+#   sudo mkdir -p /data/spendhound-receipts
+#   sudo chown 1001:1001 /data/spendhound-receipts   # runAsUser 1001 in the pod
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: spendhound-receipts-pv
+spec:
+  capacity:
+    storage: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /data/spendhound-receipts
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: storage
+              operator: In
+              values:
+                - primary
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: spendhound-receipts-pvc
+  namespace: spendhound
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: ""
+  volumeName: spendhound-receipts-pv

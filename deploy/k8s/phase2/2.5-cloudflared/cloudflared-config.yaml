@@ -1,0 +1,31 @@
+---
+# Phase 2.5 — SpendHound cloudflared: tunnel ingress config
+#
+# This ConfigMap replaces the old file at deploy/cloudflared/config.yml.
+# The tunnel now forwards to Traefik (192.168.1.200) instead of the Docker
+# frontend container.
+#
+# From cloudflared's perspective inside the cluster:
+#   - It receives HTTPS from Cloudflare edge
+#   - It forwards as plain HTTP to traefik.kube-system.svc.cluster.local:80
+#   - Traefik routes based on the Host header to the correct frontend service
+#
+# The --token flag authenticates the tunnel; the ingress rules here supplement
+# (or override) any rules configured in the Cloudflare dashboard.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: spendhound-cloudflared-config
+  namespace: spendhound
+data:
+  config.yml: |
+    # SpendHound Cloudflare Tunnel — K8s configuration
+    # Token is provided via the TUNNEL_TOKEN env var (not stored here).
+
+    ingress:
+      - hostname: spendhound.dodecahedrons.com
+        service: http://traefik.kube-system.svc.cluster.local:80
+
+      # Required catch-all
+      - service: http_status:404

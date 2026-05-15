@@ -1,0 +1,26 @@
+---
+# Phase 1.1 — PostgreSQL ClusterIP Service
+#
+# Accessible cluster-wide at: postgres.shared.svc.cluster.local:5432
+# NOT exposed externally — ClusterIP only.
+#
+# Apps reference this as:
+#   DATABASE_URL: postgresql+asyncpg://<user>:<pass>@postgres.shared.svc.cluster.local:5432/<dbname>
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: shared
+  labels:
+    app: postgres
+spec:
+  type: ClusterIP
+  clusterIP: None   # Headless — StatefulSet pods get stable DNS names
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: postgres

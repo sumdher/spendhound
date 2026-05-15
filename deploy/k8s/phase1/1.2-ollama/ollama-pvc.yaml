@@ -1,0 +1,46 @@
+---
+# Phase 1.2 — Ollama model storage PVC
+#
+# Models are large (several GB each). They must survive pod restarts.
+# Stored at /data/ollama on zoro; mounted at /root/.ollama inside the container.
+#
+# Create the host directory before applying:
+#   sudo mkdir -p /data/ollama
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ollama-data-pv
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /data/ollama
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: hardware
+              operator: In
+              values:
+                - gpu
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-data-pvc
+  namespace: shared
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: ""
+  volumeName: ollama-data-pv

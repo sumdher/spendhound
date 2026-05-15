@@ -1,0 +1,155 @@
+---
+# Phase 2.1 — SpendHound FastAPI backend Deployment
+#
+# Single replica — mandatory. asyncio.Semaphore and slowapi in-process rate
+# limiting are not Redis-backed; multiple replicas would break both.
+# This constraint stays until Redis is introduced.
+#
+# nodeAffinity: PREFERRED on zoro (low-latency Ollama access), but falls back
+# to any node so the pod can still schedule if zoro is full.
+#
+# Receipts PVC (spendhound-receipts-pvc) is mounted at /app/storage/receipts.
+# This path must match what the FastAPI app uses — check backend/app/config.py
+# if it was changed from the default.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spendhound-backend
+  namespace: spendhound
+  labels:
+    app: spendhound-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: spendhound-backend
+  template:
+    metadata:
+      labels:
+        app: spendhound-backend
+    spec:
+      affinity:
+        nodeAffinity:
+          # Prefer zoro for low-latency Ollama, but allow fallback
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              preference:
+                matchExpressions:
+                  - key: storage
+                    operator: In
+                    values:
+                      - primary
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+
+      initContainers:
+        # Wait for postgres to be accepting connections before starting
+        - name: wait-for-postgres
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z postgres.shared.svc.cluster.local 5432; do
+                echo "waiting for postgres..."; sleep 2
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+      containers:
+        - name: backend
+          image: 192.168.1.37:5000/spendhound-backend:latest
+          imagePullPolicy: Always
+
+          command:
+            - sh
+            - -c
+            - |
+              alembic upgrade head &&
+              exec uvicorn app.main:app \
+                --host 0.0.0.0 \
+                --port 8000 \
+                --workers 1 \
+                --access-log \
+                --timeout-keep-alive 30
+
+          ports:
+            - containerPort: 8000
+              name: http
+
+          env:
+            # Database — points to shared postgres
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres.shared.svc.cluster.local:5432/spendhound"
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: shared-infra-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: shared-infra-secrets
+                  key: POSTGRES_PASSWORD
+
+            # LLM — points to shared Ollama
+            - name: OLLAMA_URL
+              value: "http://ollama.shared.svc.cluster.local:11434"
+            - name: LLM_PROVIDER
+              value: "ollama"
+
+            # Receipt storage path (matches PVC mount below)
+            - name: RECEIPT_STORAGE_PATH
+              value: "/app/storage/receipts"
+
+          # All application secrets from ESO → spendhound-backend-secrets
+          envFrom:
+            - secretRef:
+                name: spendhound-backend-secrets
+
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 2Gi
+              cpu: 1000m
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
+
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          volumeMounts:
+            - name: receipts
+              mountPath: /app/storage/receipts
+
+      volumes:
+        - name: receipts
+          persistentVolumeClaim:
+            claimName: spendhound-receipts-pvc

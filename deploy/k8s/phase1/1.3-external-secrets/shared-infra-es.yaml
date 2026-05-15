@@ -1,0 +1,37 @@
+---
+# Phase 1.3 — ExternalSecret: shared namespace infra secrets
+#
+# Pulls from Infisical path "/" (root) into K8s Secret "shared-infra-secrets"
+# in the `shared` namespace.
+#
+# Secrets expected at Infisical "/":
+#   POSTGRES_USER            — database superuser name
+#   POSTGRES_PASSWORD        — database superuser password
+#   POSTGRES_DB              — (informational; actual DB names are spendhound/jobhound)
+#   CLOUDFLARE_TUNNEL_TOKEN_SPENDHOUND — spendhound-prod tunnel token
+#   CLOUDFLARE_TUNNEL_TOKEN_JOBHOUND   — jobhound-prod tunnel token
+#   UVICORN_WORKERS          — (optional) passed to backends
+#
+# NOTE: If your Infisical root path uses a single CLOUDFLARE_TUNNEL_TOKEN key,
+# store it per-app (e.g., with the naming above) so each cloudflared Deployment
+# can reference the correct token independently.
+
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: shared-infra
+  namespace: shared
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: infisical-store
+    kind: ClusterSecretStore
+  target:
+    name: shared-infra-secrets
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: /
+        conversionStrategy: Default
+        decodingStrategy: None
+        metadataPolicy: None

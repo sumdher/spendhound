@@ -1,0 +1,47 @@
+# SpendHound Helm chart — default values
+# Override any of these in a separate values-override.yaml for environments.
+
+registry: "192.168.1.37:5000"
+
+backend:
+  image: spendhound-backend
+  tag: latest
+  replicas: 1               # DO NOT increase until Redis is added
+  resources:
+    requests:
+      memory: 512Mi
+      cpu: 250m
+    limits:
+      memory: 2Gi
+      cpu: 1000m
+  ollamaUrl: "http://ollama.shared.svc.cluster.local:11434"
+  llmProvider: "ollama"
+  receiptStoragePath: "/app/storage/receipts"
+  receiptPvcSize: "20Gi"
+
+frontend:
+  image: spendhound-frontend
+  tag: latest
+  replicas: 2
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 100m
+    limits:
+      memory: 1Gi
+      cpu: 500m
+
+cloudflared:
+  replicas: 2
+  hostname: spendhound.dodecahedrons.com
+  # image is always pinned by digest in the template — no tag here
+
+postgres:
+  host: "postgres.shared.svc.cluster.local"
+  port: 5432
+  database: spendhound
+
+infisical:
+  backendSecretName: spendhound-backend-secrets
+  frontendSecretName: spendhound-frontend-secrets
+  infraSecretName: shared-infra-secrets

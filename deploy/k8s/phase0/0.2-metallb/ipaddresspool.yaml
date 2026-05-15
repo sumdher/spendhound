@@ -1,0 +1,14 @@
+---
+# Phase 0.2 — MetalLB IP address pool
+# IPs 192.168.1.200–210 must be reserved (excluded from DHCP) in the router.
+# Apply AFTER metallb-native is installed and its webhook is ready.
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: homelab-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - 192.168.1.200-192.168.1.210
+  # Prevent MetalLB from auto-assigning unless explicitly requested.
+  autoAssign: true

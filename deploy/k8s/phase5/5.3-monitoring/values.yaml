@@ -1,0 +1,81 @@
+# kube-prometheus-stack Helm values for homelab
+# Applied by: phase5/5.3-monitoring/install.sh
+
+grafana:
+  # Set at install time: helm upgrade --install ... --set grafana.adminPassword=<your-password>
+  # Do NOT add a password here — this file is in git.
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 5Gi
+  # Pre-load the standard K8s cluster dashboard
+  dashboardProviders:
+    dashboardproviders.yaml:
+      apiVersion: 1
+      providers:
+        - name: default
+          orgId: 1
+          folder: ""
+          type: file
+          disableDeletion: false
+          editable: true
+          options:
+            path: /var/lib/grafana/dashboards/default
+  dashboards:
+    default:
+      kubernetes-cluster:
+        gnetId: 7249    # Kubernetes cluster monitoring (Prometheus)
+        revision: 1
+        datasource: Prometheus
+      kubernetes-pods:
+        gnetId: 6336    # Kubernetes pod resource usage
+        revision: 1
+        datasource: Prometheus
+      node-exporter:
+        gnetId: 1860    # Node Exporter Full
+        revision: 37
+        datasource: Prometheus
+
+prometheus:
+  prometheusSpec:
+    # Keep 30 days of metrics on local-path storage
+    retention: 30d
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 20Gi
+
+alertmanager:
+  # Disable AlertManager for now — enable when you set up notification routes
+  enabled: false
+
+# node-exporter — runs on every node (DaemonSet), no config needed
+nodeExporter:
+  enabled: true
+
+# kube-state-metrics — single Deployment, no config needed
+kubeStateMetrics:
+  enabled: true
+
+# Reduce resource footprint for homelab
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 30Mi
+    limits:
+      cpu: 200m
+      memory: 50Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi

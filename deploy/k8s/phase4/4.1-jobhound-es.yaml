@@ -1,0 +1,57 @@
+---
+# Phase 4.1 — ExternalSecrets for jobhound namespace
+#
+# JobHound uses the same Infisical paths as SpendHound for backend and frontend
+# secrets. The K8s secrets are named differently (jobhound-*) so they stay
+# namespace-isolated.
+#
+# If JobHound's secrets live at different Infisical paths (e.g., /jobhound/backend),
+# update the `key:` fields in the extract blocks below.
+#
+# Secrets needed by jobhound-backend (from Infisical "/backend"):
+#   JWT_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,
+#   ANTHROPIC_API_KEY, OPENAI_API_KEY, NEBIUS_API_KEY, RESEND_API_KEY
+#
+# Secrets needed by jobhound-frontend (from Infisical "/frontend"):
+#   NEXTAUTH_SECRET, NEXTAUTH_URL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: jobhound-backend
+  namespace: jobhound
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: infisical-store
+    kind: ClusterSecretStore
+  target:
+    name: jobhound-backend-secrets
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: /backend
+        conversionStrategy: Default
+        decodingStrategy: None
+        metadataPolicy: None
+
+---
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: jobhound-frontend
+  namespace: jobhound
+spec:
+  refreshInterval: "1h"
+  secretStoreRef:
+    name: infisical-store
+    kind: ClusterSecretStore
+  target:
+    name: jobhound-frontend-secrets
+    creationPolicy: Owner
+  dataFrom:
+    - extract:
+        key: /frontend
+        conversionStrategy: Default
+        decodingStrategy: None
+        metadataPolicy: None

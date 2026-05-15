@@ -1,0 +1,149 @@
+---
+# Phase 0.6 — Local container registry on zoro (192.168.1.37:5000)
+#
+# Deployed in the `shared` namespace on zoro (nodeSelector: storage=primary).
+# All K3s nodes are configured to treat this as an insecure mirror
+# via /etc/rancher/k3s/registries.yaml (see registries.yaml in this directory).
+#
+# Registry data is stored on a 50Gi hostPath volume at /data/registry on zoro.
+# This directory must exist before applying:
+#   sudo mkdir -p /data/registry && sudo chown 1000:1000 /data/registry
+#
+# The registry is exposed as a NodePort on port 5000 on every node, and as a
+# LoadBalancer IP (192.168.1.37) so the push-images.sh script can reach it
+# from the zoro host itself. In practice, for cluster internal use the
+# mirror config handles discovery — the NodePort is for pushing from the host.
+
+# --- PersistentVolume (hostPath, zoro only) ---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: registry-data-pv
+spec:
+  capacity:
+    storage: 50Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /data/registry
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: storage
+              operator: In
+              values:
+                - primary
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: registry-data-pvc
+  namespace: shared
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: ""
+  volumeName: registry-data-pv
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry
+  namespace: shared
+  labels:
+    app: registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: registry
+  template:
+    metadata:
+      labels:
+        app: registry
+    spec:
+      nodeSelector:
+        storage: primary
+
+      containers:
+        - name: registry
+          image: registry:2
+          ports:
+            - containerPort: 5000
+              name: registry
+          env:
+            - name: REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY
+              value: /var/lib/registry
+            - name: REGISTRY_HTTP_ADDR
+              value: "0.0.0.0:5000"
+          volumeMounts:
+            - name: registry-data
+              mountPath: /var/lib/registry
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 256Mi
+              cpu: 200m
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: 5000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /v2/
+              port: 5000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+
+      volumes:
+        - name: registry-data
+          persistentVolumeClaim:
+            claimName: registry-data-pvc
+
+---
+# ClusterIP for in-cluster pulls (used by K3s mirror config)
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry
+  namespace: shared
+spec:
+  type: ClusterIP
+  selector:
+    app: registry
+  ports:
+    - port: 5000
+      targetPort: 5000
+      protocol: TCP
+      name: registry
+
+---
+# NodePort for pushing from the zoro host
+apiVersion: v1
+kind: Service
+metadata:
+  name: registry-nodeport
+  namespace: shared
+spec:
+  type: NodePort
+  selector:
+    app: registry
+  ports:
+    - port: 5000
+      targetPort: 5000
+      nodePort: 30500
+      protocol: TCP
+      name: registry

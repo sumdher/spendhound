@@ -1,0 +1,27 @@
+# /etc/rancher/k3s/registries.yaml
+#
+# Phase 0.6 — K3s insecure registry mirror configuration
+#
+# This file must be copied to /etc/rancher/k3s/registries.yaml on EVERY node
+# and k3s must be restarted on each node before the registry is usable.
+#
+# Deployment script (run on each node, or use the configure-nodes.sh script):
+#   sudo cp registries.yaml /etc/rancher/k3s/registries.yaml
+#   sudo systemctl restart k3s         # on control-plane (zoro)
+#   sudo systemctl restart k3s-agent  # on workers (zunesha, kuma, sanji)
+#
+# What this does:
+#   Tells K3s (containerd) that 192.168.1.37:5000 is a trusted insecure
+#   registry (plain HTTP, no TLS). Any image reference like
+#   192.168.1.37:5000/my-image:tag will pull from this registry without
+#   TLS errors.
+
+mirrors:
+  "192.168.1.37:5000":
+    endpoint:
+      - "http://192.168.1.37:5000"
+
+configs:
+  "192.168.1.37:5000":
+    tls:
+      insecure_skip_verify: true

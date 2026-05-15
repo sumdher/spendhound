@@ -1,0 +1,95 @@
+---
+# Phase 1.2 — Ollama Deployment
+#
+# Runs on zoro ONLY (nodeAffinity: hardware=gpu).
+# Claims 1 NVIDIA GPU (nvidia.com/gpu: 1).
+# NOT exposed externally — ClusterIP only.
+#
+# Models are pre-loaded on the existing Docker volume at /data/ollama.
+# The migration path: stop old Docker Ollama, create the hostPath PV pointing
+# at the same directory, and the existing models are available immediately.
+#
+# Startup probe has a 120s timeout because gemma4:4b takes ~60-90s to load on
+# the 940M GPU. This is intentional — do not lower it.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: shared
+  labels:
+    app: ollama
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      # Must run on zoro — GPU and model storage are there
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: hardware
+                    operator: In
+                    values:
+                      - gpu
+
+      # Allow the pod to use the NVIDIA runtime
+      runtimeClassName: nvidia
+
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 11434
+              name: ollama
+
+          resources:
+            requests:
+              memory: 2Gi
+              cpu: 500m
+              nvidia.com/gpu: "1"
+            limits:
+              memory: 6Gi
+              nvidia.com/gpu: "1"
+
+          # Model load is slow on the 940M — give it 120s before health checks fail
+          startupProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            failureThreshold: 24   # 24 × 5s = 120s total
+            periodSeconds: 5
+
+          readinessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+
+          livenessProbe:
+            httpGet:
+              path: /api/tags
+              port: 11434
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+
+          volumeMounts:
+            - name: ollama-data
+              mountPath: /root/.ollama
+
+      volumes:
+        - name: ollama-data
+          persistentVolumeClaim:
+            claimName: ollama-data-pvc

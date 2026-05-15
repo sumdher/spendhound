@@ -1,0 +1,6 @@
+apiVersion: v2
+name: spendhound
+description: SpendHound — AI expense tracker (backend + frontend + cloudflared)
+type: application
+version: 0.1.0
+appVersion: "latest"

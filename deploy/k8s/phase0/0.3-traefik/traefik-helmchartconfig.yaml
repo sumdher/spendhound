@@ -1,0 +1,61 @@
+---
+# Phase 0.3 — K3s Traefik customisation via HelmChartConfig
+#
+# K3s ships Traefik as a bundled Helm release managed by the k3s-managed
+# helm-controller. Dropping a HelmChartConfig in kube-system is the official
+# way to override values without forking the chart or disabling the built-in.
+#
+# What this does:
+#   - Promotes the Traefik Service to LoadBalancer so MetalLB assigns 192.168.1.200
+#   - Enables JSON access logs for debugging
+#   - Explicitly declares HTTP (80) and HTTPS (443) entrypoints
+#   - Does NOT enable TLS termination — Cloudflare handles TLS end-to-end
+#
+# Apply: kubectl apply -f traefik-helmchartconfig.yaml
+# After apply, k3s will automatically re-deploy Traefik with these values.
+# Watch: kubectl rollout status deployment/traefik -n kube-system
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    # Expose Traefik via LoadBalancer; MetalLB will assign 192.168.1.200
+    service:
+      type: LoadBalancer
+      spec:
+        loadBalancerIP: "192.168.1.200"
+
+    # Entrypoints: plain HTTP and HTTPS (passthrough — no TLS termination here)
+    ports:
+      web:
+        port: 8000
+        exposedPort: 80
+        protocol: TCP
+      websecure:
+        port: 8443
+        exposedPort: 443
+        protocol: TCP
+
+    # Access logs in JSON for easy grep/jq parsing
+    logs:
+      access:
+        enabled: true
+        format: json
+      general:
+        level: INFO
+
+    # Allow cross-namespace IngressRoute references
+    providers:
+      kubernetesCRD:
+        allowCrossNamespace: true
+      kubernetesIngress:
+        publishedService:
+          enabled: true
+
+    # Disable dashboard in production
+    ingressRoute:
+      dashboard:
+        enabled: false

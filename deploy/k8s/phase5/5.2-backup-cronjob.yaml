@@ -1,0 +1,163 @@
+---
+# Phase 5.2 — PostgreSQL daily backup CronJob
+#
+# Runs pg_dump at 03:00 daily for both spendhound and jobhound databases.
+# Dumps are written to /data/pg-backups on zoro (hostPath).
+# Keeps the last 7 daily dumps per database; older ones are deleted automatically.
+#
+# Create the backup directory before applying:
+#   sudo mkdir -p /data/pg-backups
+#   sudo chown 999:999 /data/pg-backups   # postgres UID inside container
+#
+# This mirrors the existing spendhound-db-backup.sh script from deploy/backup/.
+# The pg_isready check before dumping ensures we never write a corrupt dump.
+
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: pg-backup-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: ""
+  hostPath:
+    path: /data/pg-backups
+    type: DirectoryOrCreate
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: storage
+              operator: In
+              values:
+                - primary
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pg-backup-pvc
+  namespace: shared
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: ""
+  volumeName: pg-backup-pv
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: shared
+spec:
+  schedule: "0 3 * * *"   # 03:00 daily
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+
+          # Must run on zoro where the backup PVC is bound
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: storage
+                        operator: In
+                        values:
+                          - primary
+
+          containers:
+            - name: pg-backup
+              image: pgvector/pgvector@sha256:7d400e340efb42f4d8c9c12c6427adb253f726881a9985d2a471bf0eed824dff
+              imagePullPolicy: IfNotPresent
+
+              env:
+                - name: POSTGRES_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: shared-infra-secrets
+                      key: POSTGRES_USER
+                - name: POSTGRES_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: shared-infra-secrets
+                      key: POSTGRES_PASSWORD
+                - name: PGHOST
+                  value: postgres.shared.svc.cluster.local
+                - name: PGPORT
+                  value: "5432"
+                - name: RETENTION_DAYS
+                  value: "7"
+
+              command:
+                - bash
+                - -euo
+                - pipefail
+                - -c
+                - |
+                  export PGPASSWORD="${POSTGRES_PASSWORD}"
+                  BACKUP_DIR="/backups/$(date +%Y-%m-%d)"
+                  mkdir -p "${BACKUP_DIR}"
+
+                  echo "==> Checking postgres availability"
+                  pg_isready -h "${PGHOST}" -p "${PGPORT}" -U "${POSTGRES_USER}"
+
+                  dump_db() {
+                    local db="$1"
+                    local out="${BACKUP_DIR}/${db}.dump"
+                    echo "==> Dumping ${db} → ${out}"
+                    pg_dump \
+                      -h "${PGHOST}" \
+                      -p "${PGPORT}" \
+                      -U "${POSTGRES_USER}" \
+                      -d "${db}" \
+                      --format=custom \
+                      --no-password \
+                      -f "${out}"
+                    # Verify the dump is not empty / corrupt
+                    pg_restore --list "${out}" > /dev/null
+                    echo "    ${db} dump OK ($(du -sh "${out}" | cut -f1))"
+                  }
+
+                  dump_db spendhound
+                  dump_db jobhound
+
+                  echo "==> Rotating backups older than ${RETENTION_DAYS} days"
+                  find /backups -maxdepth 1 -type d -mtime +${RETENTION_DAYS} -exec rm -rf {} + || true
+
+                  echo "==> Backup complete"
+                  ls -lh /backups/
+
+              resources:
+                requests:
+                  memory: 64Mi
+                  cpu: 50m
+                limits:
+                  memory: 256Mi
+                  cpu: 200m
+
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+
+              volumeMounts:
+                - name: backups
+                  mountPath: /backups
+
+          volumes:
+            - name: backups
+              persistentVolumeClaim:
+                claimName: pg-backup-pvc

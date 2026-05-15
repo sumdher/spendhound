@@ -1,0 +1,43 @@
+---
+# Phase 2.3 — SpendHound Services
+#
+# Both services are ClusterIP only.
+# The frontend is the only entry point visible externally (via Traefik + Cloudflare).
+# The backend is only reachable from within the cluster (frontend proxies API calls).
+
+# Backend — ClusterIP, port 8000
+apiVersion: v1
+kind: Service
+metadata:
+  name: spendhound-backend
+  namespace: spendhound
+  labels:
+    app: spendhound-backend
+spec:
+  type: ClusterIP
+  selector:
+    app: spendhound-backend
+  ports:
+    - port: 8000
+      targetPort: 8000
+      protocol: TCP
+      name: http
+
+---
+# Frontend — ClusterIP, port 3000
+apiVersion: v1
+kind: Service
+metadata:
+  name: spendhound-frontend
+  namespace: spendhound
+  labels:
+    app: spendhound-frontend
+spec:
+  type: ClusterIP
+  selector:
+    app: spendhound-frontend
+  ports:
+    - port: 3000
+      targetPort: 3000
+      protocol: TCP
+      name: http

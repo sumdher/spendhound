@@ -1,0 +1,93 @@
+---
+# Phase 2.5 — SpendHound cloudflared Deployment
+#
+# 2 replicas for tunnel redundancy — cloudflared supports multiple connectors
+# per tunnel natively (they all connect to Cloudflare and load-balance inbound traffic).
+#
+# Image pinned by SHA256 digest — same as docker-compose.prod.yml.
+#
+# CLOUDFLARE_TUNNEL_TOKEN comes from shared-infra-secrets, key:
+#   CLOUDFLARE_TUNNEL_TOKEN_SPENDHOUND
+# (adjust the secretKeyRef.key below if the Infisical key name differs)
+#
+# No ports exposed — cloudflared only makes outbound connections to Cloudflare.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: spendhound-cloudflared
+  namespace: spendhound
+  labels:
+    app: spendhound-cloudflared
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: spendhound-cloudflared
+  template:
+    metadata:
+      labels:
+        app: spendhound-cloudflared
+    spec:
+      # Spread replicas across different nodes for real redundancy
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: spendhound-cloudflared
+                topologyKey: kubernetes.io/hostname
+
+      containers:
+        - name: cloudflared
+          # Pinned by digest — same as docker-compose.prod.yml
+          image: cloudflare/cloudflared@sha256:2c78df02e1f23ab19d4c636921f05b9ebec163b887e946f98e22e56254a5540f
+          imagePullPolicy: IfNotPresent
+
+          command:
+            - cloudflared
+            - tunnel
+            - --no-autoupdate
+            - --config
+            - /etc/cloudflared/config.yml
+            - run
+            - --token
+            - $(TUNNEL_TOKEN)
+
+          env:
+            - name: TUNNEL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: shared-infra-secrets
+                  key: CLOUDFLARE_TUNNEL_TOKEN_SPENDHOUND
+
+          resources:
+            requests:
+              memory: 32Mi
+              cpu: 50m
+            limits:
+              memory: 128Mi
+              cpu: 200m
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/cloudflared
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: config
+          configMap:
+            name: spendhound-cloudflared-config
+        # cloudflared writes a tmp socket file
+        - name: tmp
+          emptyDir: {}

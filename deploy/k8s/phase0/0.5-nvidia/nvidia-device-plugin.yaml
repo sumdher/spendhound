@@ -1,0 +1,79 @@
+---
+# Phase 0.5 — NVIDIA device plugin DaemonSet
+#
+# Runs only on nodes labelled hardware=gpu (i.e., zoro).
+# After this is applied, the node will advertise nvidia.com/gpu as an
+# allocatable resource. Verify with:
+#   kubectl describe node zoro | grep -A5 "Allocatable"
+#   # Should show:  nvidia.com/gpu: 1
+#
+# Prerequisites on zoro (must be done before this is applied):
+#   1. NVIDIA driver installed: nvidia-smi should work
+#   2. nvidia-container-runtime installed and configured as the default
+#      container runtime for containerd (K3s uses containerd).
+#      See: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+#   3. Containerd config updated at /var/lib/rancher/k3s/agent/etc/containerd/config.toml
+#      to use the nvidia runtime — easiest via:
+#      sudo nvidia-ctk runtime configure --runtime=containerd --set-as-default
+#      sudo systemctl restart k3s
+#
+# Image version: v0.17.0 (latest stable at time of writing, supports driver 390+)
+
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-device-plugin-daemonset
+  namespace: kube-system
+  labels:
+    app: nvidia-device-plugin
+spec:
+  selector:
+    matchLabels:
+      name: nvidia-device-plugin-ds
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        name: nvidia-device-plugin-ds
+    spec:
+      # Only schedule on nodes with a GPU
+      nodeSelector:
+        hardware: gpu
+
+      tolerations:
+        - key: CriticalAddonsOnly
+          operator: Exists
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+
+      priorityClassName: system-node-critical
+
+      containers:
+        - name: nvidia-device-plugin-ctr
+          image: nvcr.io/nvidia/k8s-device-plugin:v0.17.0
+          env:
+            - name: FAIL_ON_INIT_ERROR
+              value: "false"
+            - name: DEVICE_LIST_STRATEGY
+              value: envvar
+            - name: DEVICE_ID_STRATEGY
+              value: uuid
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: all
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: compute,utility
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
