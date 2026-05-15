@@ -100,7 +100,7 @@ spec:
                   name: shared-infra-secrets
                   key: POSTGRES_PASSWORD
             # The primary database created on first init.
-            # spendhound and jobhound DBs are created by the init script.
+            # The spendhound DB is created by the init script.
             - name: POSTGRES_DB
               value: postgres
 

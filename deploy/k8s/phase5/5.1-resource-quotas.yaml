@@ -1,17 +1,9 @@
 ---
-# Phase 5.1 — ResourceQuotas per application namespace
+# Phase 5.1 — ResourceQuota and LimitRange for the spendhound namespace
 #
-# Caps total resource consumption in each namespace so one app cannot starve
-# the other. These limits are intentionally generous for a homelab — tighten
-# them once you have Prometheus metrics showing actual usage.
-#
-# zoro has:
-#   - 8 GB RAM total (rough estimate for 940M laptop, shared with OS)
-#   - 4 CPU cores
-# kuma has:
-#   - 8 GB RAM, i5-6200U (2 cores / 4 threads)
-# The quotas below fit two namespaces comfortably while leaving headroom
-# for shared infra (Postgres ~2 GB, Ollama ~6 GB on zoro).
+# Caps total resource consumption to prevent runaway pods starving shared infra.
+# Limits are intentionally generous for a homelab — tighten once you have
+# Prometheus metrics showing actual usage.
 
 apiVersion: v1
 kind: ResourceQuota
@@ -20,57 +12,23 @@ metadata:
   namespace: spendhound
 spec:
   hard:
-    # CPU: backend 1 core + 2× frontend 0.5 core = 2 cores; ceiling at 4
+    # backend 1 core + 2× frontend 0.5 core; ceiling at 4
     requests.cpu: "1"
     limits.cpu: "4"
-    # Memory: backend 2 GB + 2× frontend 1 GB = 4 GB; ceiling at 6 GB
+    # backend 2 GB + 2× frontend 1 GB; ceiling at 6 GB
     requests.memory: 1Gi
     limits.memory: 6Gi
-    # Prevent pod sprawl
     pods: "20"
-    # Prevent PVC sprawl (receipts PVC counts here)
+    # receipts PVC counts here
     persistentvolumeclaims: "5"
 
 ---
-apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: jobhound-quota
-  namespace: jobhound
-spec:
-  hard:
-    requests.cpu: "500m"
-    limits.cpu: "3"
-    requests.memory: 512Mi
-    limits.memory: 4Gi
-    pods: "20"
-    persistentvolumeclaims: "3"
-
----
-# LimitRange: sets defaults for pods that don't specify requests/limits.
-# Prevents unbounded containers from starving the node.
-
+# LimitRange: default requests/limits for pods that don't specify them.
 apiVersion: v1
 kind: LimitRange
 metadata:
   name: spendhound-defaults
   namespace: spendhound
-spec:
-  limits:
-    - type: Container
-      default:
-        cpu: 200m
-        memory: 256Mi
-      defaultRequest:
-        cpu: 50m
-        memory: 64Mi
-
----
-apiVersion: v1
-kind: LimitRange
-metadata:
-  name: jobhound-defaults
-  namespace: jobhound
 spec:
   limits:
     - type: Container

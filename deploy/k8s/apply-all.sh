@@ -11,15 +11,15 @@
 #      - Phase 0.6: run push-images.sh to push app images to the registry
 #      - Phase 1.1: run the data migration (see migration-guide.md)
 #      - Infisical: populate all secrets at paths /, /backend, /frontend
-#      - Cloudflare: update CLOUDFLARE_TUNNEL_TOKEN_SPENDHOUND and
-#                    CLOUDFLARE_TUNNEL_TOKEN_JOBHOUND in Infisical
+#      - Cloudflare: set CLOUDFLARE_TUNNEL_TOKEN_SPENDHOUND in Infisical
 #
 # Usage:
 #   ./apply-all.sh              # all phases
 #   ./apply-all.sh phase0       # only phase 0
 #   ./apply-all.sh phase1       # only phase 1
-#   ./apply-all.sh spendhound   # phases 0+1+2+3
-#   ./apply-all.sh jobhound     # phase 4 only (after spendhound is verified)
+#   ./apply-all.sh phase2       # only phase 2
+#   ./apply-all.sh phase3       # smoke tests
+#   ./apply-all.sh phase5       # operational hardening
 
 set -euo pipefail
 
@@ -64,7 +64,7 @@ phase0() {
   kubectl apply -f "${K8S_DIR}/phase0/0.6-registry/registry.yaml"
   kubectl rollout status deployment/registry -n shared --timeout=120s
 
-  echo "--> 0.7 Namespaces (idempotent — shared already applied above)"
+  echo "--> 0.7 Namespaces"
   kubectl apply -f "${K8S_DIR}/phase0/0.7-namespaces.yaml"
 
   echo "Phase 0 complete."
@@ -142,38 +142,6 @@ phase3() {
 }
 
 # ---------------------------------------------------------------------------
-phase4() {
-  echo ""
-  echo "========================================="
-  echo "  Phase 4 — JobHound application"
-  echo "========================================="
-
-  echo "--> 4.1 ExternalSecrets"
-  kubectl apply -f "${K8S_DIR}/phase4/4.1-jobhound-es.yaml"
-  kubectl wait externalsecret/jobhound-backend -n jobhound \
-    --for=condition=Ready --timeout=60s
-  kubectl wait externalsecret/jobhound-frontend -n jobhound \
-    --for=condition=Ready --timeout=60s
-
-  echo "--> 4.2 Backend"
-  kubectl apply -f "${K8S_DIR}/phase4/4.2-backend/"
-  kubectl rollout status deployment/jobhound-backend -n jobhound --timeout=180s
-
-  echo "--> 4.3 Frontend"
-  kubectl apply -f "${K8S_DIR}/phase4/4.3-frontend/"
-  kubectl rollout status deployment/jobhound-frontend -n jobhound --timeout=120s
-
-  echo "--> 4.4 Services + Ingress"
-  kubectl apply -f "${K8S_DIR}/phase4/4.4-services-ingress.yaml"
-
-  echo "--> 4.5 Cloudflared"
-  kubectl apply -f "${K8S_DIR}/phase4/4.5-cloudflared/"
-  kubectl rollout status deployment/jobhound-cloudflared -n jobhound --timeout=60s
-
-  echo "Phase 4 complete."
-}
-
-# ---------------------------------------------------------------------------
 phase5() {
   echo ""
   echo "========================================="
@@ -194,17 +162,14 @@ phase5() {
 
 # ---------------------------------------------------------------------------
 case "${FILTER}" in
-  phase0)     phase0 ;;
-  phase1)     phase1 ;;
-  phase2)     phase2 ;;
-  phase3)     phase3 ;;
-  phase4)     phase4 ;;
-  phase5)     phase5 ;;
-  spendhound) phase0; phase1; phase2; phase3 ;;
-  jobhound)   phase4 ;;
-  all)        phase0; phase1; phase2; phase3; phase4; phase5 ;;
+  phase0) phase0 ;;
+  phase1) phase1 ;;
+  phase2) phase2 ;;
+  phase3) phase3 ;;
+  phase5) phase5 ;;
+  all)    phase0; phase1; phase2; phase3; phase5 ;;
   *)
-    echo "Usage: $0 [all|phase0|phase1|phase2|phase3|phase4|phase5|spendhound|jobhound]"
+    echo "Usage: $0 [all|phase0|phase1|phase2|phase3|phase5]"
     exit 1
     ;;
 esac

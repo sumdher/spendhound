@@ -5,16 +5,10 @@
 # in the `shared` namespace.
 #
 # Secrets expected at Infisical "/":
-#   POSTGRES_USER            — database superuser name
-#   POSTGRES_PASSWORD        — database superuser password
-#   POSTGRES_DB              — (informational; actual DB names are spendhound/jobhound)
+#   POSTGRES_USER                      — database superuser name
+#   POSTGRES_PASSWORD                  — database superuser password
 #   CLOUDFLARE_TUNNEL_TOKEN_SPENDHOUND — spendhound-prod tunnel token
-#   CLOUDFLARE_TUNNEL_TOKEN_JOBHOUND   — jobhound-prod tunnel token
-#   UVICORN_WORKERS          — (optional) passed to backends
-#
-# NOTE: If your Infisical root path uses a single CLOUDFLARE_TUNNEL_TOKEN key,
-# store it per-app (e.g., with the naming above) so each cloudflared Deployment
-# can reference the correct token independently.
+#   UVICORN_WORKERS                    — (optional) passed to the backend
 
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret

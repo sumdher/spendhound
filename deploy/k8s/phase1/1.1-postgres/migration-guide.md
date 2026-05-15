@@ -7,6 +7,8 @@ Do this **before** starting the PostgreSQL StatefulSet with live data.
 
 ## Overview
 
+Migrates the spendhound database from the Docker Compose volume to the K8s PVC.
+
 ```
 Docker volume  →  pg_dump  →  dump file on zoro  →  pg_restore  →  K8s PVC
 (old postgres)                 (/data/pg-backup/)                   (/data/postgres)
@@ -16,29 +18,18 @@ Docker volume  →  pg_dump  →  dump file on zoro  →  pg_restore  →  K8s P
 
 ## Step 1 — Dump existing data (Docker Compose must still be stopped)
 
-SpendHound and JobHound must be stopped before dumping.
+SpendHound must be stopped before dumping.
 The old PostgreSQL container can be started temporarily just for the dump.
 
 ```bash
-# Find the old volume mount path
-docker inspect spendhound_db_prod | grep -A5 Mounts
-# Or just start the old container temporarily:
-
 cd ~/repos/spendhound-k8s
 docker compose -f docker-compose.prod.yml up -d db
 
-# Dump spendhound database
 mkdir -p /data/pg-backup
 docker exec spendhound_db_prod \
   pg_dump -U "${POSTGRES_USER}" -d spendhound --format=custom \
   > /data/pg-backup/spendhound-$(date +%Y%m%d).dump
 
-# If JobHound has its own Postgres container, dump it too:
-# docker exec jobhound_db_prod \
-#   pg_dump -U "${POSTGRES_USER}" -d jobhound --format=custom \
-#   > /data/pg-backup/jobhound-$(date +%Y%m%d).dump
-
-# Stop the container again
 docker compose -f docker-compose.prod.yml stop db
 ```
 
@@ -76,8 +67,7 @@ kubectl apply -f deploy/k8s/phase1/1.1-postgres/postgres-service.yaml
 kubectl rollout status statefulset/postgres -n shared --timeout=120s
 ```
 
-At this point the `spendhound` and `jobhound` databases exist (created by the
-init script), but they are empty.
+At this point the `spendhound` database exists (created by the init script) but is empty.
 
 ---
 
@@ -89,14 +79,8 @@ POSTGRES_POD=$(kubectl get pod -n shared -l app=postgres -o jsonpath='{.items[0]
 
 kubectl cp /data/pg-backup/spendhound-*.dump shared/${POSTGRES_POD}:/tmp/spendhound.dump
 
-# Restore — pg_restore connects to the already-created spendhound database
 kubectl exec -n shared "${POSTGRES_POD}" -- \
   bash -c 'pg_restore -U "${POSTGRES_USER}" -d spendhound --no-owner --role="${POSTGRES_USER}" /tmp/spendhound.dump'
-
-# Repeat for jobhound if you have a dump:
-# kubectl cp /data/pg-backup/jobhound-*.dump shared/${POSTGRES_POD}:/tmp/jobhound.dump
-# kubectl exec -n shared "${POSTGRES_POD}" -- \
-#   bash -c 'pg_restore -U "${POSTGRES_USER}" -d jobhound --no-owner --role="${POSTGRES_USER}" /tmp/jobhound.dump'
 
 # Clean up the dump from the pod
 kubectl exec -n shared "${POSTGRES_POD}" -- rm /tmp/spendhound.dump

@@ -1,7 +1,7 @@
 ---
 # Phase 5.2 — PostgreSQL daily backup CronJob
 #
-# Runs pg_dump at 03:00 daily for both spendhound and jobhound databases.
+# Runs pg_dump at 03:00 daily for the spendhound database.
 # Dumps are written to /data/pg-backups on zoro (hostPath).
 # Keeps the last 7 daily dumps per database; older ones are deleted automatically.
 #
@@ -132,7 +132,6 @@ spec:
                   }
 
                   dump_db spendhound
-                  dump_db jobhound
 
                   echo "==> Rotating backups older than ${RETENTION_DAYS} days"
                   find /backups -maxdepth 1 -type d -mtime +${RETENTION_DAYS} -exec rm -rf {} + || true

@@ -2,11 +2,8 @@
 # Phase 1.1 — PostgreSQL init script
 #
 # Runs once when the data directory is empty (fresh volume or after pg_restore).
-# Creates the spendhound and jobhound databases so both apps share one PG instance.
+# Creates the spendhound database and enables the pgvector extension.
 # POSTGRES_USER (from the secret) is already the superuser — no extra grant needed.
-#
-# The pgvector extension is installed by default in pgvector/pgvector images;
-# the alembic migrations in each app enable it per-database.
 
 apiVersion: v1
 kind: ConfigMap
@@ -22,14 +19,7 @@ data:
       SELECT 'CREATE DATABASE spendhound'
         WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'spendhound')\gexec
 
-      SELECT 'CREATE DATABASE jobhound'
-        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'jobhound')\gexec
-
-      -- Enable pgvector in each database
       \c spendhound
       CREATE EXTENSION IF NOT EXISTS vector;
-
-      \c jobhound
-      CREATE EXTENSION IF NOT EXISTS vector;
     EOSQL
-    echo "Databases spendhound and jobhound are ready."
+    echo "Database spendhound is ready."
