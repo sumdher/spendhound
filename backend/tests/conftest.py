@@ -22,6 +22,31 @@ TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
 
 @pytest.fixture(autouse=True)
+def _use_memory_rate_limiter():
+    """Swap the Redis-backed rate limiter for in-memory storage in every test.
+
+    The module-level Limiter is created at import time with settings.redis_url
+    (Redis). Tests run without a Redis server, so any request that reaches a
+    @limiter.limit() endpoint would fail with ConnectionError. Replacing the
+    storage URI and clearing the cached storage object makes slowapi use the
+    limits MemoryStorage backend instead, which requires no external service.
+    """
+    from limits.storage import MemoryStorage
+    from limits.strategies import MovingWindowRateLimiter
+
+    from app.middleware.rate_limit import limiter
+
+    original_storage = limiter._storage
+    original_limiter = limiter._limiter
+    mem = MemoryStorage()
+    limiter._storage = mem
+    limiter._limiter = MovingWindowRateLimiter(mem)
+    yield
+    limiter._storage = original_storage
+    limiter._limiter = original_limiter
+
+
+@pytest.fixture(autouse=True)
 def _mock_prometheus_instrumentator():
     """Prevent duplicate CollectorRegistry errors when create_app() is called per test.
 
@@ -72,7 +97,9 @@ def app(db_session: AsyncSession) -> FastAPI:
 async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     """Async HTTP client pointed at the test app."""
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"User-Agent": "Mozilla/5.0 (SpendHound test suite)"},
     ) as ac:
         yield ac
 

@@ -177,7 +177,7 @@ async def test_statement_upload_returns_pending_immediately(client, auth_headers
 
     with (
         patch("app.api.receipts.store_upload", new=AsyncMock(return_value=stored)),
-        patch("app.api.receipts.extract_statement") as mock_task,
+        patch("app.tasks.statement_tasks.extract_statement") as mock_task,
     ):
         mock_task.delay = MagicMock()
 
@@ -203,7 +203,7 @@ async def test_statement_upload_returns_pending_immediately(client, auth_headers
 
 async def test_statement_upload_rejects_non_pdf(client, auth_headers):
     """upload-statement must reject non-PDF files before dispatching any task."""
-    with patch("app.api.receipts.extract_statement") as mock_task:
+    with patch("app.tasks.statement_tasks.extract_statement") as mock_task:
         mock_task.delay = MagicMock()
 
         resp = await client.post(
