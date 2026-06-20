@@ -23,7 +23,15 @@
       "Bash(infisical --version)",
       "Bash(infisical whoami *)",
       "Bash(infisical user *)",
-      "Bash(infisical secrets *)"
+      "Bash(infisical secrets *)",
+      "Read(//home/zorino/**)",
+      "Bash(infisical token *)",
+      "Bash(infisical --help)",
+      "Bash(infisical universal-auth *)",
+      "Bash(infisical login *)"
+    ],
+    "additionalDirectories": [
+      "/home/zorino/repos/jobhound"
     ]
   }
 }

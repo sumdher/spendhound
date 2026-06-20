@@ -1,20 +1,25 @@
 """SpendHound FastAPI application entry point."""
 
-import asyncio
+import hmac
 from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from prometheus_fastapi_instrumentator import Instrumentator
+import prometheus_fastapi_instrumentator.routing as _pfi_routing
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
 import app.models  # noqa: F401
 from app.config import settings
 from app.middleware.rate_limit import limiter
-from app.services.receipt_queue import ExtractionJob, receipt_queue_worker, set_receipt_queue
+from app.services.cache import close_redis, get_celery_queue_depth, init_redis
+from app.services.metrics import RATE_LIMIT_HITS_TOTAL, RECEIPT_QUEUE_DEPTH, classify_limit_type
 
 logger = structlog.get_logger(__name__)
 
@@ -42,26 +47,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     Path(settings.receipt_storage_dir).mkdir(parents=True, exist_ok=True)
 
-    # Start the bounded receipt extraction queue worker.
-    # maxsize caps simultaneous Ollama calls from uploaded receipts.
-    queue: asyncio.Queue[ExtractionJob] = asyncio.Queue(maxsize=settings.receipt_queue_maxsize)
-    set_receipt_queue(queue)
-    worker_task = asyncio.create_task(receipt_queue_worker(queue))
+    # Redis client — used for rate limiting storage, analytics cache, and LLM
+    # model list cache. Startup ping failure is non-fatal; the app degrades.
+    await init_redis()
 
     logger.info(
         "SpendHound backend starting up",
         llm_provider=settings.llm_provider,
-        receipt_queue_maxsize=settings.receipt_queue_maxsize,
         ollama_max_concurrent=settings.ollama_max_concurrent,
     )
     yield
 
-    # Graceful shutdown: cancel the worker, let it finish the current job.
-    worker_task.cancel()
-    try:
-        await worker_task
-    except asyncio.CancelledError:
-        pass
+    await close_redis()
     logger.info("SpendHound backend shutting down")
 
 
@@ -76,10 +73,16 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Rate limiting — in-memory, keyed by user ID (authenticated) or IP (anonymous).
+    # Rate limiting — keyed by user ID (authenticated) or IP (anonymous).
     # Works correctly only with --workers 1 (single process = single shared limiter).
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+    async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Response:
+        path = request.url.path
+        RATE_LIMIT_HITS_TOTAL.labels(endpoint=path, limit_type=classify_limit_type(path)).inc()
+        return _rate_limit_exceeded_handler(request, exc)  # type: ignore[return-value]
+
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
     app.add_middleware(
         CORSMiddleware,
@@ -88,6 +91,29 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Starlette 0.40+ adds _IncludedRouter objects to app.routes when include_router()
+    # is used. prometheus-fastapi-instrumentator unconditionally accesses route.path on
+    # every route, but _IncludedRouter has no .path → AttributeError on every request.
+    # Patch the private function to skip such routes until the upstream fixes this.
+    _original_get_route_name = _pfi_routing._get_route_name
+
+    def _safe_get_route_name(scope, routes, route_name=None):  # type: ignore[no-untyped-def]
+        return _original_get_route_name(
+            scope,
+            [r for r in routes if hasattr(r, "path")],
+            route_name,
+        )
+
+    _pfi_routing._get_route_name = _safe_get_route_name
+
+    # Instrument all routes: records http_request_duration_seconds + http_requests_total
+    # automatically. We do NOT call .expose() — our own /metrics endpoint below handles
+    # exposition with bearer-token protection.
+    Instrumentator(
+        should_group_status_codes=False,
+        should_ignore_untemplated=True,
+    ).instrument(app)
 
     from app.api import admin, analytics, auth, budgets, categories, chat, expenses, ledgers, llm_models, monthly_reports, ollama, partners, receipts
 
@@ -108,6 +134,18 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["health"])
     async def health_check() -> dict[str, str]:
         return {"status": "ok", "service": "spendhound-backend"}
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics_endpoint(authorization: str = Header(default="")) -> Response:
+        """Prometheus scrape endpoint — bearer token required."""
+        token = settings.metrics_token
+        if not token or not hmac.compare_digest(
+            authorization.encode(), f"Bearer {token}".encode()
+        ):
+            raise HTTPException(status_code=403, detail="Forbidden")
+        depth = await get_celery_queue_depth()
+        RECEIPT_QUEUE_DEPTH.set(depth)
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     return app
 

@@ -409,48 +409,43 @@ async def list_llm_models(
     Return available chat/vision models for the given provider.
 
     Always returns HTTP 200 — returns [] on any error.
+    Cache is bypassed when an explicit api_key is provided (one-time test call, not the stored key).
     Providers that include pricing data: openrouter, together.
     """
+    from app.services.cache import get_cached_llm_models, set_cached_llm_models  # noqa: PLC0415
+
     provider_lower = provider.strip().lower()
+    # Don't cache one-time key fetches — the caller is testing a key they haven't saved yet.
+    use_cache = api_key is None
+
+    if use_cache:
+        cached = await get_cached_llm_models(provider_lower, current_user.id)
+        if cached is not None:
+            return [LLMModelInfo(**m) for m in cached]
 
     if provider_lower == "openrouter":
-        # Public API — no key needed
-        return await _list_openrouter()
+        result = await _list_openrouter()
+    else:
+        effective_key = _get_effective_api_key(api_key, current_user, provider_lower)
+        if provider_lower == "openai":
+            result = await _list_openai(effective_key) if effective_key else []
+        elif provider_lower == "anthropic":
+            result = await _list_anthropic(effective_key) if effective_key else []
+        elif provider_lower == "groq":
+            result = await _list_groq(effective_key) if effective_key else []
+        elif provider_lower == "together":
+            result = await _list_together(effective_key) if effective_key else []
+        elif provider_lower == "mistral":
+            result = await _list_mistral(effective_key) if effective_key else []
+        elif provider_lower == "nebius":
+            result = await _list_nebius(effective_key, current_user.llm_base_url) if effective_key else []
+        elif provider_lower == "ollama":
+            result = await _list_ollama(current_user.llm_base_url)
+        else:
+            logger.warning("list_llm_models: unknown provider %r", provider)
+            result = []
 
-    effective_key = _get_effective_api_key(api_key, current_user, provider_lower)
+    if use_cache and result:
+        await set_cached_llm_models(provider_lower, current_user.id, [m.model_dump() for m in result])
 
-    if provider_lower == "openai":
-        if not effective_key:
-            return []
-        return await _list_openai(effective_key)
-
-    if provider_lower == "anthropic":
-        if not effective_key:
-            return []
-        return await _list_anthropic(effective_key)
-
-    if provider_lower == "groq":
-        if not effective_key:
-            return []
-        return await _list_groq(effective_key)
-
-    if provider_lower == "together":
-        if not effective_key:
-            return []
-        return await _list_together(effective_key)
-
-    if provider_lower == "mistral":
-        if not effective_key:
-            return []
-        return await _list_mistral(effective_key)
-
-    if provider_lower == "nebius":
-        if not effective_key:
-            return []
-        return await _list_nebius(effective_key, current_user.llm_base_url)
-
-    if provider_lower == "ollama":
-        return await _list_ollama(current_user.llm_base_url)
-
-    logger.warning("list_llm_models: unknown provider %r", provider)
-    return []
+    return result

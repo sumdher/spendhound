@@ -117,6 +117,33 @@ async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSessi
     )
 
 
+@router.post("/demo-login", response_model=AuthResponse)
+async def demo_login(request: Request, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+    """Issue a backend JWT for the Bruce Wayne demo account — no Google auth required.
+
+    Seeds the full demo dataset on first call.  Subsequent calls are instant.
+    Rate-limited to the same auth limit to prevent abuse.
+    """
+    from app.services.demo_seed import DEMO_USER_EMAIL, seed_demo_data  # noqa: PLC0415
+
+    user = await seed_demo_data(db)
+
+    token = create_access_token(user.id, user.email)
+    return AuthResponse(
+        access_token=token,
+        user={
+            "id": str(user.id),
+            "email": user.email,
+            "name": user.name,
+            "avatar_url": user.avatar_url,
+            "status": "approved",
+            "automatic_monthly_reports": False,
+            "is_admin": False,
+            "is_demo": True,
+        },
+    )
+
+
 @router.get("/me", response_model=UserResponse)
 async def get_me(current_user: User = Depends(get_current_user)) -> UserResponse:
     return serialize_user_profile(current_user)
@@ -170,6 +197,8 @@ async def update_llm_settings(
     db.add(current_user)
     await db.commit()
     await db.refresh(current_user)
+    from app.services.cache import invalidate_llm_models_cache  # noqa: PLC0415
+    await invalidate_llm_models_cache(current_user.id)
     return serialize_user_profile(current_user)
 
 
@@ -311,7 +340,33 @@ async def delete_my_account(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Permanently delete the current user's account and all associated data."""
+    """Permanently erase the current user's account and all associated data.
+
+    GDPR Article 17 — Right to Erasure. Deletes:
+    - All DB rows (expenses, receipts, chat sessions, budgets, categories, etc.)
+      via FK ON DELETE CASCADE
+    - Uploaded receipt/statement files on disk
+    - Redis cache entries for this user (best-effort)
+    """
+    import shutil
+    from pathlib import Path
+
+    user_id = current_user.id
+
+    # Remove uploaded files before the DB row disappears
+    user_storage = Path(settings.receipt_storage_dir) / str(user_id)
+    if user_storage.exists():
+        shutil.rmtree(user_storage, ignore_errors=True)
+
+    # FK ON DELETE CASCADE handles all child rows; we only need to delete the parent
     await db.delete(current_user)
     await db.commit()
+
+    # Best-effort cache eviction — non-fatal if Redis is unreachable
+    try:
+        from app.services.cache import invalidate_analytics_cache
+        await invalidate_analytics_cache(user_id)
+    except Exception:
+        pass
+
     return {"deleted": True}

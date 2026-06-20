@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -19,6 +19,22 @@ from app.models.user import User
 
 # In-memory SQLite for tests (no pgvector, but covers all scalar columns)
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
+
+
+@pytest.fixture(autouse=True)
+def _mock_prometheus_instrumentator():
+    """Prevent duplicate CollectorRegistry errors when create_app() is called per test.
+
+    prometheus-fastapi-instrumentator registers metrics into prometheus_client's
+    global REGISTRY. Calling create_app() in every test would re-register the same
+    metric names and raise ValueError. Mocking the Instrumentator keeps the custom
+    /metrics endpoint functional (it uses separately-defined module-level metrics)
+    while skipping the per-request HTTP instrumentation that causes duplicates.
+    """
+    mock = MagicMock()
+    mock.return_value.instrument.return_value = mock.return_value
+    with patch("app.main.Instrumentator", mock):
+        yield
 
 
 @pytest_asyncio.fixture()

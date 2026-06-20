@@ -11,6 +11,10 @@ temp*
 .next_features
 .envv
 .infisical.json
+.task*
+task*
+.tech*
+.enotatallv
 
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/

@@ -22,6 +22,7 @@ from app.models.expense_item import ExpenseItem
 from app.models.ledger import Ledger, LedgerAuditLog, LedgerMembership
 from app.models.receipt import Receipt
 from app.models.user import User
+from app.services.cache import invalidate_analytics_cache
 from app.services.item_rag import upsert_item_embedding
 from app.services.report_exports import build_expense_export_payload
 from app.services.spendhound import CADENCE_CUSTOM, CADENCE_ONE_TIME, CADENCE_PREPAID, TRANSACTION_TYPE_DEBIT, apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_cadence, normalize_money, normalize_recurring_settings, normalize_transaction_type, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_item_rule, serialize_receipt, upsert_item_keyword_rule_from_correction
@@ -338,6 +339,7 @@ async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_c
         db.add(LedgerAuditLog(ledger_id=ledger_id, expense_id=expense.id, user_id=current_user.id, action="created"))
     await recompute_recurring_expenses(db, current_user.id)
     await db.refresh(expense)
+    await invalidate_analytics_cache(current_user.id)
     return serialize_expense(expense, category_name=category.name if category else None, ledger_name=ledger_name)
 
 
@@ -426,6 +428,7 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
     await replace_expense_items(db, expense, body.items if body.items is not None else (receipt.preview_data or {}).get("items", []), category_name=category.name if category else body.category_name)
     await recompute_recurring_expenses(db, current_user.id)
     await db.refresh(expense)
+    await invalidate_analytics_cache(current_user.id)
     return serialize_expense(expense, category_name=category.name if category else None, receipt_filename=receipt.original_filename)
 
 
@@ -527,6 +530,7 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
     await db.refresh(receipt)
     await recompute_recurring_expenses(db, current_user.id)
     await db.refresh(expense)
+    await invalidate_analytics_cache(current_user.id)
     return {
         "expense": serialize_expense(expense, category_name=category.name if category else None, receipt_filename=receipt.original_filename),
         "statement": serialize_receipt(receipt),
@@ -631,6 +635,7 @@ async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_use
     if expense.receipt_id:
         receipt_result = await db.execute(select(Receipt.original_filename).where(Receipt.id == expense.receipt_id))
         receipt_filename = receipt_result.scalar_one_or_none()
+    await invalidate_analytics_cache(current_user.id)
     return serialize_expense(expense, category_name=current_category.name if current_category else None, receipt_filename=receipt_filename)
 
 
@@ -643,6 +648,7 @@ async def delete_expense(expense_id: uuid.UUID, current_user: User = Depends(get
     await db.delete(expense)
     await db.flush()
     await recompute_recurring_expenses(db, current_user.id)
+    await invalidate_analytics_cache(current_user.id)
 
 
 class ExpenseItemUpdate(BaseModel):

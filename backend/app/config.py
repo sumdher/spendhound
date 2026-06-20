@@ -87,6 +87,20 @@ class Settings(BaseSettings):
         description="Max pending receipt extraction jobs. Uploads beyond this return a queued_full status.",
     )
 
+    # ── Redis ─────────────────────────────────────────────────────────────────
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis connection URL. Used for rate limiting storage and analytics cache.",
+    )
+    analytics_cache_ttl_seconds: int = Field(
+        default=300,
+        description="TTL in seconds for the per-user analytics dashboard cache. Eager invalidation on expense writes means this is a safety net, not the primary freshness mechanism.",
+    )
+    llm_models_cache_ttl_seconds: int = Field(
+        default=600,
+        description="TTL in seconds for per-user LLM model list cache. Provider model catalogues change infrequently; eager invalidation fires when the user saves new LLM settings.",
+    )
+
     # ── Rate limiting ─────────────────────────────────────────────────────────
     rate_limit_chat_per_minute: int = Field(default=20, description="Chat stream requests per user per minute")
     rate_limit_upload_per_minute: int = Field(default=3, description="Receipt uploads per user per minute")
@@ -95,6 +109,12 @@ class Settings(BaseSettings):
     # ── Database connection pool ──────────────────────────────────────────────
     db_pool_size: int = Field(default=20, description="SQLAlchemy async connection pool base size")
     db_max_overflow: int = Field(default=40, description="Max extra connections beyond db_pool_size")
+
+    # ── Observability ─────────────────────────────────────────────────────────
+    metrics_token: str = Field(
+        default="",
+        description="Bearer token required to scrape /metrics. Empty = endpoint blocked. Set in Infisical for prod.",
+    )
 
     debug: bool = Field(default=False, description="Enable debug mode")
     cors_origins: list[str] = Field(

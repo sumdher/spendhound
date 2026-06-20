@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import dataclasses
 import uuid
 
 import structlog
@@ -17,10 +17,12 @@ from app.middleware.bot_detect import block_bots
 from app.middleware.rate_limit import limiter
 from app.models.receipt import Receipt
 from app.models.user import User
-from app.services.receipt_extraction import build_statement_preview, create_llm_config, store_upload
+from app.services.cache import get_celery_queue_depth
+from app.services.receipt_extraction import create_llm_config, store_upload
 from app.services.url_validation import validate_llm_base_url
-from app.services.receipt_queue import ExtractionJob, get_receipt_queue
 from app.services.spendhound import ensure_default_categories, serialize_receipt
+from app.tasks.receipt_tasks import extract_receipt
+from app.tasks.statement_tasks import extract_statement
 
 logger = structlog.get_logger(__name__)
 
@@ -62,27 +64,27 @@ async def upload_receipt(request: Request, file: UploadFile = File(...), provide
     await db.flush()
     await db.refresh(receipt)
 
-    job = ExtractionJob(
-        receipt_id=receipt.id,
-        user_id=current_user.id,
-        stored=stored,
-        content_type=file.content_type,
-        filename=filename,
-        llm_config=llm_config,
-    )
-    try:
-        get_receipt_queue().put_nowait(job)
-    except asyncio.QueueFull:
-        # Queue is at capacity. Receipt is saved but won't auto-extract.
-        # The frontend polls extraction_status and will show it as pending.
+    # Check Celery broker queue depth before enqueuing.
+    # Redis LLEN on the "celery" list key: O(1), <1 ms, accurate to ±1.
+    queue_depth = await get_celery_queue_depth()
+    if queue_depth >= settings.receipt_queue_maxsize:
         logger.warning(
             "receipt_extraction.queue_full",
             receipt_id=str(receipt.id),
-            queue_size=get_receipt_queue().qsize(),
+            queue_depth=queue_depth,
         )
         receipt.extraction_status = "queued_full"
-        await db.flush()  # persist status; get_db dependency commits after endpoint returns
+        await db.flush()
+        return serialize_receipt(receipt)
 
+    extract_receipt.delay(
+        receipt_id=str(receipt.id),
+        user_id=str(current_user.id),
+        storage_path=stored.storage_path,
+        content_type=file.content_type,
+        filename=filename,
+        llm_config_dict=dataclasses.asdict(llm_config) if llm_config is not None else None,
+    )
     return serialize_receipt(receipt)
 
 
@@ -95,15 +97,9 @@ async def upload_statement(file: UploadFile = File(...), provider: str | None = 
         raise HTTPException(status_code=400, detail="Bank statement import currently requires a PDF upload")
 
     stored = await store_upload(current_user.id, file)
-    extraction = await build_statement_preview(
-        db,
-        current_user,
-        storage_path=stored.storage_path,
-        content_type=file.content_type,
-        filename=filename,
-        llm_config=create_llm_config(provider=provider, model=model, api_key=api_key, base_url=base_url),
-    )
-    preview = extraction.preview
+    llm_config = create_llm_config(provider=provider, model=model, api_key=api_key, base_url=base_url)
+
+    # Create receipt immediately with pending status — extraction runs in Celery worker.
     receipt = Receipt(
         user_id=current_user.id,
         original_filename=filename,
@@ -111,17 +107,25 @@ async def upload_statement(file: UploadFile = File(...), provider: str | None = 
         content_type=file.content_type,
         file_size=stored.file_size,
         storage_path=stored.storage_path,
-        ocr_text=extraction.extracted_text,
-        preview_data=preview.model_dump(),
-        extraction_confidence=preview.confidence,
+        ocr_text=None,
+        preview_data=None,
+        extraction_confidence=0.0,
         document_kind="statement",
-        extraction_status="review",
+        extraction_status="pending",
         needs_review=True,
-        review_notes=preview.notes,
     )
     db.add(receipt)
     await db.flush()
     await db.refresh(receipt)
+
+    extract_statement.delay(
+        receipt_id=str(receipt.id),
+        user_id=str(current_user.id),
+        storage_path=stored.storage_path,
+        content_type=file.content_type,
+        filename=filename,
+        llm_config_dict=dataclasses.asdict(llm_config) if llm_config is not None else None,
+    )
     return serialize_receipt(receipt)
 
 

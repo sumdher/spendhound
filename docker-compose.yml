@@ -19,6 +19,18 @@ services:
       retries: 5
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: spendhound_redis
+    # No host port — reachable only by containers on this network.
+    # To inspect: docker compose exec redis redis-cli
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -26,9 +38,11 @@ services:
       target: development
     container_name: spendhound_backend
     env_file:
-      - ./backend/.env          # non-secret config only
+      - path: ./backend/.env    # non-secret config only — optional, all secrets via env block
+        required: false
     environment:
       DATABASE_URL: postgresql+asyncpg://spendhound:localdev@db:5432/spendhound
+      REDIS_URL: redis://redis:6379/0
       # Secrets — injected by `infisical run` via Makefile
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
@@ -41,6 +55,7 @@ services:
       LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET}
       MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
       MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
+      METRICS_TOKEN: dev-metrics-token
     ports:
       - "8000:8000"
     volumes:
@@ -52,6 +67,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -60,6 +77,116 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: spendhound_celery_worker
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://spendhound:localdev@db:5432/spendhound
+      REDIS_URL: redis://redis:6379/0
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET}
+      MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
+      MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=1
+    volumes:
+      - ./backend:/app
+      - ./storage:/app/storage
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: spendhound_celery_beat
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://spendhound:localdev@db:5432/spendhound
+      REDIS_URL: redis://redis:6379/0
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET}
+    command: celery -A app.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: spendhound_prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.listen-address=0.0.0.0:9090
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: spendhound_grafana
+    ports:
+      - "127.0.0.1:3004:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  flower:
+    image: mher/flower:2.0
+    container_name: spendhound_flower
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/0
+    command: celery flower --broker=redis://redis:6379/0 --port=5555 --address=0.0.0.0
+    ports:
+      - "127.0.0.1:5555:5555"
+    depends_on:
+      - redis
+    restart: unless-stopped
 
   frontend:
     build:
@@ -91,3 +218,5 @@ services:
 
 volumes:
   postgres_data:
+  prometheus_data:
+  grafana_data:

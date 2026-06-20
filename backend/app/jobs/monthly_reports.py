@@ -212,16 +212,47 @@ async def run_monthly_report_job(
         logger.info("monthly_reports.job.disabled", report_month=summary.report_month)
         return summary
 
+    # Local import avoids circular dependency:
+    # report_tasks → monthly_reports (helpers) → report_tasks (this import)
+    from app.tasks.report_tasks import deliver_monthly_report  # noqa: PLC0415
+
+    report_month_str = report_month.strftime("%Y-%m")
     async_session_factory = session_factory or AsyncSessionLocal
     async with async_session_factory() as db:
-        summary = await send_monthly_reports_for_month(db, report_month)
+        users_result = await db.execute(
+            select(User).where(User.status == "approved").order_by(User.created_at.asc())
+        )
+        for user in users_result.scalars().all():
+            summary.processed_users += 1
+            if not user.automatic_monthly_reports:
+                summary.skipped_users += 1
+                logger.info(
+                    "monthly_reports.delivery.skipped",
+                    user_id=str(user.id),
+                    email=user.email,
+                    report_month=report_month_str,
+                    reason="automatic_monthly_reports_disabled",
+                )
+                continue
+
+            deliver_monthly_report.delay(
+                user_id=str(user.id),
+                report_month_str=report_month_str,
+            )
+            summary.sent_users += 1
+            logger.info(
+                "monthly_reports.delivery.queued",
+                user_id=str(user.id),
+                email=user.email,
+                report_month=report_month_str,
+            )
 
     logger.info(
         "monthly_reports.job.completed",
         report_month=summary.report_month,
         processed_users=summary.processed_users,
         skipped_users=summary.skipped_users,
-        sent_users=summary.sent_users,
+        queued_users=summary.sent_users,
         failed_users=summary.failed_users,
     )
     return summary

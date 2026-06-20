@@ -1,6 +1,7 @@
 "use client";
 
 import { signOut, useSession } from "next-auth/react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -33,8 +34,10 @@ type Period = "all" | "this_month" | "month";
 
 function Avatar({ name, avatarUrl, size = 8 }: { name?: string | null; avatarUrl?: string | null; size?: number }) {
   const initials = (name || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((c) => c[0]?.toUpperCase() || "").join("");
-  if (avatarUrl) return <img src={avatarUrl} alt={name ?? ""} className={`h-${size} w-${size} rounded-full object-cover shrink-0`} referrerPolicy="no-referrer" />;
-  return <div className={`flex h-${size} w-${size} shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-bold text-primary`}>{initials || "?"}</div>;
+  const fallback = <div className={`flex h-${size} w-${size} shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-bold text-primary`}>{initials || "?"}</div>;
+  const [broken, setBroken] = useState(false);
+  if (avatarUrl && !broken) return <img src={avatarUrl} alt={name ?? ""} className={`h-${size} w-${size} rounded-full object-cover shrink-0`} referrerPolicy="no-referrer" onError={() => setBroken(true)} />;
+  return fallback;
 }
 
 function WarningBox({ children }: { children: React.ReactNode }) {
@@ -343,6 +346,7 @@ export default function AccountPage() {
   const avatarUrl = session?.user?.image || (session?.user as Record<string, unknown>)?.avatar_url as string | undefined;
   const initials = (session?.user?.name || session?.user?.email || "SH")
     .split(/\s+/).filter(Boolean).slice(0, 2).map((c: string) => c[0]?.toUpperCase() || "").join("");
+  const [profileAvatarBroken, setProfileAvatarBroken] = useState(false);
 
   // Stats
   const [stats, setStats] = useState<{ created_at: string; expense_count: number; needs_review_count: number } | null>(null);
@@ -419,8 +423,8 @@ export default function AccountPage() {
       <section className="rounded-2xl border border-border bg-card p-6 space-y-4">
         <h2 className="text-lg font-semibold">Profile</h2>
         <div className="flex items-center gap-4">
-          {avatarUrl ? (
-            <img src={avatarUrl} alt={session?.user?.name ?? "User"} className="h-16 w-16 rounded-full object-cover" referrerPolicy="no-referrer" />
+          {avatarUrl && !profileAvatarBroken ? (
+            <img src={avatarUrl} alt={session?.user?.name ?? "User"} className="h-16 w-16 rounded-full object-cover" referrerPolicy="no-referrer" onError={() => setProfileAvatarBroken(true)} />
           ) : (
             <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/20 text-xl font-bold text-primary">{initials || "SH"}</div>
           )}
@@ -545,6 +549,10 @@ export default function AccountPage() {
       <section className="rounded-2xl border border-red-500/20 bg-card p-6 space-y-4">
         <h2 className="text-lg font-semibold text-red-400">Delete my account</h2>
         <WarningBox>Deleting your account removes <strong>all your data and your account</strong> permanently from the server. This cannot be undone.</WarningBox>
+        <p className="text-xs text-muted-foreground">
+          Exercising your right to erasure under GDPR Art. 17.{" "}
+          <Link href="/privacy" className="underline hover:text-foreground">Read our Privacy Policy.</Link>
+        </p>
         {deleteError && <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">{deleteError}</div>}
         {!showDeleteConfirm ? (
           <button type="button" onClick={() => setShowDeleteConfirm(true)} className="rounded-lg bg-red-600/90 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">Delete my account</button>
