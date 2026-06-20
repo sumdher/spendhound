@@ -21,8 +21,6 @@ from app.services.cache import get_celery_queue_depth
 from app.services.receipt_extraction import create_llm_config, store_upload
 from app.services.spendhound import ensure_default_categories, serialize_receipt
 from app.services.url_validation import validate_llm_base_url
-from app.tasks.receipt_tasks import extract_receipt
-from app.tasks.statement_tasks import extract_statement
 
 logger = structlog.get_logger(__name__)
 
@@ -77,6 +75,8 @@ async def upload_receipt(request: Request, file: UploadFile = File(...), provide
         await db.flush()
         return serialize_receipt(receipt)
 
+    from app.tasks.receipt_tasks import extract_receipt
+
     extract_receipt.delay(
         receipt_id=str(receipt.id),
         user_id=str(current_user.id),
@@ -117,6 +117,8 @@ async def upload_statement(file: UploadFile = File(...), provider: str | None = 
     db.add(receipt)
     await db.flush()
     await db.refresh(receipt)
+
+    from app.tasks.statement_tasks import extract_statement
 
     extract_statement.delay(
         receipt_id=str(receipt.id),

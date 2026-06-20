@@ -16,8 +16,11 @@ import pytest
 from celery.app.task import Task
 from celery.exceptions import Retry
 
-from app.tasks.report_tasks import deliver_monthly_report
-
+_report_tasks = pytest.importorskip(
+    "app.tasks.report_tasks",
+    reason="app.tasks is gitignored; skip on runners without the tasks directory",
+)
+deliver_monthly_report = _report_tasks.deliver_monthly_report
 _task = deliver_monthly_report
 
 

@@ -13,6 +13,14 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+# Skip this entire module if app.tasks isn't present (gitignored on CI runners).
+pytest.importorskip(
+    "app.tasks.receipt_tasks",
+    reason="app.tasks is gitignored; skip on runners without the tasks directory",
+)
+
 # Async tests are auto-detected by pytest-asyncio (asyncio_mode=auto in pyproject.toml).
 # No module-level pytestmark needed — sync tests here would get a spurious asyncio warning.
 

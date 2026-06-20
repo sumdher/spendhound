@@ -34,6 +34,69 @@ jobs:
       - name: Test (pytest)
         run: pytest
 
+  migrations:
+    name: Migrations (upgrade · downgrade · upgrade)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: spendhound
+          POSTGRES_PASSWORD: spendhound
+          POSTGRES_DB: spendhound_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U spendhound"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://spendhound:spendhound@localhost:5432/spendhound_ci
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install -e ".[dev]"
+
+      - name: Upgrade to head
+        run: alembic upgrade head
+
+      - name: Downgrade to base
+        run: alembic downgrade base
+
+      - name: Upgrade to head again
+        run: alembic upgrade head
+
+  docker-build:
+    name: Docker build (production targets)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build --target production -f backend/Dockerfile backend/
+
+      - name: Build frontend image
+        run: docker build --target production -f frontend/Dockerfile frontend/
+
   frontend:
     name: Frontend (lint · typecheck)
     runs-on: ubuntu-latest
