@@ -77,8 +77,8 @@ jobs:
       - name: Upgrade to head
         run: alembic upgrade head
 
-      - name: Downgrade to base
-        run: alembic downgrade base
+      - name: Downgrade to SpendHound base (0007)
+        run: alembic downgrade 0007
 
       - name: Upgrade to head again
         run: alembic upgrade head
