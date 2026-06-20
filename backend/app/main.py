@@ -77,7 +77,7 @@ def create_app() -> FastAPI:
     # Works correctly only with --workers 1 (single process = single shared limiter).
     app.state.limiter = limiter
 
-    async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Response:
+    async def _rate_limit_handler(request: Request, exc: Exception) -> Response:
         path = request.url.path
         RATE_LIMIT_HITS_TOTAL.labels(endpoint=path, limit_type=classify_limit_type(path)).inc()
         return _rate_limit_exceeded_handler(request, exc)

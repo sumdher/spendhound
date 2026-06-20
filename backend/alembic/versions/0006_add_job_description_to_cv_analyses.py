@@ -24,6 +24,9 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     bind = op.get_bind()
-    columns = {column["name"] for column in sa.inspect(bind).get_columns("cv_analyses")}
+    inspector = sa.inspect(bind)
+    if not inspector.has_table("cv_analyses"):
+        return
+    columns = {column["name"] for column in inspector.get_columns("cv_analyses")}
     if "job_description" in columns:
         op.drop_column("cv_analyses", "job_description")
