@@ -119,7 +119,7 @@ async def list_ledgers(
     user_result = await db.execute(select(User).where(User.id.in_(user_ids)))
     user_map = {u.id: u for u in user_result.scalars().all()}
     for m in all_memberships:
-        m.user = user_map.get(m.user_id)
+        m.user = user_map.get(m.user_id)  # type: ignore[assignment]
 
     memberships_by_ledger: dict[uuid.UUID, list[LedgerMembership]] = {}
     for m in all_memberships:
@@ -177,9 +177,9 @@ async def create_ledger(
     user_result = await db.execute(select(User).where(User.id.in_(user_ids)))
     user_map = {u.id: u for u in user_result.scalars().all()}
     for m in memberships:
-        m.user = user_map.get(m.user_id)
+        m.user = user_map.get(m.user_id)  # type: ignore[assignment]
 
-    return _serialize_ledger(ledger, memberships)
+    return _serialize_ledger(ledger, list(memberships))
 
 
 @router.patch("/{ledger_id}")
@@ -255,8 +255,8 @@ async def add_ledger_members(
     user_result = await db.execute(select(User).where(User.id.in_(user_ids)))
     user_map = {u.id: u for u in user_result.scalars().all()}
     for m in memberships:
-        m.user = user_map.get(m.user_id)
-    return _serialize_ledger(ledger, memberships)
+        m.user = user_map.get(m.user_id)  # type: ignore[assignment]
+    return _serialize_ledger(ledger, list(memberships))
 
 
 @router.delete("/{ledger_id}/leave")
@@ -418,7 +418,7 @@ async def copy_expenses(
                     description=item.description,
                     quantity=item.quantity,
                     unit_price=item.unit_price,
-                    total=item.total,
+                    total_price=item.total_price,
                     subcategory=item.subcategory,
                 ))
 

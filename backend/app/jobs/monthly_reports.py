@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
@@ -82,7 +83,7 @@ async def fetch_monthly_report_pdf(user: User, report_month: date) -> bytes:
 async def get_or_create_monthly_report_delivery(
     db: AsyncSession,
     *,
-    user_id,
+    user_id: uuid.UUID,
     report_month: date,
 ) -> MonthlyReportDelivery:
     delivery_result = await db.execute(

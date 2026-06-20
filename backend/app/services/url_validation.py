@@ -60,7 +60,7 @@ def _sync_resolve_and_check(hostname: str, port: int) -> str | None:
         return f"hostname '{hostname}' could not be resolved: {exc}"
 
     for result in results:
-        ip = result[4][0]
+        ip = str(result[4][0])
         if _is_private_ip(ip):
             return f"resolves to a private/internal address ({ip})"
     return None

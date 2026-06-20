@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -96,7 +96,8 @@ async def _get_existing_receipt_expense(db: AsyncSession, *, user_id: uuid.UUID,
         .order_by(Expense.created_at.asc())
         .limit(1)
     )
-    return result.first()
+    row = result.first()
+    return (row[0], row[1]) if row is not None else None
 
 
 async def _get_expense_with_category_name(db: AsyncSession, *, user_id: uuid.UUID, expense_id: uuid.UUID) -> tuple[Expense, str | None] | None:
@@ -106,7 +107,8 @@ async def _get_expense_with_category_name(db: AsyncSession, *, user_id: uuid.UUI
         .where(Expense.user_id == user_id, Expense.id == expense_id)
         .limit(1)
     )
-    return result.first()
+    row = result.first()
+    return (row[0], row[1]) if row is not None else None
 
 
 class ExpenseCreate(BaseModel):
@@ -179,7 +181,7 @@ async def list_expenses(
     If omitted, defaults to general.
     show_duplicates: filter to only expenses with same merchant+amount+date across >1 ledger.
     """
-    parsed_ledger_ids: list[uuid.UUID | None] = []
+    parsed_ledger_ids: list[uuid.UUID] = []
     include_general = True
 
     if ledger_ids:
@@ -278,7 +280,7 @@ async def review_queue(current_user: User = Depends(get_current_user), db: Async
 
 
 @router.get("/export")
-async def export_expenses(export_format: str = Query(default="json"), month: str | None = Query(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def export_expenses(export_format: str = Query(default="json"), month: str | None = Query(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> Response:
     export_payload = await build_expense_export_payload(db, user_id=current_user.id, month=month)
     items = export_payload["items"]
 
@@ -728,9 +730,9 @@ async def update_expense_item(
     if body.quantity is not None:
         item.quantity = body.quantity
     if body.unit_price is not None:
-        item.unit_price = body.unit_price
+        item.unit_price = body.unit_price  # type: ignore[assignment]
     if body.total is not None:
-        item.total_price = body.total
+        item.total_price = body.total  # type: ignore[assignment]
 
     rule_created = None
     if body.learn and body.subcategory and subcategory_changed and item.description:

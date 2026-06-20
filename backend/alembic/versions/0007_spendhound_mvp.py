@@ -37,10 +37,10 @@ def upgrade() -> None:
         if session_fk_names:
             logger.info(
                 "Dropping legacy chat_messages -> chat_sessions foreign keys: %s",
-                ", ".join(session_fk_names),
+                ", ".join(session_fk_names),  # type: ignore[arg-type]
             )
             for constraint_name in session_fk_names:
-                op.drop_constraint(constraint_name, "chat_messages", type_="foreignkey")
+                op.drop_constraint(constraint_name, "chat_messages", type_="foreignkey")  # type: ignore[arg-type]
 
         chat_message_columns = {column["name"] for column in inspector.get_columns("chat_messages")}
         if "session_id" in chat_message_columns:

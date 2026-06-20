@@ -35,7 +35,7 @@ def upgrade() -> None:
         ]
         for constraint_name in session_fk_names:
             logger.info("Dropping existing chat_messages foreign key %s", constraint_name)
-            op.drop_constraint(constraint_name, "chat_messages", type_="foreignkey")
+            op.drop_constraint(constraint_name, "chat_messages", type_="foreignkey")  # type: ignore[arg-type]
         logger.info("Dropping existing chat_messages table before recreation")
         op.drop_table("chat_messages")
 

@@ -10,6 +10,7 @@ list. The first message with role="system" is extracted automatically.
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import httpx
 
@@ -47,7 +48,7 @@ def _build_content_blocks(message: Message) -> str | list[dict]:
 class AnthropicProvider(BaseLLMProvider):
     """LLM provider backed by the Anthropic Messages API."""
 
-    def _get_client(self, config: LLMConfig | None):
+    def _get_client(self, config: LLMConfig | None) -> Any:
         """Construct an AsyncAnthropic client."""
         try:
             from anthropic import AsyncAnthropic

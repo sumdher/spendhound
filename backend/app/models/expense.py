@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
@@ -22,6 +23,13 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.category import Category
+    from app.models.expense_item import ExpenseItem
+    from app.models.ledger import Ledger
+    from app.models.receipt import Receipt
+    from app.models.user import User
 
 
 class Expense(Base):

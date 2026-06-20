@@ -102,7 +102,7 @@ async def _build_grocery_insights(db: AsyncSession, user_id: uuid.UUID, selected
         f"Most grocery spend went to {top_subcategories[0]['name']}"
         + (f", followed by {top_subcategories[1]['name']}" if len(top_subcategories) > 1 else "")
         + (
-            f". Your lightest categories were {', '.join(item['name'] for item in least_subcategories)}."
+            f". Your lightest categories were {', '.join(str(item['name']) for item in least_subcategories)}."
             if least_subcategories
             else "."
         )

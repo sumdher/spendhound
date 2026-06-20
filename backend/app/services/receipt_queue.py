@@ -33,7 +33,11 @@ from app.database import AsyncSessionLocal
 from app.models.receipt import Receipt
 from app.models.user import User
 from app.services.llm.base import LLMConfig
-from app.services.receipt_extraction import StoredReceipt, build_receipt_preview
+from app.services.receipt_extraction import (
+    ReceiptPreviewModel,
+    StoredReceipt,
+    build_receipt_preview,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -78,8 +82,9 @@ async def _run_extraction_job(job: ExtractionJob) -> None:
                 llm_config=job.llm_config,
             )
             preview = extraction.preview
+            assert isinstance(preview, ReceiptPreviewModel)
             needs_review = (
-                preview.confidence < settings.receipt_review_confidence_threshold
+                (preview.confidence or 0.0) < settings.receipt_review_confidence_threshold
                 or preview.category_name is None
                 or preview.amount is None
                 or not preview.merchant

@@ -7,6 +7,7 @@ Configure via OPENAI_API_KEY and OPENAI_MODEL environment variables.
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import httpx
 
@@ -17,7 +18,7 @@ from app.services.llm.base import BaseLLMProvider, LLMConfig, Message
 class OpenAIProvider(BaseLLMProvider):
     """LLM provider backed by the OpenAI Chat Completions API."""
 
-    def _get_client(self, config: LLMConfig | None):
+    def _get_client(self, config: LLMConfig | None) -> Any:
         """Construct an AsyncOpenAI client, honouring per-request overrides."""
         try:
             from openai import AsyncOpenAI
@@ -76,7 +77,7 @@ class OpenAIProvider(BaseLLMProvider):
         try:
             response = await client.chat.completions.create(
                 model=model,
-                messages=self._build_messages(messages),  # type: ignore[arg-type]
+                messages=self._build_messages(messages),
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
@@ -100,7 +101,7 @@ class OpenAIProvider(BaseLLMProvider):
         try:
             stream = await client.chat.completions.create(
                 model=model,
-                messages=self._build_messages(messages),  # type: ignore[arg-type]
+                messages=self._build_messages(messages),
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stream=True,

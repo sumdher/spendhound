@@ -80,7 +80,7 @@ def create_app() -> FastAPI:
     async def _rate_limit_handler(request: Request, exc: RateLimitExceeded) -> Response:
         path = request.url.path
         RATE_LIMIT_HITS_TOTAL.labels(endpoint=path, limit_type=classify_limit_type(path)).inc()
-        return _rate_limit_exceeded_handler(request, exc)  # type: ignore[return-value]
+        return _rate_limit_exceeded_handler(request, exc)
 
     app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
@@ -164,4 +164,4 @@ def create_app() -> FastAPI:
     return app
 
 
-app = create_app()
+app = create_app()  # type: ignore[assignment]

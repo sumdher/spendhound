@@ -70,7 +70,7 @@ def serialize_user_profile(user: User) -> UserResponse:
 @limiter.limit(f"{settings.rate_limit_auth_per_minute}/minute")
 async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSession = Depends(get_db), _bot_check: None = Depends(block_bots)) -> AuthResponse:
     try:
-        id_info = id_token.verify_oauth2_token(body.id_token, google_requests.Request(), settings.google_client_id)
+        id_info = id_token.verify_oauth2_token(body.id_token, google_requests.Request(), settings.google_client_id)  # type: ignore[no-untyped-call]
     except ValueError as error:
         logger.warning("Invalid Google ID token", error=str(error))
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid Google token: {error}") from error
@@ -84,7 +84,7 @@ async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSessi
     user = result.scalar_one_or_none()
     is_new_user = user is None
 
-    if is_new_user:
+    if user is None:
         initial_status = "approved" if (is_admin_email(normalized_email) or not (settings.admin_email or "").strip()) else "pending"
         user = User(email=normalized_email, name=id_info.get("name"), avatar_url=id_info.get("picture"), status=initial_status)
         db.add(user)
@@ -339,7 +339,7 @@ async def clear_my_data(
 
     result = await db.execute(stmt)
     await db.commit()
-    return {"deleted": result.rowcount}
+    return {"deleted": result.rowcount}  # type: ignore[attr-defined]
 
 
 @router.delete("/me")

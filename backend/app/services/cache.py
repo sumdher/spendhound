@@ -79,7 +79,7 @@ async def get_cached_analytics(user_id: uuid.UUID, month: str | None) -> dict | 
         raw = await _redis_client.get(_analytics_key(user_id, month))
         if raw is None:
             return None
-        return json.loads(raw)  # type: ignore[no-any-return]
+        return json.loads(raw)
     except Exception as exc:
         logger.warning("cache.analytics.read_failed", error=str(exc))
         return None
@@ -147,7 +147,7 @@ async def get_cached_llm_models(provider: str, user_id: uuid.UUID) -> list | Non
         raw = await _redis_client.get(_llm_models_key(provider, user_id))
         if raw is None:
             return None
-        return json.loads(raw)  # type: ignore[no-any-return]
+        return json.loads(raw)
     except Exception as exc:
         logger.warning("cache.llm_models.read_failed", provider=provider, error=str(exc))
         return None

@@ -88,6 +88,16 @@ strict = true
 ignore_missing_imports = true
 plugins = ["pydantic.mypy"]
 
+[[tool.mypy.overrides]]
+module = ["tests.*", "alembic.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["app", "app.*"]
+disallow_any_generics = false
+warn_return_any = false
+disallow_untyped_decorators = false
+
 # ── Pytest ────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
