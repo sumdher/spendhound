@@ -13,8 +13,10 @@ temp*
 .infisical.json
 .task*
 task*
+feat*
 .tech*
 .enotatallv
+TECH*
 
 # ── Python ───────────────────────────────────────────────────────────────────
 __pycache__/
