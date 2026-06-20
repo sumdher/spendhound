@@ -17,7 +17,12 @@ from app.models.budget import Budget
 from app.models.category import Category
 from app.models.expense import Expense
 from app.models.user import User
-from app.services.spendhound import TRANSACTION_TYPE_DEBIT, month_start_from_string, next_month, serialize_budget
+from app.services.spendhound import (
+    TRANSACTION_TYPE_DEBIT,
+    month_start_from_string,
+    next_month,
+    serialize_budget,
+)
 
 router = APIRouter()
 

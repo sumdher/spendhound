@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,7 +29,7 @@ async def build_expense_export_payload(db: AsyncSession, *, user_id: uuid.UUID, 
         for expense, category_name, receipt_filename in result.all()
     ]
     return {
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "month": month,
         "total": len(items),
         "items": items,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -120,7 +120,7 @@ async def send_monthly_report_for_user(
         return MonthlyReportSendResult(report_month=report_month_key, outcome="skipped", delivery=delivery)
 
     try:
-        attempted_at = datetime.now(timezone.utc)
+        attempted_at = datetime.now(UTC)
         delivery.status = "pending"
         delivery.attempted_at = attempted_at
         delivery.sent_at = None
@@ -141,7 +141,7 @@ async def send_monthly_report_for_user(
             raise RuntimeError("Monthly report email was not sent; verify Resend configuration")
 
         delivery.status = "sent"
-        delivery.sent_at = datetime.now(timezone.utc)
+        delivery.sent_at = datetime.now(UTC)
         delivery.resend_email_id = resend_email_id
         await db.commit()
         await db.refresh(delivery)
@@ -214,7 +214,7 @@ async def run_monthly_report_job(
 
     # Local import avoids circular dependency:
     # report_tasks → monthly_reports (helpers) → report_tasks (this import)
-    from app.tasks.report_tasks import deliver_monthly_report  # noqa: PLC0415
+    from app.tasks.report_tasks import deliver_monthly_report
 
     report_month_str = report_month.strftime("%Y-%m")
     async_session_factory = session_factory or AsyncSessionLocal

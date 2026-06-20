@@ -6,7 +6,19 @@ import uuid
 from datetime import date, datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, Uuid, func
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    Uuid,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -49,8 +61,8 @@ class Expense(Base):
 
     ledger_id: Mapped[uuid.UUID | None] = mapped_column(Uuid(as_uuid=True), ForeignKey("ledgers.id", ondelete="SET NULL"), nullable=True, index=True)
 
-    user: Mapped["User"] = relationship("User", back_populates="expenses")
-    category: Mapped["Category | None"] = relationship("Category", back_populates="expenses")
-    receipt: Mapped["Receipt | None"] = relationship("Receipt", back_populates="expenses")
-    items: Mapped[list["ExpenseItem"]] = relationship("ExpenseItem", back_populates="expense", cascade="all, delete-orphan")
-    ledger: Mapped["Ledger | None"] = relationship("Ledger", back_populates="expenses")
+    user: Mapped[User] = relationship("User", back_populates="expenses")
+    category: Mapped[Category | None] = relationship("Category", back_populates="expenses")
+    receipt: Mapped[Receipt | None] = relationship("Receipt", back_populates="expenses")
+    items: Mapped[list[ExpenseItem]] = relationship("ExpenseItem", back_populates="expense", cascade="all, delete-orphan")
+    ledger: Mapped[Ledger | None] = relationship("Ledger", back_populates="expenses")

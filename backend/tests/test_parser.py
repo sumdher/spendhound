@@ -7,9 +7,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.services.receipt_extraction import _canonical_supermarket_name, _extract_json_object, _merchant_hint_from_receipt_text, _should_force_groceries, ReceiptPreviewItemModel, ReceiptPreviewModel, extract_text_from_file, fallback_preview_from_text, fallback_statement_preview_from_text, llm_receipt_preview, llm_receipt_preview_from_image
 from app.services.llm.base import ImageInput, LLMConfig, Message
 from app.services.llm.ollama import OllamaProvider
+from app.services.receipt_extraction import (
+    ReceiptPreviewItemModel,
+    ReceiptPreviewModel,
+    _canonical_supermarket_name,
+    _extract_json_object,
+    _merchant_hint_from_receipt_text,
+    _should_force_groceries,
+    extract_text_from_file,
+    fallback_preview_from_text,
+    fallback_statement_preview_from_text,
+    llm_receipt_preview,
+    llm_receipt_preview_from_image,
+)
 
 
 def test_extract_json_object_embedded_payload():

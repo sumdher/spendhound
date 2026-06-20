@@ -7,7 +7,7 @@ get_any_user     — no status check (use for /api/auth/status polling).
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -24,12 +24,12 @@ bearer_scheme = HTTPBearer()
 
 def create_access_token(user_id: uuid.UUID, email: str) -> str:
     """Create a signed JWT for the given user."""
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.jwt_expiry_days)
+    expire = datetime.now(UTC) + timedelta(days=settings.jwt_expiry_days)
     payload = {
         "sub": str(user_id),
         "email": email,
         "exp": expire,
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(UTC),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 

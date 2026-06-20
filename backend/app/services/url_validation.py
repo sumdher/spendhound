@@ -79,7 +79,7 @@ async def validate_llm_base_url(url: str | None) -> None:
     try:
         parsed = urlparse(url.strip())
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid LLM base URL format.")
+        raise HTTPException(status_code=400, detail="Invalid LLM base URL format.") from None
 
     if parsed.scheme not in ("http", "https"):
         raise HTTPException(status_code=400, detail="LLM base URL must use http or https.")

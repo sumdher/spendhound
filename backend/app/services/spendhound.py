@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import calendar
-from difflib import SequenceMatcher
 import re
 import unicodedata
 import uuid
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
+from difflib import SequenceMatcher
 
 import structlog
 from sqlalchemy import delete, or_, select
@@ -442,13 +442,13 @@ def matches_item_keyword_rule(description: str, rule: ItemKeywordRule) -> bool:
     """Return True if *description* matches *rule* according to its pattern_type.
 
     Pattern types:
-      fuzzy      – smart fuzzy match (existing behaviour)
-      contains   – normalized keyword is a substring of the normalized description
-      starts_with – any token of the description starts with the keyword
+      fuzzy      - smart fuzzy match (existing behaviour)
+      contains   - normalized keyword is a substring of the normalized description
+      starts_with - any token of the description starts with the keyword
                    e.g. keyword="diges" matches "DIGES. MCVITIE'S" and "DIGESTIVI"
-      abbrev     – all keyword chars appear in order inside any single token
+      abbrev     - all keyword chars appear in order inside any single token
                    e.g. keyword="mcvt" matches "MCVITIE" (m·c·v···t inside)
-      regex      – full regex against the original description (case-insensitive)
+      regex      - full regex against the original description (case-insensitive)
     """
     if rule.pattern_type == "regex":
         try:

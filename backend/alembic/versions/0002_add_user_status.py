@@ -9,8 +9,9 @@ Existing users are migrated to 'approved' (they were already active).
 New users default to 'pending' — awaiting admin approval.
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "0002"
 down_revision = "0001"

@@ -25,7 +25,7 @@ def get_llm_provider(config: LLMConfig | None = None) -> BaseLLMProvider:
     every complete() call is recorded in the llm_response_seconds histogram.
     config.provider overrides the global LLM_PROVIDER setting.
     """
-    from app.services.metrics import MeteredLLMProvider  # noqa: PLC0415
+    from app.services.metrics import MeteredLLMProvider
 
     provider = (config.provider if config else None) or settings.llm_provider
 

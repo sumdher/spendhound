@@ -7,7 +7,7 @@ import math
 import re
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 import structlog
 from fastapi import HTTPException, Request
@@ -23,13 +23,18 @@ from app.models.chat_session import ChatSession
 from app.models.expense import Expense
 from app.models.expense_item import ExpenseItem
 from app.models.receipt import Receipt
-from app.schemas.chat import ChatHistoryResponse, ChatMessageResponse, ChatSessionResponse, ChatSummarizeStreamRequest, ChatStreamRequest
 from app.models.user import User
-from app.services.receipt_extraction import create_llm_config
-from app.services.spendhound import month_start_from_string
+from app.schemas.chat import (
+    ChatHistoryResponse,
+    ChatMessageResponse,
+    ChatSessionResponse,
+    ChatStreamRequest,
+    ChatSummarizeStreamRequest,
+)
 from app.services.llm.base import LLMConfig, Message
 from app.services.llm.factory import get_llm_provider, resolve_user_llm_config
-
+from app.services.receipt_extraction import create_llm_config
+from app.services.spendhound import month_start_from_string
 
 logger = structlog.get_logger(__name__)
 
@@ -178,7 +183,7 @@ class ExpenseChatService:
                 accumulated += chunk
                 yield self._sse_event("token", {"text": chunk, "token": chunk})
         except Exception as exc:
-            session.last_message_at = datetime.now(timezone.utc)
+            session.last_message_at = datetime.now(UTC)
             session.max_tokens = request.max_tokens
             session.token_count += user_message.token_count or 0
             if session.title == TITLE_FALLBACK:
@@ -201,7 +206,7 @@ class ExpenseChatService:
             message_metadata={"kind": "chat", "source": "expense_chat"},
         )
         self.db.add(assistant_message)
-        session.last_message_at = datetime.now(timezone.utc)
+        session.last_message_at = datetime.now(UTC)
         session.max_tokens = request.max_tokens
         session.token_count += (user_message.token_count or 0) + (assistant_message.token_count or 0)
         if session.title == TITLE_FALLBACK:

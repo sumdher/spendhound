@@ -19,8 +19,8 @@ from app.models.receipt import Receipt
 from app.models.user import User
 from app.services.cache import get_celery_queue_depth
 from app.services.receipt_extraction import create_llm_config, store_upload
-from app.services.url_validation import validate_llm_base_url
 from app.services.spendhound import ensure_default_categories, serialize_receipt
+from app.services.url_validation import validate_llm_base_url
 from app.tasks.receipt_tasks import extract_receipt
 from app.tasks.statement_tasks import extract_statement
 

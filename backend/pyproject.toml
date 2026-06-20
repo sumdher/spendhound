@@ -73,6 +73,11 @@ target-version = "py312"
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "RUF"]
 ignore = ["E501", "B008", "RUF012"]
 
+[tool.ruff.lint.per-file-ignores]
+# SQLAlchemy models use string-based forward references in relationship() that
+# ruff cannot resolve without circular imports. F821 is a false positive here.
+"app/models/*.py" = ["F821"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
 

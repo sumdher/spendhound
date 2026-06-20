@@ -9,9 +9,9 @@ Key design decisions:
 - Limits are configurable via settings so you can tune without code changes.
 """
 
+from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from fastapi import Request
 
 from app.config import settings
 

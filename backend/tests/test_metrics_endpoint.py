@@ -9,8 +9,6 @@ Verifies:
 
 from __future__ import annotations
 
-import pytest
-
 from app.config import settings
 
 # Async tests detected automatically (asyncio_mode=auto). No pytestmark needed —

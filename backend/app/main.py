@@ -1,21 +1,21 @@
 """SpendHound FastAPI application entry point."""
 
 import hmac
-from contextlib import asynccontextmanager
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
+import prometheus_fastapi_instrumentator.routing as _pfi_routing
 import structlog
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from prometheus_fastapi_instrumentator import Instrumentator
-import prometheus_fastapi_instrumentator.routing as _pfi_routing
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-import app.models  # noqa: F401
+import app.models
 from app.config import settings
 from app.middleware.rate_limit import limiter
 from app.services.cache import close_redis, get_celery_queue_depth, init_redis
@@ -115,7 +115,21 @@ def create_app() -> FastAPI:
         should_ignore_untemplated=True,
     ).instrument(app)
 
-    from app.api import admin, analytics, auth, budgets, categories, chat, expenses, ledgers, llm_models, monthly_reports, ollama, partners, receipts
+    from app.api import (
+        admin,
+        analytics,
+        auth,
+        budgets,
+        categories,
+        chat,
+        expenses,
+        ledgers,
+        llm_models,
+        monthly_reports,
+        ollama,
+        partners,
+        receipts,
+    )
 
     app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
     app.include_router(admin.router, prefix="/api/admin", tags=["admin"])

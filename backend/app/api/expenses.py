@@ -5,12 +5,12 @@ from __future__ import annotations
 import csv
 import io
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -25,7 +25,26 @@ from app.models.user import User
 from app.services.cache import invalidate_analytics_cache
 from app.services.item_rag import upsert_item_embedding
 from app.services.report_exports import build_expense_export_payload
-from app.services.spendhound import CADENCE_CUSTOM, CADENCE_ONE_TIME, CADENCE_PREPAID, TRANSACTION_TYPE_DEBIT, apply_expense_filters, ensure_default_categories, expense_requires_review, normalize_cadence, normalize_money, normalize_recurring_settings, normalize_transaction_type, recompute_recurring_expenses, replace_expense_items, resolve_category, serialize_expense, serialize_item_rule, serialize_receipt, upsert_item_keyword_rule_from_correction
+from app.services.spendhound import (
+    CADENCE_CUSTOM,
+    CADENCE_ONE_TIME,
+    CADENCE_PREPAID,
+    TRANSACTION_TYPE_DEBIT,
+    apply_expense_filters,
+    ensure_default_categories,
+    expense_requires_review,
+    normalize_cadence,
+    normalize_money,
+    normalize_recurring_settings,
+    normalize_transaction_type,
+    recompute_recurring_expenses,
+    replace_expense_items,
+    resolve_category,
+    serialize_expense,
+    serialize_item_rule,
+    serialize_receipt,
+    upsert_item_keyword_rule_from_correction,
+)
 
 router = APIRouter()
 
@@ -46,7 +65,7 @@ def _resolve_cadence_fields(
     prepaid_months: int | None,
     prepaid_start_date_str: str | None,
     expense_date_str: str,
-) -> tuple[int | None, int | None, "date | None"]:
+) -> tuple[int | None, int | None, date | None]:
     """Return (cadence_interval, prepaid_months, prepaid_start_date) cleaned by cadence type."""
     resolved_cadence = normalize_cadence(cadence_str)
     if resolved_cadence == CADENCE_CUSTOM:
@@ -187,7 +206,8 @@ async def list_expenses(
         .outerjoin(Ledger, Ledger.id == Expense.ledger_id)
     )
 
-    from sqlalchemy import or_ as sql_or, and_ as sql_and
+    from sqlalchemy import and_ as sql_and
+    from sqlalchemy import or_ as sql_or
 
     conditions = []
     if include_general:
@@ -258,11 +278,11 @@ async def review_queue(current_user: User = Depends(get_current_user), db: Async
 
 
 @router.get("/export")
-async def export_expenses(format: str = Query(default="json"), month: str | None = Query(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def export_expenses(export_format: str = Query(default="json"), month: str | None = Query(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     export_payload = await build_expense_export_payload(db, user_id=current_user.id, month=month)
     items = export_payload["items"]
 
-    if format == "csv":
+    if export_format == "csv":
         output = io.StringIO()
         fieldnames = ["id", "expense_date", "merchant", "description", "amount", "signed_amount", "transaction_type", "currency", "cadence", "cadence_override", "is_major_purchase", "category_name", "source", "needs_review", "is_recurring", "receipt_filename", "notes"]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
@@ -358,7 +378,7 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
         if receipt.extraction_status != "finalized":
             receipt.extraction_status = "finalized"
             receipt.needs_review = existing_expense.needs_review
-            receipt.finalized_at = receipt.finalized_at or datetime.now(timezone.utc)
+            receipt.finalized_at = receipt.finalized_at or datetime.now(UTC)
             await db.flush()
         return serialize_expense(existing_expense, category_name=existing_category_name, receipt_filename=receipt.original_filename)
 
@@ -423,7 +443,7 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
     }
     receipt.needs_review = expense.needs_review
     receipt.extraction_status = "finalized"
-    receipt.finalized_at = datetime.now(timezone.utc)
+    receipt.finalized_at = datetime.now(UTC)
     await db.flush()
     await replace_expense_items(db, expense, body.items if body.items is not None else (receipt.preview_data or {}).get("items", []), category_name=category.name if category else body.category_name)
     await recompute_recurring_expenses(db, current_user.id)
@@ -525,7 +545,7 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
     has_pending = any((candidate or {}).get("status") != "finalized" for candidate in entries)
     receipt.extraction_status = "review" if has_pending else "finalized"
     receipt.needs_review = has_pending or expense.needs_review
-    receipt.finalized_at = None if has_pending else datetime.now(timezone.utc)
+    receipt.finalized_at = None if has_pending else datetime.now(UTC)
     await db.flush()
     await db.refresh(receipt)
     await recompute_recurring_expenses(db, current_user.id)

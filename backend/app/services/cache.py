@@ -35,7 +35,7 @@ async def init_redis() -> None:
     """
     global _redis_client
     try:
-        import redis.asyncio as aioredis  # noqa: PLC0415
+        import redis.asyncio as aioredis
 
         _redis_client = aioredis.Redis.from_url(
             settings.redis_url,

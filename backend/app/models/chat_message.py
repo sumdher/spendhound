@@ -32,5 +32,5 @@ class ChatMessage(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    user: Mapped["User"] = relationship("User", back_populates="chat_messages")
-    session: Mapped["ChatSession"] = relationship("ChatSession", back_populates="messages")
+    user: Mapped[User] = relationship("User", back_populates="chat_messages")
+    session: Mapped[ChatSession] = relationship("ChatSession", back_populates="messages")

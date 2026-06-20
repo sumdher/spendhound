@@ -3,7 +3,7 @@
 import asyncio
 import calendar
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -15,17 +15,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin import create_action_token, is_admin_email
 from app.config import settings
-from app.middleware.bot_detect import block_bots
-from app.middleware.rate_limit import limiter
 from app.database import get_db
 from app.middleware.auth import create_access_token, get_any_user, get_current_user
+from app.middleware.bot_detect import block_bots
+from app.middleware.rate_limit import limiter
 from app.models.expense import Expense
 from app.models.user import User
-from app.schemas.user import LLMTestRequest, LLMTestResponse, UserLLMSettingsUpdateRequest, UserReceiptPromptUpdateRequest, UserResponse, UserUpdateRequest
+from app.schemas.user import (
+    LLMTestRequest,
+    LLMTestResponse,
+    UserLLMSettingsUpdateRequest,
+    UserReceiptPromptUpdateRequest,
+    UserResponse,
+    UserUpdateRequest,
+)
 from app.services.email import send_approval_request_email
 from app.services.llm.encryption import encrypt_api_key
-from app.services.url_validation import validate_llm_base_url
 from app.services.spendhound import ensure_default_categories
+from app.services.url_validation import validate_llm_base_url
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -124,7 +131,7 @@ async def demo_login(request: Request, db: AsyncSession = Depends(get_db)) -> Au
     Seeds the full demo dataset on first call.  Subsequent calls are instant.
     Rate-limited to the same auth limit to prevent abuse.
     """
-    from app.services.demo_seed import DEMO_USER_EMAIL, seed_demo_data  # noqa: PLC0415
+    from app.services.demo_seed import seed_demo_data
 
     user = await seed_demo_data(db)
 
@@ -193,11 +200,11 @@ async def update_llm_settings(
     elif body.llm_api_key:
         current_user.llm_api_key = encrypt_api_key(body.llm_api_key)
 
-    current_user.updated_at = datetime.now(timezone.utc)
+    current_user.updated_at = datetime.now(UTC)
     db.add(current_user)
     await db.commit()
     await db.refresh(current_user)
-    from app.services.cache import invalidate_llm_models_cache  # noqa: PLC0415
+    from app.services.cache import invalidate_llm_models_cache
     await invalidate_llm_models_cache(current_user.id)
     return serialize_user_profile(current_user)
 

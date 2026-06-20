@@ -27,5 +27,5 @@ class PartnerRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    requester: Mapped["User"] = relationship("User", foreign_keys=[requester_id], back_populates="sent_partner_requests")
-    recipient: Mapped["User | None"] = relationship("User", foreign_keys=[recipient_id], back_populates="received_partner_requests")
+    requester: Mapped[User] = relationship("User", foreign_keys=[requester_id], back_populates="sent_partner_requests")
+    recipient: Mapped[User | None] = relationship("User", foreign_keys=[recipient_id], back_populates="received_partner_requests")

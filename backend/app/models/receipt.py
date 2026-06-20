@@ -34,5 +34,5 @@ class Receipt(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    user: Mapped["User"] = relationship("User", back_populates="receipts")
-    expenses: Mapped[list["Expense"]] = relationship("Expense", back_populates="receipt")
+    user: Mapped[User] = relationship("User", back_populates="receipts")
+    expenses: Mapped[list[Expense]] = relationship("Expense", back_populates="receipt")

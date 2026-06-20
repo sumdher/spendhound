@@ -13,9 +13,6 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-import pytest_asyncio
-
 # Async tests are auto-detected by pytest-asyncio (asyncio_mode=auto in pyproject.toml).
 # No module-level pytestmark needed — sync tests here would get a spurious asyncio warning.
 
@@ -55,11 +52,11 @@ def test_reset_called_before_each_task():
     # Compare line numbers so docstring mentions of 'asyncio.run()' don't confuse us.
     lines = inspect.getsource(receipt_tasks).splitlines()
     reset_line = next(
-        (i for i, l in enumerate(lines) if "_reset_ollama_semaphore()" in l and not l.strip().startswith("#")),
+        (i for i, line in enumerate(lines) if "_reset_ollama_semaphore()" in line and not line.strip().startswith("#")),
         None,
     )
     run_line = next(
-        (i for i, l in enumerate(lines) if "asyncio.run(" in l and not l.strip().startswith(("\"\"\"", "#", "``"))),
+        (i for i, line in enumerate(lines) if "asyncio.run(" in line and not line.strip().startswith(("\"\"\"", "#", "``"))),
         None,
     )
     assert reset_line is not None, "_reset_ollama_semaphore() call not found in receipt_tasks"
@@ -98,7 +95,6 @@ def test_sequential_tasks_each_get_fresh_semaphore():
     older Python, silent misuse in 3.12+). With the reset, L2 creates a fresh
     Semaphore bound to itself.
     """
-    from app.services.llm import ollama as _ollama
     from app.services.llm.ollama import _get_semaphore
     from app.tasks.receipt_tasks import _reset_ollama_semaphore
 

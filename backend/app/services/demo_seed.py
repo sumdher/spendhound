@@ -10,7 +10,6 @@ canonical seed rows.  Categories and partner links are seeded once and left alon
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import calendar as _cal
 import uuid
@@ -242,7 +241,7 @@ def _e(
 def _build_expenses(ledger_manor: uuid.UUID, ledger_fox: uuid.UUID, ledger_jl: uuid.UUID) -> list[dict]:
     return [
 
-        # ── Month −2 (two months ago) ────────────────────────────────────────────
+        # ── Month -2 (two months ago) ────────────────────────────────────────────
 
         # Big Q1 income
         _e("inc-m2-01", "Wayne Enterprises", "280000.00", "Salary", _day(2, 1), tx="credit",
@@ -318,22 +317,22 @@ def _build_expenses(ledger_manor: uuid.UUID, ledger_fox: uuid.UUID, ledger_jl: u
         _e("m2-19", "WayneTech Manufacturing", "1600.00", "Crime Fighting", _day(2, 30),
            description="Batarang replenishment pack 200 units — monthly supply gone in 3 weeks (Gotham is busy)"),
 
-        # Wayne Manor Ops ledger — month −2
+        # Wayne Manor Ops ledger — month -2
         _e("l-manor-m2-01", "Whole Foods Market Gotham", "1800.00", "Groceries", _day(2, 8),
            ledger_id=ledger_manor, description="Wayne Manor monthly provisions — Alfred's bulk order"),
         _e("l-manor-m2-02", "Gotham Green Grounds Ltd.", "850.00", "Other", _day(2, 15),
            ledger_id=ledger_manor, description="Manor grounds bi-monthly maintenance & topiary"),
 
-        # Fox-Wayne Labs ledger — month −2
+        # Fox-Wayne Labs ledger — month -2
         _e("l-fox-m2-01", "Gotham Advanced Composites Inc.", "12400.00", "WayneTech R&D", _day(2, 22),
            ledger_id=ledger_fox, is_major=True,
            description="Fox-Wayne Labs Q2 raw materials — carbon fiber, titanium alloy sheets"),
 
-        # JL Petty Cash — month −2
+        # JL Petty Cash — month -2
         _e("l-jl-m2-01", "Gotham Roast Coffee", "145.00", "Dining", _day(2, 29),
            ledger_id=ledger_jl, description="JL HQ monthly coffee & snack fund. Aquaman drinks an unreasonable amount."),
 
-        # ── Month −1 (last month) ────────────────────────────────────────────────
+        # ── Month -1 (last month) ────────────────────────────────────────────────
 
         _e("inc-m1-01", "Wayne Enterprises", "95000.00", "Salary", _day(1, 1), tx="credit",
            description="Monthly executive compensation — board-approved"),
@@ -415,18 +414,18 @@ def _build_expenses(ledger_manor: uuid.UUID, ledger_fox: uuid.UUID, ledger_jl: u
            is_major=True,
            description="Gotham surveillance drone fleet x8 — silent rotors, 48h battery, Lucius-certified"),
 
-        # Wayne Manor Ops ledger — month −1
+        # Wayne Manor Ops ledger — month -1
         _e("l-manor-m1-01", "Whole Foods Market Gotham", "1920.00", "Groceries", _day(1, 6),
            ledger_id=ledger_manor, description="Wayne Manor monthly provisions"),
         _e("l-manor-m1-02", "CaveClean Industrial Services", "440.00", "Groceries", _day(1, 28),
            ledger_id=ledger_manor, description="Batcave deep-clean supplies — industrial-grade, bat-safe certified"),
 
-        # Fox-Wayne Labs ledger — month −1
+        # Fox-Wayne Labs ledger — month -1
         _e("l-fox-m1-01", "CognitionTech Computing", "8900.00", "WayneTech R&D", _day(1, 16),
            ledger_id=ledger_fox, is_major=True,
            description="Batcomputer RAM expansion — Lucius Fox spec, 2PB upgrade"),
 
-        # JL Petty Cash — month −1
+        # JL Petty Cash — month -1
         _e("l-jl-m1-01", "Gotham Pizza Palace", "280.00", "Dining", _day(1, 20),
            ledger_id=ledger_jl,
            description="JL meeting dinner — 4 large pizzas. Aquaman ate 6 slices. Arthur pays next time."),

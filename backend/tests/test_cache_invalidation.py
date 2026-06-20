@@ -15,7 +15,7 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest_asyncio.fixture()
-async def fake_redis(client):  # noqa: ARG001 — client triggers lifespan so _redis_client is set
+async def fake_redis(client):
     """Replace the module-level Redis client with an in-process fake for the test."""
     fakeredis = pytest.importorskip("fakeredis", reason="fakeredis not installed")
     r = fakeredis.FakeAsyncRedis(decode_responses=True)

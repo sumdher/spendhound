@@ -8,7 +8,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import delete, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin import is_admin_email
@@ -18,7 +18,14 @@ from app.models.category import Category, ItemKeywordRule, MerchantRule
 from app.models.item_embedding import ItemEmbedding
 from app.models.user import User
 from app.services.item_rag import bulk_upsert_embeddings
-from app.services.spendhound import TRANSACTION_TYPE_DEBIT, ensure_default_categories, normalize_transaction_type, serialize_category, serialize_item_rule, serialize_rule
+from app.services.spendhound import (
+    TRANSACTION_TYPE_DEBIT,
+    ensure_default_categories,
+    normalize_transaction_type,
+    serialize_category,
+    serialize_item_rule,
+    serialize_rule,
+)
 
 router = APIRouter()
 

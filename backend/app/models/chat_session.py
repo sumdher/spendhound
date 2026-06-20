@@ -28,8 +28,8 @@ class ChatSession(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    user: Mapped["User"] = relationship("User", back_populates="chat_sessions")
-    messages: Mapped[list["ChatMessage"]] = relationship(
+    user: Mapped[User] = relationship("User", back_populates="chat_sessions")
+    messages: Mapped[list[ChatMessage]] = relationship(
         "ChatMessage",
         back_populates="session",
         cascade="all, delete-orphan",

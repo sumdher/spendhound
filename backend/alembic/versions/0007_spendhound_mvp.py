@@ -7,10 +7,10 @@ Create Date: 2026-04-12
 
 import logging
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
+from alembic import op
 
 logger = logging.getLogger("alembic.runtime.migration")
 

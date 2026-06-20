@@ -37,4 +37,4 @@ class ItemEmbedding(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    user: Mapped["User | None"] = relationship("User", back_populates="item_embeddings")
+    user: Mapped[User | None] = relationship("User", back_populates="item_embeddings")

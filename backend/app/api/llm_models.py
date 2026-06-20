@@ -11,7 +11,6 @@ Providers that expose pricing: openrouter, together.
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, Query
@@ -41,10 +40,10 @@ OPENAI_VISION_SUBSTRINGS = ("gpt-4o", "gpt-4-turbo", "o1", "o3", "o4")
 
 
 def _get_effective_api_key(
-    query_api_key: Optional[str],
+    query_api_key: str | None,
     user: User,
     provider: str,
-) -> Optional[str]:
+) -> str | None:
     """
     Returns the API key to use for the model listing request.
     Priority: query param > user's stored (decrypted) DB key > admin .env fallback.
@@ -54,7 +53,7 @@ def _get_effective_api_key(
 
     if user.llm_api_key:
         try:
-            from app.services.llm.encryption import decrypt_api_key  # noqa: PLC0415
+            from app.services.llm.encryption import decrypt_api_key
             return decrypt_api_key(user.llm_api_key)
         except Exception:
             pass
@@ -79,7 +78,7 @@ def _get_effective_api_key(
 # Provider helpers
 # ---------------------------------------------------------------------------
 
-async def _list_openai(api_key: str) -> List[LLMModelInfo]:
+async def _list_openai(api_key: str) -> list[LLMModelInfo]:
     """Fetch and filter models from the OpenAI API."""
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -93,7 +92,7 @@ async def _list_openai(api_key: str) -> List[LLMModelInfo]:
         logger.warning("openai model listing failed: %s", exc)
         return []
 
-    models: List[LLMModelInfo] = []
+    models: list[LLMModelInfo] = []
     for m in data.get("data", []):
         model_id: str = m.get("id", "")
         if not model_id:
@@ -116,7 +115,7 @@ async def _list_openai(api_key: str) -> List[LLMModelInfo]:
     return sorted(models, key=lambda m: m.id)[:_MAX_MODELS]
 
 
-async def _list_anthropic(api_key: str) -> List[LLMModelInfo]:
+async def _list_anthropic(api_key: str) -> list[LLMModelInfo]:
     """Fetch models from the Anthropic API."""
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -133,7 +132,7 @@ async def _list_anthropic(api_key: str) -> List[LLMModelInfo]:
         logger.warning("anthropic model listing failed: %s", exc)
         return []
 
-    models: List[LLMModelInfo] = []
+    models: list[LLMModelInfo] = []
     for m in data.get("data", []):
         if m.get("type") != "model":
             continue
@@ -147,7 +146,7 @@ async def _list_anthropic(api_key: str) -> List[LLMModelInfo]:
     return sorted(models, key=lambda m: m.id)[:_MAX_MODELS]
 
 
-async def _list_openrouter() -> List[LLMModelInfo]:
+async def _list_openrouter() -> list[LLMModelInfo]:
     """Fetch models from the OpenRouter public API (no auth required)."""
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -158,7 +157,7 @@ async def _list_openrouter() -> List[LLMModelInfo]:
         logger.warning("openrouter model listing failed: %s", exc)
         return []
 
-    models: List[LLMModelInfo] = []
+    models: list[LLMModelInfo] = []
     for m in data.get("data", []):
         model_id: str = m.get("id", "")
         if not model_id:
@@ -178,7 +177,7 @@ async def _list_openrouter() -> List[LLMModelInfo]:
 
         # Pricing
         pricing_data = m.get("pricing") or {}
-        pricing: Optional[LLMModelPricing] = None
+        pricing: LLMModelPricing | None = None
         try:
             prompt_cost = pricing_data.get("prompt")
             completion_cost = pricing_data.get("completion")
@@ -204,7 +203,7 @@ async def _list_openrouter() -> List[LLMModelInfo]:
     return sorted(models, key=lambda m: m.id)[:_MAX_MODELS]
 
 
-async def _list_groq(api_key: str) -> List[LLMModelInfo]:
+async def _list_groq(api_key: str) -> list[LLMModelInfo]:
     """Fetch models from the Groq OpenAI-compatible API."""
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -218,7 +217,7 @@ async def _list_groq(api_key: str) -> List[LLMModelInfo]:
         logger.warning("groq model listing failed: %s", exc)
         return []
 
-    models: List[LLMModelInfo] = []
+    models: list[LLMModelInfo] = []
     for m in data.get("data", []):
         model_id: str = m.get("id", "")
         if not model_id:
@@ -233,9 +232,9 @@ async def _list_groq(api_key: str) -> List[LLMModelInfo]:
     return sorted(models, key=lambda m: m.id)[:_MAX_MODELS]
 
 
-async def _list_together(api_key: str) -> List[LLMModelInfo]:
+async def _list_together(api_key: str) -> list[LLMModelInfo]:
     """Fetch models from the Together AI API."""
-    TOGETHER_CHAT_TYPES = {"chat", "language", "code"}
+    together_chat_types = {"chat", "language", "code"}
 
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -252,14 +251,14 @@ async def _list_together(api_key: str) -> List[LLMModelInfo]:
     # Together AI returns a top-level array (not wrapped in "data")
     raw_list = data if isinstance(data, list) else data.get("data", [])
 
-    models: List[LLMModelInfo] = []
+    models: list[LLMModelInfo] = []
     for m in raw_list:
         model_id: str = m.get("id", "")
         if not model_id:
             continue
 
         model_type: str = (m.get("type") or "").lower()
-        if model_type not in TOGETHER_CHAT_TYPES:
+        if model_type not in together_chat_types:
             continue
 
         display_name: str = m.get("display_name") or m.get("name") or model_id
@@ -270,7 +269,7 @@ async def _list_together(api_key: str) -> List[LLMModelInfo]:
             ctx = (m.get("config") or {}).get("max_tokens")
 
         # Pricing
-        pricing: Optional[LLMModelPricing] = None
+        pricing: LLMModelPricing | None = None
         pricing_data = m.get("pricing") or {}
         try:
             in_cost = pricing_data.get("input")
@@ -298,7 +297,7 @@ async def _list_together(api_key: str) -> List[LLMModelInfo]:
     return sorted(models, key=lambda m: m.id)[:_MAX_MODELS]
 
 
-async def _list_mistral(api_key: str) -> List[LLMModelInfo]:
+async def _list_mistral(api_key: str) -> list[LLMModelInfo]:
     """Fetch models from the Mistral AI API."""
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -312,7 +311,7 @@ async def _list_mistral(api_key: str) -> List[LLMModelInfo]:
         logger.warning("mistral model listing failed: %s", exc)
         return []
 
-    models: List[LLMModelInfo] = []
+    models: list[LLMModelInfo] = []
     for m in data.get("data", []):
         model_id: str = m.get("id", "")
         if not model_id:
@@ -334,7 +333,7 @@ async def _list_mistral(api_key: str) -> List[LLMModelInfo]:
     return sorted(models, key=lambda m: m.id)[:_MAX_MODELS]
 
 
-async def _list_nebius(api_key: str, base_url: Optional[str]) -> List[LLMModelInfo]:
+async def _list_nebius(api_key: str, base_url: str | None) -> list[LLMModelInfo]:
     """Fetch models from the Nebius (OpenAI-compatible) API."""
     nebius_base = (
         base_url
@@ -354,7 +353,7 @@ async def _list_nebius(api_key: str, base_url: Optional[str]) -> List[LLMModelIn
         logger.warning("nebius model listing failed: %s", exc)
         return []
 
-    models: List[LLMModelInfo] = []
+    models: list[LLMModelInfo] = []
     for m in data.get("data", []):
         model_id: str = m.get("id", "")
         if not model_id:
@@ -366,9 +365,9 @@ async def _list_nebius(api_key: str, base_url: Optional[str]) -> List[LLMModelIn
     return sorted(models, key=lambda m: m.id)[:_MAX_MODELS]
 
 
-async def _list_ollama(base_url: Optional[str]) -> List[LLMModelInfo]:
+async def _list_ollama(base_url: str | None) -> list[LLMModelInfo]:
     """List locally running Ollama models (reuses ollama.py logic)."""
-    from app.api.ollama import EXCLUDED_MODELS  # noqa: PLC0415
+    from app.api.ollama import EXCLUDED_MODELS
 
     ollama_base = (base_url or settings.ollama_url or "http://localhost:11434").rstrip("/")
 
@@ -381,7 +380,7 @@ async def _list_ollama(base_url: Optional[str]) -> List[LLMModelInfo]:
         logger.warning("ollama model listing failed: %s", exc)
         return []
 
-    models: List[LLMModelInfo] = []
+    models: list[LLMModelInfo] = []
     for m in data.get("models", []):
         name: str = m.get("name", "")
         if not name:
@@ -399,12 +398,12 @@ async def _list_ollama(base_url: Optional[str]) -> List[LLMModelInfo]:
 # Route
 # ---------------------------------------------------------------------------
 
-@router.get("/models", response_model=List[LLMModelInfo])
+@router.get("/models", response_model=list[LLMModelInfo])
 async def list_llm_models(
     provider: str = Query(..., description="LLM provider name"),
-    api_key: Optional[str] = Query(default=None, description="Plaintext API key for this one-time fetch (never stored)"),
+    api_key: str | None = Query(default=None, description="Plaintext API key for this one-time fetch (never stored)"),
     current_user: User = Depends(get_current_user),
-) -> List[LLMModelInfo]:
+) -> list[LLMModelInfo]:
     """
     Return available chat/vision models for the given provider.
 
@@ -412,7 +411,7 @@ async def list_llm_models(
     Cache is bypassed when an explicit api_key is provided (one-time test call, not the stored key).
     Providers that include pricing data: openrouter, together.
     """
-    from app.services.cache import get_cached_llm_models, set_cached_llm_models  # noqa: PLC0415
+    from app.services.cache import get_cached_llm_models, set_cached_llm_models
 
     provider_lower = provider.strip().lower()
     # Don't cache one-time key fetches — the caller is testing a key they haven't saved yet.

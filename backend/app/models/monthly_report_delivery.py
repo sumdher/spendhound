@@ -36,4 +36,4 @@ class MonthlyReportDelivery(Base):
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship("User", back_populates="monthly_report_deliveries")
+    user: Mapped[User] = relationship("User", back_populates="monthly_report_deliveries")

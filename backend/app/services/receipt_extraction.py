@@ -11,19 +11,27 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+import pdfplumber
+import structlog
 from fastapi import HTTPException, UploadFile
 from pydantic import BaseModel, Field
-import pdfplumber
 from pypdf import PdfReader
-import structlog
 from sqlalchemy import select
 
 from app.config import settings
 from app.models.user import User
 from app.services.llm.base import ImageInput, LLMConfig, Message
 from app.services.llm.factory import get_llm_provider, resolve_user_llm_config
-from app.services.spendhound import TRANSACTION_TYPE_CREDIT, TRANSACTION_TYPE_DEBIT, find_matching_category, get_category_by_name, normalize_grocery_description, normalize_match_text, normalize_transaction_type, resolve_category
-
+from app.services.spendhound import (
+    TRANSACTION_TYPE_CREDIT,
+    TRANSACTION_TYPE_DEBIT,
+    find_matching_category,
+    get_category_by_name,
+    normalize_grocery_description,
+    normalize_match_text,
+    normalize_transaction_type,
+    resolve_category,
+)
 
 logger = structlog.get_logger(__name__)
 
