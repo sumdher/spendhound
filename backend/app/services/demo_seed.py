@@ -651,7 +651,7 @@ _PETER_RG = {
 def _build_peter_expenses(ledger_lab: uuid.UUID, ledger_avengers: uuid.UUID, ledger_may: uuid.UUID) -> list[dict]:
     return [
 
-        # ── Month −2 ─────────────────────────────────────────────────────────────
+        # ── Month -2 ─────────────────────────────────────────────────────────────
 
         _e("p-inc-m2-01", "Daily Bugle Photography", "340.00", "Salary", _day(2, 1), tx="credit",
            description="J. Jonah Jameson's freelance check — docked €160 for 'Spider-Man photos not menacing enough'"),
@@ -723,22 +723,22 @@ def _build_peter_expenses(ledger_lab: uuid.UUID, ledger_avengers: uuid.UUID, led
         _e("p-m2-medical-02", "Queens Medical Center", "140.00", "Health", _day(2, 28),
            description="Rib follow-up. Doctor notes I'm healing 'unusually fast'. I said: good metabolism. He: noted it."),
 
-        # Parker Lab ledger — month −2
+        # Parker Lab ledger — month -2
         _e("p-l-lab-m2-01", "Carolina Biological Supply", "145.00", "Web Fluid R&D", _day(2, 11),
            ledger_id=ledger_lab,
            description="Lab supplies (Ned's order) — listed as 'ESU adhesion research project'. That's not what we call it."),
 
-        # Avengers — month −2
+        # Avengers — month -2
         _e("p-l-avg-m2-01", "Avengers Compound Cafeteria", "8.50", "Dining", _day(2, 19),
            ledger_id=ledger_avengers,
            description="Lunch at the compound — I was invited. This is not a drill. Turkey sandwich. Very good."),
 
-        # Aunt May ledger — month −2
+        # Aunt May ledger — month -2
         _e("p-l-may-m2-01", "Walgreens Queens", "34.00", "Health", _day(2, 17),
            ledger_id=ledger_may,
            description="Aunt May's prescriptions + vitamins — she doesn't ask where I find the money. I appreciate that."),
 
-        # ── Month −1 ─────────────────────────────────────────────────────────────
+        # ── Month -1 ─────────────────────────────────────────────────────────────
 
         _e("p-inc-m1-01", "Daily Bugle Photography", "480.00", "Salary", _day(1, 1), tx="credit",
            description="Best Bugle check in months — Jameson said 'barely adequate'. Framed it on the wall."),
@@ -808,17 +808,17 @@ def _build_peter_expenses(ledger_lab: uuid.UUID, ledger_avengers: uuid.UUID, led
            is_major=True,
            description="Monthly tuition installment — scholarship covers 70%. The other 30% covers the anxiety too."),
 
-        # Parker Lab ledger — month −1
+        # Parker Lab ledger — month -1
         _e("p-l-lab-m1-01", "Sigma-Aldrich", "220.00", "Web Fluid R&D", _day(1, 13),
            ledger_id=ledger_lab, is_major=True,
            description="Polymer synthesis kit — Ned found a deal. The deal was: experimental and possibly not legal in 3 states."),
 
-        # Avengers — month −1
+        # Avengers — month -1
         _e("p-l-avg-m1-01", "Avengers Compound Gift Shop", "24.00", "Shopping", _day(1, 15),
            ledger_id=ledger_avengers,
            description="Bought Aunt May a 'Stark Industries' mug from the gift shop. Did not tell her where I was."),
 
-        # Aunt May ledger — month −1
+        # Aunt May ledger — month -1
         _e("p-l-may-m1-01", "Key Food Supermarkets", "78.00", "Groceries", _day(1, 20),
            ledger_id=ledger_may,
            description="May's weekly shop — she cooks for me every Sunday. Roast chicken. This is the least I can do."),
