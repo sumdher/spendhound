@@ -100,13 +100,35 @@ _LEDGER_FOX_ID = _did("ledger:fox-wayne-labs")
 _LEDGER_JL_ID = _did("ledger:jl-petty-cash")
 
 # ---------------------------------------------------------------------------
+# Peter Parker (Spider-Man) demo account
+# ---------------------------------------------------------------------------
+
+PETER_PARKER_EMAIL = "peter.parker@dailybugle.com"
+
+PETER_PARKER_ID = _did(PETER_PARKER_EMAIL)
+MJ_ID = _did("mj.watson@empire-state.edu")
+NED_ID = _did("ned.leeds@empire-state.edu")
+AUNT_MAY_ID = _did("may.parker@queens.ny.us")
+HAPPY_ID = _did("happy.hogan@starkindustries.com")
+
+_LEDGER_PARKER_LAB_ID = _did("ledger:parker-lab-with-ned")
+_LEDGER_AVENGERS_ID = _did("ledger:avengers-petty-cash-peter")
+_LEDGER_MAY_ID = _did("ledger:may-parker-household")
+
+# ---------------------------------------------------------------------------
 # Custom category names (beyond the 17 defaults)
 # ---------------------------------------------------------------------------
 
-_CUSTOM_CATS = [
+_BRUCE_CUSTOM_CATS = [
     ("Crime Fighting", "#7c3aed", "shield", "debit"),
     ("Wayne Foundation", "#2563eb", "heart-handshake", "debit"),
     ("WayneTech R&D", "#ea580c", "cpu", "debit"),
+]
+
+_PETER_CUSTOM_CATS = [
+    ("Crime Fighting", "#dc2626", "shield", "debit"),
+    ("Web Fluid R&D", "#1d4ed8", "cpu", "debit"),
+    ("Parker Industries", "#7c3aed", "camera", "debit"),
 ]
 
 
@@ -186,6 +208,48 @@ _M0_GROCERY_ITEMS = [
     _item("Parmigiano Reggiano DOP 250g", 1, 7.90, 7.90, "Dairy & Eggs"),
     _item("Sparkling mineral water 500ml x24", 24, 0.60, 14.40, "Beverages"),
 ]  # ~€296
+
+# Peter Parker grocery items — comically cheap vs Bruce's
+_M2_PETER_GROCERY_ITEMS = [
+    _item("Maruchan instant ramen x24 pack", 24, 0.35, 8.40, "Pantry"),
+    _item("Wonder Bread classic white x2", 2, 2.20, 4.40, "Bakery"),
+    _item("Jif creamy peanut butter 40oz", 1, 5.49, 5.49, "Condiments & Spices"),
+    _item("Smucker's strawberry jam", 1, 3.29, 3.29, "Condiments & Spices"),
+    _item("Whole milk 1 gallon", 1, 3.80, 3.80, "Dairy & Eggs"),
+    _item("Large eggs x12", 1, 2.89, 2.89, "Dairy & Eggs"),
+    _item("Gatorade Blue Bolt x6 (electrolyte replenishment — not labeled as such)", 6, 1.29, 7.74, "Beverages"),
+    _item("Clif Bar assorted x8 (field rations, again not labeled)", 8, 1.25, 10.00, "Snacks"),
+    _item("Apples x5 (Aunt May made me)", 5, 0.50, 2.50, "Vegetables"),
+    _item("Instant oatmeal packets x8", 8, 0.45, 3.60, "Breakfast & Cereal"),
+]  # ~€52
+
+_M1_PETER_GROCERY_ITEMS = [
+    _item("Maruchan instant ramen x20", 20, 0.35, 7.00, "Pantry"),
+    _item("Generic white bread x2 loaves", 2, 1.89, 3.78, "Bakery"),
+    _item("Jif peanut butter 28oz", 1, 4.29, 4.29, "Condiments & Spices"),
+    _item("Skippy grape jelly", 1, 2.99, 2.99, "Condiments & Spices"),
+    _item("Lactaid milk (Ned: 'be good to yourself')", 1, 4.49, 4.49, "Dairy & Eggs"),
+    _item("Large eggs x12", 1, 2.89, 2.89, "Dairy & Eggs"),
+    _item("Minute Rice x2 boxes", 2, 2.49, 4.98, "Pantry"),
+    _item("Campbell's soup cans x6", 6, 1.25, 7.50, "Pantry"),
+    _item("Gatorade Glacier x4", 4, 1.29, 5.16, "Beverages"),
+    _item("KIND bars assorted x8", 8, 1.49, 11.92, "Snacks"),
+    _item("Bananas x6 (Aunt May would be proud)", 6, 0.30, 1.80, "Vegetables"),
+]  # ~€57 (Stark stipend month)
+
+_M0_PETER_GROCERY_ITEMS = [
+    _item("Maruchan instant ramen x20", 20, 0.35, 7.00, "Pantry"),
+    _item("Wonder Bread x1 loaf", 1, 2.20, 2.20, "Bakery"),
+    _item("Jif peanut butter 16oz (small — cash flow issue)", 1, 2.99, 2.99, "Condiments & Spices"),
+    _item("Generic grape jelly", 1, 1.89, 1.89, "Condiments & Spices"),
+    _item("Whole milk half gallon", 1, 2.29, 2.29, "Dairy & Eggs"),
+    _item("Medium eggs x12 (cheaper than large)", 1, 2.49, 2.49, "Dairy & Eggs"),
+    _item("Gatorade x6 (web-swinging is dehydrating)", 6, 1.29, 7.74, "Beverages"),
+    _item("Clif Bar x6", 6, 1.25, 7.50, "Snacks"),
+    _item("Instant oatmeal x8 packets", 8, 0.45, 3.60, "Breakfast & Cereal"),
+    _item("Apples x4 (weekly Aunt May quota)", 4, 0.50, 2.00, "Vegetables"),
+    _item("Canned tuna x4 (protein, desperate times)", 4, 0.99, 3.96, "Fish & Seafood"),
+]  # ~€44
 
 
 # ---------------------------------------------------------------------------
@@ -573,6 +637,326 @@ def _build_budgets(cat_by_name: dict[str, uuid.UUID]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Peter Parker seed data
+# ---------------------------------------------------------------------------
+
+_PETER_RG = {
+    "therapy": "peter:dr.madison.grief.therapy:EUR:debit:monthly:80.00",
+    "rent": "peter:queens.apartment.rent:EUR:debit:monthly:850.00",
+    "web_fluid": "peter:oscorp.web.fluid.polymer:EUR:debit:monthly:180.00",
+    "metro": "peter:mta.monthly.card:EUR:debit:monthly:33.00",
+}
+
+
+def _build_peter_expenses(ledger_lab: uuid.UUID, ledger_avengers: uuid.UUID, ledger_may: uuid.UUID) -> list[dict]:
+    return [
+
+        # ── Month -2 ─────────────────────────────────────────────────────────────
+
+        _e("p-inc-m2-01", "Daily Bugle Photography", "340.00", "Salary", _day(2, 1), tx="credit",
+           description="J. Jonah Jameson's freelance check — docked €160 for 'Spider-Man photos not menacing enough'"),
+
+        _e("p-inc-m2-02", "Empire State University", "280.00", "Salary", _day(2, 5), tx="credit",
+           description="Chemistry TA stipend — grading papers on polymers I invented two years ago"),
+
+        _e("p-m2-rent", "Queens Landlord LLC", "850.00", "Housing", _day(2, 2),
+           cadence="monthly", rg=_PETER_RG["rent"],
+           description="Monthly rent — Mrs Chen gave me an extension. She said 'you're a good boy, Peter'. I said nothing."),
+
+        _e("p-m2-webfluid", "Oscorp Industrial Chemicals", "180.00", "Web Fluid R&D", _day(2, 3),
+           cadence="monthly", rg=_PETER_RG["web_fluid"],
+           description="Web fluid base polymer — monthly supply. Lab notebook reason: 'advanced thesis research on adhesives'"),
+
+        _e("p-m2-therapy-01", "Dr. Marla Madison, LCSW", "80.00", "Health", _day(2, 4),
+           cadence="monthly", rg=_PETER_RG["therapy"],
+           description="Session 1: we started with Uncle Ben. We always start with Uncle Ben."),
+
+        _e("p-m2-medical-01", "Queens Medical Center", "420.00", "Health", _day(2, 6),
+           description="Rib fractures x2, dislocated shoulder — cause of injury entered as 'bicycle accident'. 4th visit this quarter."),
+
+        _e("p-m2-suit-01", "Chinatown Fabric District", "34.00", "Crime Fighting", _day(2, 7),
+           description="Red/blue spandex 3m + UV-resistant dye — told the cashier it was for a 'theatre project'"),
+
+        _e("p-m2-ramen", "H-Mart Queens", "8.50", "Dining", _day(2, 8),
+           description="Emergency ramen run — 3rd time this week. Ned says I should learn to cook. Ned is right."),
+
+        _e("p-m2-camera", "B&H Photo Video NYC", "280.00", "Shopping", _day(2, 10),
+           is_major=True,
+           description="Nikon zoom lens — previous one destroyed in the Vulture incident. Expensed to Bugle as 'equipment wear'"),
+
+        _e("p-m2-therapy-02", "Dr. Marla Madison, LCSW", "80.00", "Health", _day(2, 12),
+           cadence="monthly", rg=_PETER_RG["therapy"],
+           description="Session 2: still Uncle Ben. Briefly touched on Gwen. Dr. Madison suggested journaling. Will not journal."),
+
+        _e("p-m2-cartridge", "Oscorp Advanced Materials", "320.00", "Web Fluid R&D", _day(2, 14),
+           is_major=True,
+           description="High-tensile web cartridges x12 — monthly supply. Told Ned they're '3D printing filament'. He knows."),
+
+        _e("p-m2-chem-01", "Staten Island Chemical Co.", "95.00", "Web Fluid R&D", _day(2, 15),
+           description="Tensile modifier compound — web strength upgrade. MJ noticed the chemicals. I said 'for school'."),
+
+        _e("p-m2-backpack-01", "Target Queens", "28.00", "Shopping", _day(2, 16),
+           description="Backpack #4 this year — previous ones: left on rooftop, caught fire, dissolved in acid (don't ask)"),
+
+        _e("p-m2-therapy-03", "Dr. Marla Madison, LCSW", "80.00", "Health", _day(2, 18),
+           cadence="monthly", rg=_PETER_RG["therapy"],
+           description="Session 3: lighter session! We discussed compartmentalization. Very relevant to my situation."),
+
+        _e("p-m2-book", "ESU Campus Bookstore", "74.00", "Shopping", _day(2, 19),
+           description="Advanced Organic Chemistry vol. 4 — for class AND for other reasons I will not specify here"),
+
+        _e("p-m2-mj-01", "Delmar's Deli-Grocery", "22.00", "Dining", _day(2, 20),
+           description="Dinner with MJ — she had the salmon; I had the #3 combo. She tried to pay. I declined. Error."),
+
+        _e("p-m2-grocery", "Walmart Supercenter Queens", "52.00", "Groceries", _day(2, 22),
+           description="Monthly provisions — ramen x24, PB&J supplies. Aunt May would not approve of this diet.",
+           items=_M2_PETER_GROCERY_ITEMS),
+
+        _e("p-m2-therapy-04", "Dr. Marla Madison, LCSW", "80.00", "Health", _day(2, 25),
+           cadence="monthly", rg=_PETER_RG["therapy"],
+           description="Session 4: discussed masks — metaphor and literal. She doesn't know it's both."),
+
+        _e("p-m2-metro", "MTA New York City Transit", "33.00", "Transport", _day(2, 26),
+           cadence="monthly", rg=_PETER_RG["metro"],
+           description="Monthly MetroCard — backup transport for when the suit is being repaired by Ned"),
+
+        _e("p-m2-medical-02", "Queens Medical Center", "140.00", "Health", _day(2, 28),
+           description="Rib follow-up. Doctor notes I'm healing 'unusually fast'. I said: good metabolism. He: noted it."),
+
+        # Parker Lab ledger — month -2
+        _e("p-l-lab-m2-01", "Carolina Biological Supply", "145.00", "Web Fluid R&D", _day(2, 11),
+           ledger_id=ledger_lab,
+           description="Lab supplies (Ned's order) — listed as 'ESU adhesion research project'. That's not what we call it."),
+
+        # Avengers — month -2
+        _e("p-l-avg-m2-01", "Avengers Compound Cafeteria", "8.50", "Dining", _day(2, 19),
+           ledger_id=ledger_avengers,
+           description="Lunch at the compound — I was invited. This is not a drill. Turkey sandwich. Very good."),
+
+        # Aunt May ledger — month -2
+        _e("p-l-may-m2-01", "Walgreens Queens", "34.00", "Health", _day(2, 17),
+           ledger_id=ledger_may,
+           description="Aunt May's prescriptions + vitamins — she doesn't ask where I find the money. I appreciate that."),
+
+        # ── Month -1 ─────────────────────────────────────────────────────────────
+
+        _e("p-inc-m1-01", "Daily Bugle Photography", "480.00", "Salary", _day(1, 1), tx="credit",
+           description="Best Bugle check in months — Jameson said 'barely adequate'. Framed it on the wall."),
+
+        _e("p-inc-m1-02", "Stark Industries", "500.00", "Salary", _day(1, 3), tx="credit",
+           description="Consulting fee from Happy Hogan — Tony called it 'educational expenses'. I'll take it."),
+
+        _e("p-m1-rent", "Queens Landlord LLC", "850.00", "Housing", _day(1, 2),
+           cadence="monthly", rg=_PETER_RG["rent"],
+           description="Monthly rent — paid ON TIME for once. Mrs Chen nearly fainted."),
+
+        _e("p-m1-webfluid", "Oscorp Industrial Chemicals", "180.00", "Web Fluid R&D", _day(1, 3),
+           cadence="monthly", rg=_PETER_RG["web_fluid"],
+           description="Web fluid monthly order — formula still the best I've designed. Ned wanted to add glitter. No."),
+
+        _e("p-m1-therapy-01", "Dr. Marla Madison, LCSW", "80.00", "Health", _day(1, 5),
+           cadence="monthly", rg=_PETER_RG["therapy"],
+           description="Session 5: we made it 15 full minutes before Uncle Ben came up. Personal record."),
+
+        _e("p-m1-medical-01", "Bellevue Hospital Center", "650.00", "Health", _day(1, 7),
+           is_major=True,
+           description="Concussion + fractured wrist — 'bicycle accident'. Doctor said 'see you next month'. Accurate prediction."),
+
+        _e("p-m1-suit-01", "AliExpress", "18.00", "Crime Fighting", _day(1, 8),
+           description="Replacement eye lenses for mask — €18 + 3 weeks shipping. Ned suggested Prime. He's right."),
+
+        _e("p-m1-cartridge", "Oscorp Advanced Materials", "320.00", "Web Fluid R&D", _day(1, 10),
+           is_major=True,
+           description="Web cartridges x12 — went through them fast. Rhino was involved. Long story, much webbing."),
+
+        _e("p-m1-camera", "B&H Photo Video NYC", "190.00", "Shopping", _day(1, 12),
+           description="Camera mount + remote trigger — for 'self-portraits'. Bugle pays better for action shots."),
+
+        _e("p-m1-therapy-02", "Dr. Marla Madison, LCSW", "80.00", "Health", _day(1, 14),
+           cadence="monthly", rg=_PETER_RG["therapy"],
+           description="Session 6: discussed whether wearing a mask all day is authentic self-expression. It is not."),
+
+        _e("p-m1-grocery", "Walmart Supercenter Queens", "57.00", "Groceries", _day(1, 16),
+           description="Monthly grocery run — splurged on NAME-BRAND peanut butter. Stark stipend month. No regrets.",
+           items=_M1_PETER_GROCERY_ITEMS),
+
+        _e("p-m1-chem-01", "Fisher Scientific", "145.00", "Web Fluid R&D", _day(1, 18),
+           description="Micro-filament spooler + precision nozzle tips — 'for the lab'. For THE lab."),
+
+        _e("p-m1-therapy-03", "Dr. Marla Madison, LCSW", "80.00", "Health", _day(1, 20),
+           cadence="monthly", rg=_PETER_RG["therapy"],
+           description="Session 7: discussed power and responsibility. I changed the subject. She noticed immediately."),
+
+        _e("p-m1-mj-01", "Joe Coffee Midtown", "14.00", "Dining", _day(1, 21),
+           description="Coffee with MJ — she's writing on vigilantes. I pretended to find it purely hypothetical."),
+
+        _e("p-m1-backpack-01", "Target Queens", "28.00", "Shopping", _day(1, 22),
+           description="Backpack #2 this month — last one lasted 11 days before the Electro incident"),
+
+        _e("p-m1-therapy-04", "Dr. Marla Madison, LCSW", "80.00", "Health", _day(1, 24),
+           cadence="monthly", rg=_PETER_RG["therapy"],
+           description="Session 8: she asked if the 'mystery friend' I mentioned has my back. Yes. Sort of. It's complicated."),
+
+        _e("p-m1-metro", "MTA New York City Transit", "33.00", "Transport", _day(1, 25),
+           cadence="monthly", rg=_PETER_RG["metro"],
+           description="Monthly MetroCard — Happy asked why I still need this. 'Dates,' I said. Partially true."),
+
+        _e("p-m1-suit-repair", "Chinatown Fabric District", "45.00", "Crime Fighting", _day(1, 27),
+           description="Suit patching + Kevlar reinforcement — Rhino tears. Ned is doing the stitching now. He's better at it."),
+
+        _e("p-m1-tuition", "Empire State University", "380.00", "Shopping", _day(1, 28),
+           is_major=True,
+           description="Monthly tuition installment — scholarship covers 70%. The other 30% covers the anxiety too."),
+
+        # Parker Lab ledger — month -1
+        _e("p-l-lab-m1-01", "Sigma-Aldrich", "220.00", "Web Fluid R&D", _day(1, 13),
+           ledger_id=ledger_lab, is_major=True,
+           description="Polymer synthesis kit — Ned found a deal. The deal was: experimental and possibly not legal in 3 states."),
+
+        # Avengers — month -1
+        _e("p-l-avg-m1-01", "Avengers Compound Gift Shop", "24.00", "Shopping", _day(1, 15),
+           ledger_id=ledger_avengers,
+           description="Bought Aunt May a 'Stark Industries' mug from the gift shop. Did not tell her where I was."),
+
+        # Aunt May ledger — month -1
+        _e("p-l-may-m1-01", "Key Food Supermarkets", "78.00", "Groceries", _day(1, 20),
+           ledger_id=ledger_may,
+           description="May's weekly shop — she cooks for me every Sunday. Roast chicken. This is the least I can do."),
+
+        # ── Current month ─────────────────────────────────────────────────────────
+
+        _e("p-inc-m0-01", "Daily Bugle Photography", "410.00", "Salary", _day(0, 1), tx="credit",
+           description="This month's Bugle check — Jameson said my Spider-Man photos 'show his criminal nature'. Framing #2."),
+
+        _e("p-m0-rent", "Queens Landlord LLC", "850.00", "Housing", _day(0, 2),
+           cadence="monthly", rg=_PETER_RG["rent"],
+           description="Monthly rent — autopay set up. Small victory in an otherwise chaotic life."),
+
+        _e("p-m0-webfluid", "Oscorp Industrial Chemicals", "180.00", "Web Fluid R&D", _day(0, 3),
+           cadence="monthly", rg=_PETER_RG["web_fluid"],
+           description="Web fluid supply — reformulated adhesion coefficient. Ned: 'impressive'. MJ: 'why is there webbing in the sink'."),
+
+        _e("p-m0-therapy-01", "Dr. Marla Madison, LCSW", "80.00", "Health", _day(0, 4),
+           cadence="monthly", rg=_PETER_RG["therapy"],
+           description="Session 9: 40 full minutes, no Uncle Ben. Dr. Madison cried. (So did I, later, in the stairwell.)"),
+
+        _e("p-m0-cartridge", "Oscorp Advanced Materials", "320.00", "Web Fluid R&D", _day(0, 6),
+           is_major=True,
+           description="Web cartridges x12 — ran out in 3 weeks. Sandman is very, very wasteful of webbing."),
+
+        _e("p-m0-chem-01", "Staten Island Chemical Co.", "115.00", "Web Fluid R&D", _day(0, 8),
+           description="Polymer catalyst batch — new synthesis. Lab note: DO NOT TOUCH THE BLUE ONE (lab incident, don't ask)"),
+
+        _e("p-m0-therapy-02", "Dr. Marla Madison, LCSW", "80.00", "Health", _day(0, 9),
+           cadence="monthly", rg=_PETER_RG["therapy"],
+           description="Session 10: relapse — talked about Uncle Ben for 55 of 60 minutes. Dr. Madison: visibly tired."),
+
+        _e("p-m0-medical", "Queens Medical Center", "290.00", "Health", _day(0, 11),
+           description="Sprained ankle, bruised sternum — 'same bicycle, same exact accident'. They have a dedicated file now."),
+
+        _e("p-m0-grocery", "Walmart Supercenter Queens", "44.00", "Groceries", _day(0, 12),
+           description="Monthly grocery — ramen x20, bread, PB, Gatorade x6. Aunt May would not approve. She'd be right.",
+           items=_M0_PETER_GROCERY_ITEMS),
+
+        _e("p-m0-mj-01", "Patsy's Pizzeria Queens", "28.00", "Dining", _day(0, 13),
+           description="Pizza with MJ — her idea, my bill. She had 4 slices. I respect that. I had 2. Shame."),
+
+        _e("p-m0-suit-01", "Amazon.com", "52.00", "Crime Fighting", _day(0, 14),
+           description="Carbon fibre reinforcement fabric + heat-resistant thread — suit v3.4 upgrade. Ned: 'This one will hold?' Maybe."),
+
+        _e("p-m0-therapy-03", "Dr. Marla Madison, LCSW", "80.00", "Health", _day(0, 16),
+           cadence="monthly", rg=_PETER_RG["therapy"],
+           description="Session 11: breakthrough — 25 minutes no Uncle Ben. Then I mentioned the radioactive spider. Back to zero."),
+
+        _e("p-m0-metro", "MTA New York City Transit", "33.00", "Transport", _day(0, 17),
+           cadence="monthly", rg=_PETER_RG["metro"],
+           description="Monthly MetroCard — Ned asked why I still buy this. 'For dates,' I said. Partially true."),
+
+        _e("p-m0-backpack-01", "Duane Reade", "19.00", "Shopping", _day(0, 18),
+           description="Backpack from the clearance bin — €19. Mr Stark would be embarrassed. He never said that but I know."),
+
+        _e("p-m0-therapy-04", "Dr. Marla Madison, LCSW", "80.00", "Health", _day(0, 19),
+           cadence="monthly", rg=_PETER_RG["therapy"],
+           description="Session 12: discussed responsibility. She still doesn't know. I think that's the whole point."),
+
+        _e("p-m0-tuition", "Empire State University", "380.00", "Shopping", _day(0, 20),
+           is_major=True,
+           description="Tuition installment — Professor Connors wrote a glowing recommendation. He then became a lizard."),
+
+        # Parker Lab ledger — current month
+        _e("p-l-lab-m0-01", "LabSupply Direct", "95.00", "Web Fluid R&D", _day(0, 7),
+           ledger_id=ledger_lab,
+           description="Micro-dispensing nozzles x20 — web cartridge refill components. Ned: 'this is genuinely so cool'"),
+
+        # Avengers — current month
+        _e("p-l-avg-m0-01", "Shake Shack Midtown", "12.50", "Dining", _day(0, 9),
+           ledger_id=ledger_avengers,
+           description="Lunch near the compound — Happy invited. I paid my own shake out of pride. Happy didn't notice."),
+
+        # Aunt May ledger — current month
+        _e("p-l-may-m0-01", "Walgreens Queens", "34.00", "Health", _day(0, 10),
+           ledger_id=ledger_may,
+           description="May's prescriptions — she asked why I look bruised. I said 'gym'. She said 'sure'. She knows."),
+    ]
+
+
+def _build_peter_budgets(cat_by_name: dict[str, uuid.UUID]) -> list[dict]:
+    month = _month_start(0)
+    return [
+        {
+            "id": _did("p-budget:rent"),
+            "name": "Rent (Absolutely Non-Negotiable)",
+            "category_id": cat_by_name.get("Housing"),
+            "amount": Decimal("850.00"),
+            "currency": "EUR",
+            "period": "monthly",
+            "month_start": month,
+            "notes": "Exactly €850. Mrs Chen has been very patient. This one does not slip.",
+        },
+        {
+            "id": _did("p-budget:web-rd"),
+            "name": "Web Fluid R&D (Officially: Chemistry Thesis)",
+            "category_id": cat_by_name.get("Web Fluid R&D"),
+            "amount": Decimal("100.00"),
+            "currency": "EUR",
+            "period": "monthly",
+            "month_start": month,
+            "notes": "Budget suggested by Ned. Actual spend: 5-6x over every month. I have expensive hobbies.",
+        },
+        {
+            "id": _did("p-budget:groceries"),
+            "name": "Groceries (Being Very Optimistic)",
+            "category_id": cat_by_name.get("Groceries"),
+            "amount": Decimal("60.00"),
+            "currency": "EUR",
+            "period": "monthly",
+            "month_start": month,
+            "notes": "Ramen is €0.35 a pack. I am ironically very good at this one.",
+        },
+        {
+            "id": _did("p-budget:crime"),
+            "name": "Crime Fighting Equipment (Classified Budget)",
+            "category_id": cat_by_name.get("Crime Fighting"),
+            "amount": Decimal("50.00"),
+            "currency": "EUR",
+            "period": "monthly",
+            "month_start": month,
+            "notes": "Ned suggested €50. We both knew this was aspirational. Current month: already €52 on Amazon alone.",
+        },
+        {
+            "id": _did("p-budget:mj"),
+            "name": "MJ — Dates & Coffee",
+            "category_id": None,
+            "amount": Decimal("40.00"),
+            "currency": "EUR",
+            "period": "monthly",
+            "month_start": month,
+            "notes": "She insists on splitting. I insist on paying. She wins most of the time. Honestly great for the budget.",
+        },
+    ]
+
+
+# ---------------------------------------------------------------------------
 # Core helpers
 # ---------------------------------------------------------------------------
 
@@ -596,13 +980,18 @@ async def _get_or_create_user(
 
 
 async def _get_categories(db: AsyncSession, user_id: uuid.UUID) -> dict[str, uuid.UUID]:
-    """Return {category_name: category_id} for all of Bruce's categories."""
+    """Return {category_name: category_id} for a given user."""
     result = await db.execute(select(Category.name, Category.id).where(Category.user_id == user_id))
     return {row[0]: row[1] for row in result.all()}
 
 
-async def _ensure_custom_categories(db: AsyncSession, user_id: uuid.UUID, cat_by_name: dict[str, uuid.UUID]) -> None:
-    for name, color, icon, tx_type in _CUSTOM_CATS:
+async def _ensure_custom_categories(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    cat_by_name: dict[str, uuid.UUID],
+    custom_cats: list[tuple[str, str, str, str]],
+) -> None:
+    for name, color, icon, tx_type in custom_cats:
         if name.lower() not in {k.lower() for k in cat_by_name}:
             db.add(Category(user_id=user_id, name=name, color=color, icon=icon, transaction_type=tx_type, is_system=False))
     await db.flush()
@@ -736,7 +1125,7 @@ async def seed_demo_data(db: AsyncSession) -> User:
     # Categories
     await ensure_default_categories(db, bruce.id)
     cat_by_name = await _get_categories(db, bruce.id)
-    await _ensure_custom_categories(db, bruce.id, cat_by_name)
+    await _ensure_custom_categories(db, bruce.id, cat_by_name, _BRUCE_CUSTOM_CATS)
     await db.commit()
     cat_by_name = await _get_categories(db, bruce.id)
 
@@ -801,3 +1190,135 @@ async def reset_demo_data(db: AsyncSession, user_id: uuid.UUID | None = None, ca
     await db.commit()
     await invalidate_analytics_cache(uid)
     logger.info("demo.reset_complete", user_id=str(uid))
+
+
+async def seed_peter_data(db: AsyncSession) -> User:
+    """Create Peter Parker, partner stubs, categories, and all seed data.
+
+    Idempotent: safe to call multiple times — will not duplicate data.
+    """
+    await _get_or_create_user(db, MJ_ID, "mj.watson@empire-state.edu", "Mary Jane Watson",
+                              _avatar_svg("MJ", "#7f1d1d", "#fca5a5"))
+    await _get_or_create_user(db, NED_ID, "ned.leeds@empire-state.edu", "Ned Leeds",
+                              _avatar_svg("NL", "#1e3a5f", "#93c5fd"))
+    await _get_or_create_user(db, AUNT_MAY_ID, "may.parker@queens.ny.us", "May Parker",
+                              _avatar_svg("MP", "#3b1f5c", "#c084fc"))
+    await _get_or_create_user(db, HAPPY_ID, "happy.hogan@starkindustries.com", "Happy Hogan",
+                              _avatar_svg("HH", "#1c1917", "#fb923c"))
+
+    peter = await _get_or_create_user(
+        db, PETER_PARKER_ID, PETER_PARKER_EMAIL, "Peter Parker",
+        _avatar_svg("PP", "#1e1b4b", "#f87171"),
+    )
+
+    await ensure_default_categories(db, peter.id)
+    cat_by_name = await _get_categories(db, peter.id)
+    await _ensure_custom_categories(db, peter.id, cat_by_name, _PETER_CUSTOM_CATS)
+    await db.commit()
+    cat_by_name = await _get_categories(db, peter.id)
+
+    await _ensure_partner_requests(db, peter.id, [
+        (MJ_ID, "mj.watson@empire-state.edu"),
+        (NED_ID, "ned.leeds@empire-state.edu"),
+        (AUNT_MAY_ID, "may.parker@queens.ny.us"),
+        (HAPPY_ID, "happy.hogan@starkindustries.com"),
+    ])
+
+    needs_seed = False
+    count_result = await db.execute(select(func.count(Expense.id)).where(Expense.user_id == peter.id))
+    if (count_result.scalar() or 0) == 0:
+        needs_seed = True
+    else:
+        canary_id = _did("p-m0-grocery")
+        canary = await db.execute(
+            select(func.count(Expense.id)).where(
+                Expense.id == canary_id,
+                Expense.expense_date >= _month_start(0),
+            )
+        )
+        if (canary.scalar() or 0) == 0:
+            needs_seed = True
+    if needs_seed:
+        await reset_peter_data(db, peter.id, cat_by_name)
+
+    await db.commit()
+    return peter
+
+
+async def reset_peter_data(db: AsyncSession, user_id: uuid.UUID | None = None, cat_by_name: dict[str, uuid.UUID] | None = None) -> None:
+    """Wipe and re-seed all ephemeral data for Peter Parker."""
+    uid = user_id or PETER_PARKER_ID
+
+    await db.execute(delete(Expense).where(Expense.user_id == uid))
+    await db.execute(delete(Budget).where(Budget.user_id == uid))
+    await db.execute(delete(Ledger).where(Ledger.created_by == uid))
+    await db.execute(delete(ChatSession).where(ChatSession.user_id == uid))
+    await db.flush()
+
+    if cat_by_name is None:
+        cat_by_name = await _get_categories(db, uid)
+
+    ledger_lab = await _create_ledger(db, _LEDGER_PARKER_LAB_ID, "Parker's Lab", uid, [NED_ID])
+    ledger_avengers = await _create_ledger(db, _LEDGER_AVENGERS_ID, "Avengers Auxiliary", uid, [HAPPY_ID])
+    ledger_may = await _create_ledger(db, _LEDGER_MAY_ID, "Aunt May's Household", uid, [AUNT_MAY_ID])
+
+    rows = _build_peter_expenses(ledger_lab.id, ledger_avengers.id, ledger_may.id)
+    for row in rows:
+        cat_id = cat_by_name.get(row["cat_name"])
+        expense = Expense(
+            id=row["id"],
+            user_id=uid,
+            category_id=cat_id,
+            merchant=row["merchant"],
+            amount=row["amount"],
+            transaction_type=row["transaction_type"],
+            currency=row["currency"],
+            expense_date=row["expense_date"],
+            source="manual",
+            confidence=1.0,
+            needs_review=False,
+            cadence=row["cadence"],
+            is_recurring=row["is_recurring"],
+            recurring_group=row["recurring_group"],
+            recurring_auto_add=False,
+            is_major_purchase=row["is_major_purchase"],
+            notes=row["notes"],
+            description=row["description"],
+            ledger_id=row["ledger_id"],
+        )
+        db.add(expense)
+        await db.flush()
+        for item in row["items"]:
+            db.add(ExpenseItem(
+                expense_id=expense.id,
+                description=item["description"],
+                quantity=item.get("quantity"),
+                unit_price=Decimal(str(item["unit_price"])) if item.get("unit_price") else None,
+                total_price=Decimal(str(item["total"])),
+                subcategory=item.get("subcategory"),
+                subcategory_confidence=item.get("subcategory_confidence"),
+            ))
+
+    budgets = _build_peter_budgets(cat_by_name)
+    for b in budgets:
+        db.add(Budget(
+            id=b["id"],
+            user_id=uid,
+            name=b["name"],
+            category_id=b["category_id"],
+            amount=b["amount"],
+            currency=b["currency"],
+            period=b["period"],
+            month_start=b["month_start"],
+            notes=b["notes"],
+        ))
+    await db.flush()
+    await db.commit()
+    await invalidate_analytics_cache(uid)
+    logger.info("demo.peter_reset_complete", user_id=str(uid))
+
+
+async def reset_all_demo_data(db: AsyncSession) -> None:
+    """Reset both Bruce Wayne and Peter Parker in one Celery task invocation."""
+    await reset_demo_data(db)
+    await reset_peter_data(db)

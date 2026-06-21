@@ -47,6 +47,35 @@ const handler = NextAuth({
             userStatus: "approved",
             isAdmin: false,
             isDemo: true,
+            demoCharacter: "bruce",
+          };
+        } catch {
+          return null;
+        }
+      },
+    }),
+    CredentialsProvider({
+      id: "demo-peter",
+      name: "Demo Peter",
+      credentials: {},
+      async authorize() {
+        try {
+          const res = await fetch(`${API_URL}/api/auth/demo-login-peter`, { method: "POST" });
+          if (!res.ok) return null;
+          const data = (await res.json()) as {
+            access_token: string;
+            user: { id: string; email: string; name: string; avatar_url?: string };
+          };
+          return {
+            id: data.user.id,
+            email: data.user.email,
+            name: data.user.name,
+            image: data.user.avatar_url ?? null,
+            accessToken: data.access_token,
+            userStatus: "approved",
+            isAdmin: false,
+            isDemo: true,
+            demoCharacter: "peter",
           };
         } catch {
           return null;
@@ -68,12 +97,13 @@ const handler = NextAuth({
       trigger?: string;
     }) {
       // Demo credentials sign-in: backend JWT already in user object
-      if (account?.provider === "demo" && user) {
+      if ((account?.provider === "demo" || account?.provider === "demo-peter") && user) {
         token.accessToken = (user as User & { accessToken?: string }).accessToken;
         token.avatar_url = user.image ?? undefined;
         token.userStatus = "approved";
         token.isAdmin = false;
         token.isDemo = true;
+        token.demoCharacter = (user as User & { demoCharacter?: string }).demoCharacter;
         return token;
       }
 
@@ -125,6 +155,7 @@ const handler = NextAuth({
       session.userStatus = token.userStatus;
       session.isAdmin = token.isAdmin;
       session.isDemo = token.isDemo;
+      session.demoCharacter = token.demoCharacter;
       if (session.user) {
         session.user.avatar_url = token.avatar_url;
       }

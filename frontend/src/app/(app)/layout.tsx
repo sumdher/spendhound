@@ -27,6 +27,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const isChatRoute = pathname === "/chat";
   const isDemo = session?.isDemo === true;
+  const demoCharacter = session?.demoCharacter ?? "bruce";
   const handleSidebarClose = useCallback(() => {
     setSidebarOpen(false);
   }, []);
@@ -60,14 +61,28 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (!session || session.userStatus !== "approved") return null;
 
+  const isBruce = demoCharacter === "bruce";
+  const demoBorderColor = isBruce ? "border-yellow-700/40" : "border-red-800/40";
+  const demoBgColor = isBruce ? "bg-yellow-950/95" : "bg-red-950/90";
+  const demoTextColor = isBruce ? "text-yellow-200/90" : "text-red-200/90";
+  const demoNameColor = isBruce ? "text-yellow-100" : "text-red-100";
+  const demoTimerColor = isBruce ? "text-yellow-400" : "text-red-400";
+  const demoExitBorder = isBruce ? "border-yellow-600/40" : "border-red-600/40";
+  const demoExitHover = isBruce ? "hover:bg-yellow-500/20 hover:text-yellow-300" : "hover:bg-red-500/20 hover:text-red-300";
+  const demoNearResetMsg = isBruce
+    ? "⚡ Barry Allen is running around — this timeline will be erased."
+    : "⚡ The multiverse is collapsing — this timeline will be erased.";
+  const demoEmoji = isBruce ? "🦇" : "🕷️";
+  const demoName = isBruce ? "Bruce Wayne" : "Peter Parker";
+
   return (
     <div className={`flex h-dvh flex-col overflow-hidden bg-background${isDemo ? (nearReset ? " pt-12" : " pt-8") : ""}`}>
       {isDemo && (
-        <div className="fixed inset-x-0 top-0 z-[60] border-b border-yellow-700/40 bg-yellow-950/95 backdrop-blur-sm">
-          <div className="flex items-center justify-center gap-3 px-4 py-1.5 text-xs text-yellow-200/90">
-            <span className="text-sm">🦇</span>
+        <div className={`fixed inset-x-0 top-0 z-[60] border-b ${demoBorderColor} ${demoBgColor} backdrop-blur-sm`}>
+          <div className={`flex items-center justify-center gap-3 px-4 py-1.5 text-xs ${demoTextColor}`}>
+            <span className="text-sm">{demoEmoji}</span>
             <span>
-              Demo mode — browsing as <span className="font-semibold text-yellow-100">Bruce Wayne</span>.
+              Demo mode — browsing as <span className={`font-semibold ${demoNameColor}`}>{demoName}</span>.
               {" "}Resets in{" "}
               <span className={`font-mono ${nearReset ? "font-bold text-red-300" : ""}`}>
                 {formatCountdown(demoSecondsLeft)}
@@ -75,14 +90,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </span>
             <button
               onClick={() => signOut({ callbackUrl: "/login" })}
-              className="ml-1 rounded border border-yellow-600/40 px-2 py-0.5 text-yellow-400 transition-colors hover:bg-yellow-500/20 hover:text-yellow-300"
+              className={`ml-1 rounded border ${demoExitBorder} px-2 py-0.5 ${demoTimerColor} transition-colors ${demoExitHover}`}
             >
               Exit demo
             </button>
           </div>
           {nearReset && (
             <div className="pb-1.5 text-center text-xs text-yellow-400/70">
-              ⚡ Barry Allen is running around — this timeline will be erased.
+              {demoNearResetMsg}
             </div>
           )}
         </div>
