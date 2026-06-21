@@ -147,6 +147,31 @@ async def demo_login(request: Request, db: AsyncSession = Depends(get_db)) -> Au
             "automatic_monthly_reports": False,
             "is_admin": False,
             "is_demo": True,
+            "demo_character": "bruce",
+        },
+    )
+
+
+@router.post("/demo-login-peter", response_model=AuthResponse)
+async def demo_login_peter(request: Request, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+    """Issue a backend JWT for the Peter Parker demo account — no Google auth required."""
+    from app.services.demo_seed import seed_peter_data
+
+    user = await seed_peter_data(db)
+
+    token = create_access_token(user.id, user.email)
+    return AuthResponse(
+        access_token=token,
+        user={
+            "id": str(user.id),
+            "email": user.email,
+            "name": user.name,
+            "avatar_url": user.avatar_url,
+            "status": "approved",
+            "automatic_monthly_reports": False,
+            "is_admin": False,
+            "is_demo": True,
+            "demo_character": "peter",
         },
     )
 

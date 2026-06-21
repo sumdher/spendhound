@@ -65,11 +65,14 @@ def get_llm_provider(config: LLMConfig | None = None) -> BaseLLMProvider:
         return MeteredLLMProvider(OllamaProvider(), "ollama")
 
 
-_DEMO_USER_EMAIL = "bruce.wayne@wayneenterprises.com"
+_DEMO_USER_EMAILS = frozenset({
+    "bruce.wayne@wayneenterprises.com",
+    "peter.parker@dailybugle.com",
+})
 
 
 def _is_demo_user(user: User) -> bool:
-    return user.email == _DEMO_USER_EMAIL
+    return user.email in _DEMO_USER_EMAILS
 
 
 def resolve_user_llm_config(
@@ -154,7 +157,12 @@ def resolve_user_llm_config(
         )
 
     # Non-admin (including demo user) with no stored key and no request key → error
-    demo_suffix = " Bruce Wayne can afford it." if _is_demo_user(user) else ""
+    if user.email == "bruce.wayne@wayneenterprises.com":
+        demo_suffix = " Bruce Wayne can afford it."
+    elif user.email == "peter.parker@dailybugle.com":
+        demo_suffix = " Peter Parker cannot, but that's the point."
+    else:
+        demo_suffix = ""
     raise HTTPException(
         status_code=400,
         detail=(
