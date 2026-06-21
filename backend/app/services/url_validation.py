@@ -60,7 +60,7 @@ def _sync_resolve_and_check(hostname: str, port: int) -> str | None:
         return f"hostname '{hostname}' could not be resolved: {exc}"
 
     for result in results:
-        ip = result[4][0]
+        ip = str(result[4][0])
         if _is_private_ip(ip):
             return f"resolves to a private/internal address ({ip})"
     return None
@@ -79,7 +79,7 @@ async def validate_llm_base_url(url: str | None) -> None:
     try:
         parsed = urlparse(url.strip())
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid LLM base URL format.")
+        raise HTTPException(status_code=400, detail="Invalid LLM base URL format.") from None
 
     if parsed.scheme not in ("http", "https"):
         raise HTTPException(status_code=400, detail="LLM base URL must use http or https.")

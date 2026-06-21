@@ -52,4 +52,5 @@ class BaseLLMProvider(ABC):
         self, messages: list[Message], config: LLMConfig | None = None
     ) -> AsyncGenerator[str, None]:
         """Stream completion tokens. Yields string chunks."""
-        ...
+        if False:  # pragma: no cover
+            yield ""

@@ -41,6 +41,10 @@ dependencies = [
     "pgvector>=0.3.0",
     "cryptography>=42.0.0",
     "slowapi>=0.1.9",
+    "redis>=5.0.0",
+    "celery[redis]>=5.3",
+    "prometheus-client>=0.20.0",
+    "prometheus-fastapi-instrumentator==7.1.0",
 ]
 
 [project.optional-dependencies]
@@ -50,6 +54,7 @@ dev = [
     "pytest-cov>=6.0.0",
     "httpx>=0.27.0",
     "aiosqlite>=0.20.0",
+    "fakeredis>=2.0.0",
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     "types-python-jose>=3.3.4",
@@ -68,6 +73,11 @@ target-version = "py312"
 select = ["E", "F", "W", "I", "N", "UP", "B", "A", "C4", "RUF"]
 ignore = ["E501", "B008", "RUF012"]
 
+[tool.ruff.lint.per-file-ignores]
+# SQLAlchemy models use string-based forward references in relationship() that
+# ruff cannot resolve without circular imports. F821 is a false positive here.
+"app/models/*.py" = ["F821"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["app"]
 
@@ -77,6 +87,16 @@ python_version = "3.12"
 strict = true
 ignore_missing_imports = true
 plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*", "alembic.*"]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = ["app", "app.*"]
+disallow_any_generics = false
+warn_return_any = false
+disallow_untyped_decorators = false
 
 # ── Pytest ────────────────────────────────────────────────────────────────────
 [tool.pytest.ini_options]

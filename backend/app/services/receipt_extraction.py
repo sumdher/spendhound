@@ -11,19 +11,28 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
+import pdfplumber
+import structlog
 from fastapi import HTTPException, UploadFile
 from pydantic import BaseModel, Field
-import pdfplumber
 from pypdf import PdfReader
-import structlog
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.user import User
 from app.services.llm.base import ImageInput, LLMConfig, Message
 from app.services.llm.factory import get_llm_provider, resolve_user_llm_config
-from app.services.spendhound import TRANSACTION_TYPE_CREDIT, TRANSACTION_TYPE_DEBIT, find_matching_category, get_category_by_name, normalize_grocery_description, normalize_match_text, normalize_transaction_type, resolve_category
-
+from app.services.spendhound import (
+    TRANSACTION_TYPE_CREDIT,
+    TRANSACTION_TYPE_DEBIT,
+    find_matching_category,
+    get_category_by_name,
+    normalize_grocery_description,
+    normalize_match_text,
+    normalize_transaction_type,
+    resolve_category,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -298,7 +307,7 @@ def _should_force_groceries(preview: ReceiptPreviewModel, context_text: str | No
     return _canonical_supermarket_name(context_text or "") is not None
 
 
-async def _apply_category_heuristics(db, user_id: uuid.UUID, preview: ReceiptPreviewModel, *, context_text: str | None = None) -> ReceiptPreviewModel:
+async def _apply_category_heuristics(db: AsyncSession, user_id: uuid.UUID, preview: ReceiptPreviewModel, *, context_text: str | None = None) -> ReceiptPreviewModel:
     if _should_force_groceries(preview, context_text=context_text):
         preview.category_name = "Groceries"
         preview.confidence = max(preview.confidence or 0.35, 0.86)
@@ -510,7 +519,7 @@ def _finalize_preview_model(model: ReceiptPreviewModel, *, filename: str | None 
     return model
 
 
-async def _apply_receipt_category_heuristics(db, user_id: uuid.UUID, preview: ReceiptPreviewModel, *, context_text: str | None = None) -> ReceiptPreviewModel:
+async def _apply_receipt_category_heuristics(db: AsyncSession, user_id: uuid.UUID, preview: ReceiptPreviewModel, *, context_text: str | None = None) -> ReceiptPreviewModel:
     if _should_force_groceries(preview, context_text=context_text):
         preview.category_name = "Groceries"
         preview.confidence = max(preview.confidence or 0.35, 0.86)
@@ -937,7 +946,7 @@ async def llm_statement_preview(text: str, filename: str, llm_config: LLMConfig 
 
 
 async def build_receipt_preview(
-    db,
+    db: AsyncSession,
     user: User,
     *,
     storage_path: str,
@@ -981,14 +990,14 @@ async def build_receipt_preview(
         category = await resolve_category(db, user.id, merchant=preview.merchant, transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT)
         if category is not None:
             preview.category_name = category.name
-            preview.confidence = max(preview.confidence, 0.72)
+            preview.confidence = max(preview.confidence or 0.0, 0.72)
     preview = await _apply_receipt_category_heuristics(db, user.id, preview, context_text=extracted_text)
     preview = _finalize_preview_model(preview, filename=filename, context_text=extracted_text)
     return ReceiptExtractionResult(preview=preview, extracted_text=extracted_text, used_text_fallback=used_text_fallback)
 
 
 async def build_statement_preview(
-    db,
+    db: AsyncSession,
     user: User,
     *,
     storage_path: str,

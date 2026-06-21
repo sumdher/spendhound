@@ -44,6 +44,7 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
 
   const activeSessionId = pathname.startsWith("/chat") ? searchParams.get("s") : null;
   const avatarUrl = session?.user?.image || session?.user?.avatar_url;
+  const [avatarBroken, setAvatarBroken] = useState(false);
   const initials = (session?.user?.name || session?.user?.email || "SH")
     .split(/\s+/)
     .filter(Boolean)
@@ -330,12 +331,13 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                 className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-accent transition-colors"
                 title="My account"
               >
-                  {avatarUrl ? (
+                  {avatarUrl && !avatarBroken ? (
                     <img
                       src={avatarUrl}
                       alt={session.user.name ?? session.user.email ?? "User"}
                       className="h-8 w-8 shrink-0 rounded-full object-cover"
                       referrerPolicy="no-referrer"
+                      onError={() => setAvatarBroken(true)}
                     />
                   ) : (
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-sm font-bold text-primary">
@@ -405,6 +407,14 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   </div>
                 </div>
               )}
+            </div>
+            <div className="px-2 pt-1">
+              <Link
+                href="/privacy"
+                className="block text-center text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+              >
+                Privacy Policy
+              </Link>
             </div>
           </div>
         )}

@@ -442,11 +442,27 @@ export default function DashboardPage() {
               </div>
               <div className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={fxTopMerchants} margin={{ left: 8, right: 8, top: 8, bottom: 8 }}>
+                  <BarChart data={fxTopMerchants} margin={{ left: 8, right: 8, top: 8, bottom: 56 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(110,231,183,0.12)" />
-                    <XAxis dataKey="merchant" tick={{ fontSize: 12 }} interval={0} angle={-15} textAnchor="end" height={60} />
+                    <XAxis
+                      dataKey="merchant"
+                      interval={0}
+                      angle={-38}
+                      textAnchor="end"
+                      height={20}
+                      tick={({ x, y, payload }: { x: number; y: number; payload: { value: string } }) => {
+                        const label = payload.value.length > 18 ? payload.value.slice(0, 17) + "…" : payload.value;
+                        return (
+                          <g transform={`translate(${x},${y})`}>
+                            <text x={0} y={0} dy={4} textAnchor="end" fill="#94a3b8" fontSize={11} transform="rotate(-38)">
+                              {label}
+                            </text>
+                          </g>
+                        );
+                      }}
+                    />
                     <YAxis tickFormatter={(value) => `${value}`} />
-                    <Tooltip formatter={(value: number) => formatCurrency(value)} />
+                    <Tooltip formatter={(value: number) => formatCurrency(value)} labelFormatter={(label: string) => label} />
                     <Bar dataKey="amount" fill="#34d399" radius={[8, 8, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>

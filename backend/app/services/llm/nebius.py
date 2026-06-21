@@ -9,6 +9,7 @@ variables.
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from app.config import settings
 from app.services.llm.base import BaseLLMProvider, LLMConfig, Message
@@ -17,7 +18,7 @@ from app.services.llm.base import BaseLLMProvider, LLMConfig, Message
 class NebiusProvider(BaseLLMProvider):
     """LLM provider backed by Nebius AI Studio (OpenAI-compatible endpoint)."""
 
-    def _get_client(self, config: LLMConfig | None):
+    def _get_client(self, config: LLMConfig | None) -> Any:
         """Construct an AsyncOpenAI client pointing at the Nebius base URL."""
         try:
             from openai import AsyncOpenAI
@@ -68,7 +69,7 @@ class NebiusProvider(BaseLLMProvider):
         try:
             response = await client.chat.completions.create(
                 model=model,
-                messages=self._build_messages(messages),  # type: ignore[arg-type]
+                messages=self._build_messages(messages),
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
@@ -91,7 +92,7 @@ class NebiusProvider(BaseLLMProvider):
         try:
             async with client.chat.completions.stream(
                 model=model,
-                messages=self._build_messages(messages),  # type: ignore[arg-type]
+                messages=self._build_messages(messages),
                 temperature=temperature,
                 max_tokens=max_tokens,
             ) as stream:

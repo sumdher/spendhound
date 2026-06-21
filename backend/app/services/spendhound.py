@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import calendar
-from difflib import SequenceMatcher
 import re
 import unicodedata
 import uuid
 from collections import defaultdict
 from datetime import date
 from decimal import Decimal
+from difflib import SequenceMatcher
+from typing import Any
 
 import structlog
 from sqlalchemy import delete, or_, select
@@ -442,13 +443,13 @@ def matches_item_keyword_rule(description: str, rule: ItemKeywordRule) -> bool:
     """Return True if *description* matches *rule* according to its pattern_type.
 
     Pattern types:
-      fuzzy      – smart fuzzy match (existing behaviour)
-      contains   – normalized keyword is a substring of the normalized description
-      starts_with – any token of the description starts with the keyword
+      fuzzy      - smart fuzzy match (existing behaviour)
+      contains   - normalized keyword is a substring of the normalized description
+      starts_with - any token of the description starts with the keyword
                    e.g. keyword="diges" matches "DIGES. MCVITIE'S" and "DIGESTIVI"
-      abbrev     – all keyword chars appear in order inside any single token
+      abbrev     - all keyword chars appear in order inside any single token
                    e.g. keyword="mcvt" matches "MCVITIE" (m·c·v···t inside)
-      regex      – full regex against the original description (case-insensitive)
+      regex      - full regex against the original description (case-insensitive)
     """
     if rule.pattern_type == "regex":
         try:
@@ -733,7 +734,7 @@ def serialize_expense(
     ledger_name: str | None = None,
     added_by: dict | None = None,
 ) -> dict:
-    payload = {
+    payload: dict[str, Any] = {
         "id": str(expense.id),
         "merchant": expense.merchant,
         "description": expense.description,
@@ -779,24 +780,24 @@ def serialize_expense(
 
 
 def _coerce_optional_money(value: Decimal | float | str | None) -> Decimal | None:
-    if value in (None, ""):
+    if value is None or value == "":
         return None
     return normalize_money(value)
 
 
 def _coerce_optional_float(value: float | str | None) -> float | None:
-    if value in (None, ""):
+    if value is None or value == "":
         return None
     return round(float(value), 2)
 
 
-def _item_value(item: object, field_name: str):
+def _item_value(item: object, field_name: str) -> Any:
     if isinstance(item, dict):
         return item.get(field_name)
     return getattr(item, field_name, None)
 
 
-async def replace_expense_items(db: AsyncSession, expense: Expense, items: list[object] | None, *, category_name: str | None = None) -> None:
+async def replace_expense_items(db: AsyncSession, expense: Expense, items: list[Any] | None, *, category_name: str | None = None) -> None:
     resolved_category_name = await expense_category_name(db, expense, category_name)
     is_grocery_expense = is_grocery_category_name(resolved_category_name)
     normalized_items: list[ExpenseItem] = []
@@ -971,7 +972,7 @@ async def generate_recurring_expenses_for_month(db: AsyncSession, user_id: uuid.
 
 
 def apply_expense_filters(
-    statement,
+    statement: Any,
     *,
     user_id: uuid.UUID | None,
     month: str | None = None,
@@ -980,7 +981,7 @@ def apply_expense_filters(
     cadence: str | None = None,
     review_only: bool = False,
     search: str | None = None,
-):
+) -> Any:
     if user_id is not None:
         statement = statement.where(Expense.user_id == user_id)
     if month and month not in {"all", "all_time"}:

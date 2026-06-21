@@ -2,8 +2,9 @@
 
 import { signIn, useSession } from "next-auth/react";
 import Image from "next/image";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 
 function LoginContent() {
   const { data: session, status } = useSession();
@@ -11,10 +12,17 @@ function LoginContent() {
   const searchParams = useSearchParams();
   const approved = searchParams.get("approved") === "1";
   const callbackUrl = searchParams.get("callbackUrl") || "/dashboard";
+  const [demoLoading, setDemoLoading] = useState(false);
 
   useEffect(() => {
     if (session) router.replace("/dashboard");
   }, [router, session]);
+
+  const handleDemoLogin = async () => {
+    setDemoLoading(true);
+    await signIn("demo", { callbackUrl: "/dashboard" });
+    setDemoLoading(false);
+  };
 
   if (status === "loading") {
     return <div className="flex min-h-screen items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" /></div>;
@@ -49,6 +57,35 @@ function LoginContent() {
           </svg>
           Continue with Google
         </button>
+
+        <div className="relative">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-border" />
+          </div>
+          <div className="relative flex justify-center">
+            <span className="bg-card px-3 text-xs text-muted-foreground/60">or</span>
+          </div>
+        </div>
+
+        <button
+          onClick={handleDemoLogin}
+          disabled={demoLoading}
+          className="group flex w-full items-center justify-center gap-2.5 rounded-lg border border-yellow-600/30 bg-yellow-950/30 px-4 py-3 text-sm font-medium text-yellow-200/80 transition-colors hover:border-yellow-500/50 hover:bg-yellow-950/50 hover:text-yellow-100 disabled:opacity-60"
+        >
+          {demoLoading ? (
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-yellow-400/40 border-t-yellow-400" />
+          ) : (
+            <span className="text-base leading-none transition-transform group-hover:scale-110">🦇</span>
+          )}
+          or, login as Bruce Wayne to test the app
+        </button>
+
+        <p className="text-center text-xs text-muted-foreground">
+          By signing in you agree to our{" "}
+          <Link href="/privacy" className="underline hover:text-foreground">
+            Privacy Policy
+          </Link>
+        </p>
       </div>
     </div>
   );

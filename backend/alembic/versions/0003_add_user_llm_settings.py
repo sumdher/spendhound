@@ -8,9 +8,10 @@ Stores per-user LLM provider preferences (provider, model).
 API keys are NEVER stored — they stay browser-local only.
 """
 
-from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
+
+from alembic import op
 
 revision = "0003"
 down_revision = "0002"

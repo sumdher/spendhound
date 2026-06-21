@@ -6,6 +6,7 @@
 
 import NextAuth from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
+import CredentialsProvider from "next-auth/providers/credentials";
 import type { JWT } from "next-auth/jwt";
 import type { Session, Account, User } from "next-auth";
 
@@ -25,12 +26,40 @@ const handler = NextAuth({
         params: { prompt: "select_account" },
       },
     }),
+    CredentialsProvider({
+      id: "demo",
+      name: "Demo",
+      credentials: {},
+      async authorize() {
+        try {
+          const res = await fetch(`${API_URL}/api/auth/demo-login`, { method: "POST" });
+          if (!res.ok) return null;
+          const data = (await res.json()) as {
+            access_token: string;
+            user: { id: string; email: string; name: string; avatar_url?: string };
+          };
+          return {
+            id: data.user.id,
+            email: data.user.email,
+            name: data.user.name,
+            image: data.user.avatar_url ?? null,
+            accessToken: data.access_token,
+            userStatus: "approved",
+            isAdmin: false,
+            isDemo: true,
+          };
+        } catch {
+          return null;
+        }
+      },
+    }),
   ],
 
   callbacks: {
     async jwt({
       token,
       account,
+      user,
       trigger,
     }: {
       token: JWT;
@@ -38,6 +67,16 @@ const handler = NextAuth({
       user: User;
       trigger?: string;
     }) {
+      // Demo credentials sign-in: backend JWT already in user object
+      if (account?.provider === "demo" && user) {
+        token.accessToken = (user as User & { accessToken?: string }).accessToken;
+        token.avatar_url = user.image ?? undefined;
+        token.userStatus = "approved";
+        token.isAdmin = false;
+        token.isDemo = true;
+        return token;
+      }
+
       // On first sign-in, exchange Google ID token for backend JWT
       if (account?.id_token) {
         try {
@@ -85,6 +124,7 @@ const handler = NextAuth({
       session.accessToken = token.accessToken;
       session.userStatus = token.userStatus;
       session.isAdmin = token.isAdmin;
+      session.isDemo = token.isDemo;
       if (session.user) {
         session.user.avatar_url = token.avatar_url;
       }

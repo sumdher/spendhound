@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.chat_session import ChatSession
+    from app.models.user import User
 
 
 class ChatMessage(Base):
@@ -32,5 +37,5 @@ class ChatMessage(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    user: Mapped["User"] = relationship("User", back_populates="chat_messages")
-    session: Mapped["ChatSession"] = relationship("ChatSession", back_populates="messages")
+    user: Mapped[User] = relationship("User", back_populates="chat_messages")
+    session: Mapped[ChatSession] = relationship("ChatSession", back_populates="messages")

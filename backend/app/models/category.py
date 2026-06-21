@@ -4,11 +4,27 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.budget import Budget
+    from app.models.expense import Expense
+    from app.models.user import User
 
 
 class Category(Base):
@@ -28,10 +44,10 @@ class Category(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    user: Mapped["User"] = relationship("User", back_populates="categories")
-    expenses: Mapped[list["Expense"]] = relationship("Expense", back_populates="category")
-    budgets: Mapped[list["Budget"]] = relationship("Budget", back_populates="category")
-    merchant_rules: Mapped[list["MerchantRule"]] = relationship("MerchantRule", back_populates="category")
+    user: Mapped[User] = relationship("User", back_populates="categories")
+    expenses: Mapped[list[Expense]] = relationship("Expense", back_populates="category")
+    budgets: Mapped[list[Budget]] = relationship("Budget", back_populates="category")
+    merchant_rules: Mapped[list[MerchantRule]] = relationship("MerchantRule", back_populates="category")
 
 
 class MerchantRule(Base):
@@ -51,7 +67,7 @@ class MerchantRule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    user: Mapped["User"] = relationship("User", back_populates="merchant_rules")
+    user: Mapped[User] = relationship("User", back_populates="merchant_rules")
     category: Mapped[Category | None] = relationship("Category", back_populates="merchant_rules")
 
 
@@ -76,4 +92,4 @@ class ItemKeywordRule(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    user: Mapped["User"] = relationship("User", back_populates="item_keyword_rules")
+    user: Mapped[User] = relationship("User", back_populates="item_keyword_rules")

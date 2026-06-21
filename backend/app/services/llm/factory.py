@@ -21,23 +21,26 @@ OPENAI_COMPATIBLE_PROVIDERS: dict[str, str] = {
 
 def get_llm_provider(config: LLMConfig | None = None) -> BaseLLMProvider:
     """
-    Return the appropriate LLM provider.
+    Return the appropriate LLM provider, wrapped in MeteredLLMProvider so that
+    every complete() call is recorded in the llm_response_seconds histogram.
     config.provider overrides the global LLM_PROVIDER setting.
     """
+    from app.services.metrics import MeteredLLMProvider
+
     provider = (config.provider if config else None) or settings.llm_provider
 
     if provider == "openai":
         from app.services.llm.openai import OpenAIProvider
 
-        return OpenAIProvider()
+        return MeteredLLMProvider(OpenAIProvider(), "openai")
     elif provider == "anthropic":
         from app.services.llm.anthropic import AnthropicProvider
 
-        return AnthropicProvider()
+        return MeteredLLMProvider(AnthropicProvider(), "anthropic")
     elif provider == "nebius":
         from app.services.llm.nebius import NebiusProvider
 
-        return NebiusProvider()
+        return MeteredLLMProvider(NebiusProvider(), "nebius")
     elif provider in OPENAI_COMPATIBLE_PROVIDERS:
         from app.services.llm.openai import OpenAIProvider
 
@@ -55,11 +58,18 @@ def get_llm_provider(config: LLMConfig | None = None) -> BaseLLMProvider:
                 max_tokens=config.max_tokens,
                 extra=config.extra,
             )
-        return OpenAIProvider()  # OpenAI adapter handles custom base_url via config
+        return MeteredLLMProvider(OpenAIProvider(), provider)
     else:  # default: ollama
         from app.services.llm.ollama import OllamaProvider
 
-        return OllamaProvider()
+        return MeteredLLMProvider(OllamaProvider(), "ollama")
+
+
+_DEMO_USER_EMAIL = "bruce.wayne@wayneenterprises.com"
+
+
+def _is_demo_user(user: User) -> bool:
+    return user.email == _DEMO_USER_EMAIL
 
 
 def resolve_user_llm_config(
@@ -77,6 +87,7 @@ def resolve_user_llm_config(
     4. Non-admin with no key: raises HTTP 400 with a clear message
 
     Ollama never needs an API key — always allowed for any user.
+    Demo user: Ollama is blocked; must supply their own API key.
     """
     # Determine effective provider
     effective_provider = (
@@ -84,6 +95,17 @@ def resolve_user_llm_config(
         or user.llm_provider
         or settings.llm_provider
     )
+
+    # Demo user: no Ollama, no admin key fallback — must use own API key
+    if _is_demo_user(user) and effective_provider == "ollama":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Demo mode: Ollama is disabled for the Bruce Wayne account. "
+                "Add your own API key in Settings → AI Provider to unlock AI features. "
+                "Bruce Wayne always pays his own way."
+            ),
+        )
 
     # Ollama never needs an API key
     if effective_provider == "ollama":
@@ -119,8 +141,9 @@ def resolve_user_llm_config(
     # falls back to settings.{provider}_api_key).
     # Compare case-insensitively: user emails are stored lowercase but ADMIN_EMAIL
     # in the .env file may contain uppercase characters.
+    # Demo user: never eligible for admin key fallback.
     _admin_email_lower = (settings.admin_email or "").strip().lower()
-    if _admin_email_lower and user.email.lower() == _admin_email_lower:
+    if not _is_demo_user(user) and _admin_email_lower and user.email.lower() == _admin_email_lower:
         return LLMConfig(
             provider=(request_config.provider if request_config else None) or user.llm_provider,
             model=(request_config.model if request_config else None) or user.llm_model,
@@ -130,11 +153,12 @@ def resolve_user_llm_config(
             # api_key intentionally omitted → provider falls back to settings.{provider}_api_key
         )
 
-    # Non-admin with no stored key and no request key → error
+    # Non-admin (including demo user) with no stored key and no request key → error
+    demo_suffix = " Bruce Wayne can afford it." if _is_demo_user(user) else ""
     raise HTTPException(
         status_code=400,
         detail=(
             f"No API key configured for provider '{effective_provider}'. "
-            "Please add your API key in Settings → AI Provider."
+            f"Please add your API key in Settings → AI Provider.{demo_suffix}"
         ),
     )

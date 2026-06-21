@@ -17,7 +17,6 @@ from fastapi import HTTPException
 from app.config import settings
 from app.services.llm.base import BaseLLMProvider, LLMConfig, Message
 
-
 logger = structlog.get_logger(__name__)
 
 # Module-level singleton — created lazily inside the running event loop on first call.
@@ -78,12 +77,12 @@ class OllamaProvider(BaseLLMProvider):
             await asyncio.wait_for(
                 _get_semaphore().acquire(), timeout=settings.llm_semaphore_wait_timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "ollama.complete.semaphore_timeout",
                 max_concurrent=settings.ollama_max_concurrent,
             )
-            raise HTTPException(status_code=503, detail="LLM is busy. Please try again in a moment.")
+            raise HTTPException(status_code=503, detail="LLM is busy. Please try again in a moment.") from None
 
         try:
             url = f"{self._base_url(config)}/api/chat"
@@ -131,14 +130,14 @@ class OllamaProvider(BaseLLMProvider):
             await asyncio.wait_for(
                 _get_semaphore().acquire(), timeout=settings.llm_semaphore_wait_timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "ollama.stream.semaphore_timeout",
                 max_concurrent=settings.ollama_max_concurrent,
             )
             # Raising here means the SSE response will close immediately.
             # expense_chat.py catches ValueError from the provider and emits an SSE error event.
-            raise ValueError("LLM is busy. Please try again in a moment.")
+            raise ValueError("LLM is busy. Please try again in a moment.") from None
 
         try:
             async for chunk in self._stream_inner(messages, config):

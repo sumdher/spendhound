@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -82,7 +83,7 @@ async def fetch_monthly_report_pdf(user: User, report_month: date) -> bytes:
 async def get_or_create_monthly_report_delivery(
     db: AsyncSession,
     *,
-    user_id,
+    user_id: uuid.UUID,
     report_month: date,
 ) -> MonthlyReportDelivery:
     delivery_result = await db.execute(
@@ -120,7 +121,7 @@ async def send_monthly_report_for_user(
         return MonthlyReportSendResult(report_month=report_month_key, outcome="skipped", delivery=delivery)
 
     try:
-        attempted_at = datetime.now(timezone.utc)
+        attempted_at = datetime.now(UTC)
         delivery.status = "pending"
         delivery.attempted_at = attempted_at
         delivery.sent_at = None
@@ -141,7 +142,7 @@ async def send_monthly_report_for_user(
             raise RuntimeError("Monthly report email was not sent; verify Resend configuration")
 
         delivery.status = "sent"
-        delivery.sent_at = datetime.now(timezone.utc)
+        delivery.sent_at = datetime.now(UTC)
         delivery.resend_email_id = resend_email_id
         await db.commit()
         await db.refresh(delivery)
@@ -212,16 +213,47 @@ async def run_monthly_report_job(
         logger.info("monthly_reports.job.disabled", report_month=summary.report_month)
         return summary
 
+    # Local import avoids circular dependency:
+    # report_tasks → monthly_reports (helpers) → report_tasks (this import)
+    from app.tasks.report_tasks import deliver_monthly_report
+
+    report_month_str = report_month.strftime("%Y-%m")
     async_session_factory = session_factory or AsyncSessionLocal
     async with async_session_factory() as db:
-        summary = await send_monthly_reports_for_month(db, report_month)
+        users_result = await db.execute(
+            select(User).where(User.status == "approved").order_by(User.created_at.asc())
+        )
+        for user in users_result.scalars().all():
+            summary.processed_users += 1
+            if not user.automatic_monthly_reports:
+                summary.skipped_users += 1
+                logger.info(
+                    "monthly_reports.delivery.skipped",
+                    user_id=str(user.id),
+                    email=user.email,
+                    report_month=report_month_str,
+                    reason="automatic_monthly_reports_disabled",
+                )
+                continue
+
+            deliver_monthly_report.delay(
+                user_id=str(user.id),
+                report_month_str=report_month_str,
+            )
+            summary.sent_users += 1
+            logger.info(
+                "monthly_reports.delivery.queued",
+                user_id=str(user.id),
+                email=user.email,
+                report_month=report_month_str,
+            )
 
     logger.info(
         "monthly_reports.job.completed",
         report_month=summary.report_month,
         processed_users=summary.processed_users,
         skipped_users=summary.skipped_users,
-        sent_users=summary.sent_users,
+        queued_users=summary.sent_users,
         failed_users=summary.failed_users,
     )
     return summary

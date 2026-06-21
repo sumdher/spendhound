@@ -1,6 +1,5 @@
 """Ollama utility endpoints."""
 
-from typing import List
 
 import httpx
 from fastapi import APIRouter, Depends
@@ -21,10 +20,10 @@ EXCLUDED_MODELS = {
 }
 
 
-@router.get("/models", response_model=List[str])
+@router.get("/models", response_model=list[str])
 async def list_ollama_models(
     current_user: User = Depends(get_current_user),
-) -> List[str]:
+) -> list[str]:
     """
     Return available Ollama chat models by querying the Ollama API.
     Filters out known embedding models.

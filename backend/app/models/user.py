@@ -2,11 +2,24 @@
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, String, Text, Uuid, func, true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.budget import Budget
+    from app.models.category import Category, ItemKeywordRule, MerchantRule
+    from app.models.chat_message import ChatMessage
+    from app.models.chat_session import ChatSession
+    from app.models.expense import Expense
+    from app.models.item_embedding import ItemEmbedding
+    from app.models.ledger import Ledger, LedgerMembership
+    from app.models.monthly_report_delivery import MonthlyReportDelivery
+    from app.models.partner import PartnerRequest
+    from app.models.receipt import Receipt
 
 USER_STATUSES = ("pending", "approved", "rejected")
 

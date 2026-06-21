@@ -1411,13 +1411,23 @@ export default function NewExpensePage() {
                     setStatementError(null);
                     setStatementSuccess(null);
                     try {
-                      const receipt = await uploadStatement(file);
+                      let receipt = await uploadStatement(file);
                       setSelectedStatement(receipt);
-                      const entries = receipt.preview && isStatementPreview(receipt.preview) ? receipt.preview.entries : [];
-                      const nextIndex = Math.max(findNextPendingIndex(entries), 0);
-                      setStatementIndex(nextIndex);
-                      setStatementSuccess(`Imported ${entries.length} candidate transactions from ${receipt.original_filename}. Review each one before saving.`);
-                      setTab(STATEMENT_TAB);
+                      // Statement extraction runs in a Celery worker — poll until it finishes.
+                      while (receipt.extraction_status === "pending") {
+                        await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+                        receipt = await getReceipt(receipt.id);
+                        setSelectedStatement(receipt);
+                      }
+                      if (receipt.extraction_status === "error") {
+                        setStatementError(`Statement extraction failed for ${receipt.original_filename}`);
+                      } else {
+                        const entries = receipt.preview && isStatementPreview(receipt.preview) ? receipt.preview.entries : [];
+                        const nextIndex = Math.max(findNextPendingIndex(entries), 0);
+                        setStatementIndex(nextIndex);
+                        setStatementSuccess(`Imported ${entries.length} candidate transactions from ${receipt.original_filename}. Review each one before saving.`);
+                        setTab(STATEMENT_TAB);
+                      }
                     } catch (err) {
                       setStatementError(err instanceof Error ? err.message : "Statement upload failed");
                     } finally {

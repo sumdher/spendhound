@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Date, DateTime, ForeignKey, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 
 class MonthlyReportDelivery(Base):
@@ -36,4 +40,4 @@ class MonthlyReportDelivery(Base):
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship("User", back_populates="monthly_report_deliveries")
+    user: Mapped[User] = relationship("User", back_populates="monthly_report_deliveries")

@@ -3,7 +3,7 @@
 import asyncio
 import calendar
 import uuid
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -15,17 +15,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.admin import create_action_token, is_admin_email
 from app.config import settings
-from app.middleware.bot_detect import block_bots
-from app.middleware.rate_limit import limiter
 from app.database import get_db
 from app.middleware.auth import create_access_token, get_any_user, get_current_user
+from app.middleware.bot_detect import block_bots
+from app.middleware.rate_limit import limiter
 from app.models.expense import Expense
 from app.models.user import User
-from app.schemas.user import LLMTestRequest, LLMTestResponse, UserLLMSettingsUpdateRequest, UserReceiptPromptUpdateRequest, UserResponse, UserUpdateRequest
+from app.schemas.user import (
+    LLMTestRequest,
+    LLMTestResponse,
+    UserLLMSettingsUpdateRequest,
+    UserReceiptPromptUpdateRequest,
+    UserResponse,
+    UserUpdateRequest,
+)
 from app.services.email import send_approval_request_email
 from app.services.llm.encryption import encrypt_api_key
-from app.services.url_validation import validate_llm_base_url
 from app.services.spendhound import ensure_default_categories
+from app.services.url_validation import validate_llm_base_url
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -63,7 +70,7 @@ def serialize_user_profile(user: User) -> UserResponse:
 @limiter.limit(f"{settings.rate_limit_auth_per_minute}/minute")
 async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSession = Depends(get_db), _bot_check: None = Depends(block_bots)) -> AuthResponse:
     try:
-        id_info = id_token.verify_oauth2_token(body.id_token, google_requests.Request(), settings.google_client_id)
+        id_info = id_token.verify_oauth2_token(body.id_token, google_requests.Request(), settings.google_client_id)  # type: ignore[no-untyped-call]
     except ValueError as error:
         logger.warning("Invalid Google ID token", error=str(error))
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid Google token: {error}") from error
@@ -77,7 +84,7 @@ async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSessi
     user = result.scalar_one_or_none()
     is_new_user = user is None
 
-    if is_new_user:
+    if user is None:
         initial_status = "approved" if (is_admin_email(normalized_email) or not (settings.admin_email or "").strip()) else "pending"
         user = User(email=normalized_email, name=id_info.get("name"), avatar_url=id_info.get("picture"), status=initial_status)
         db.add(user)
@@ -113,6 +120,33 @@ async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSessi
             "status": user.status,
             "automatic_monthly_reports": user.automatic_monthly_reports,
             "is_admin": is_admin,
+        },
+    )
+
+
+@router.post("/demo-login", response_model=AuthResponse)
+async def demo_login(request: Request, db: AsyncSession = Depends(get_db)) -> AuthResponse:
+    """Issue a backend JWT for the Bruce Wayne demo account — no Google auth required.
+
+    Seeds the full demo dataset on first call.  Subsequent calls are instant.
+    Rate-limited to the same auth limit to prevent abuse.
+    """
+    from app.services.demo_seed import seed_demo_data
+
+    user = await seed_demo_data(db)
+
+    token = create_access_token(user.id, user.email)
+    return AuthResponse(
+        access_token=token,
+        user={
+            "id": str(user.id),
+            "email": user.email,
+            "name": user.name,
+            "avatar_url": user.avatar_url,
+            "status": "approved",
+            "automatic_monthly_reports": False,
+            "is_admin": False,
+            "is_demo": True,
         },
     )
 
@@ -166,10 +200,12 @@ async def update_llm_settings(
     elif body.llm_api_key:
         current_user.llm_api_key = encrypt_api_key(body.llm_api_key)
 
-    current_user.updated_at = datetime.now(timezone.utc)
+    current_user.updated_at = datetime.now(UTC)
     db.add(current_user)
     await db.commit()
     await db.refresh(current_user)
+    from app.services.cache import invalidate_llm_models_cache
+    await invalidate_llm_models_cache(current_user.id)
     return serialize_user_profile(current_user)
 
 
@@ -303,7 +339,7 @@ async def clear_my_data(
 
     result = await db.execute(stmt)
     await db.commit()
-    return {"deleted": result.rowcount}
+    return {"deleted": result.rowcount}  # type: ignore[attr-defined]
 
 
 @router.delete("/me")
@@ -311,7 +347,33 @@ async def delete_my_account(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Permanently delete the current user's account and all associated data."""
+    """Permanently erase the current user's account and all associated data.
+
+    GDPR Article 17 — Right to Erasure. Deletes:
+    - All DB rows (expenses, receipts, chat sessions, budgets, categories, etc.)
+      via FK ON DELETE CASCADE
+    - Uploaded receipt/statement files on disk
+    - Redis cache entries for this user (best-effort)
+    """
+    import shutil
+    from pathlib import Path
+
+    user_id = current_user.id
+
+    # Remove uploaded files before the DB row disappears
+    user_storage = Path(settings.receipt_storage_dir) / str(user_id)
+    if user_storage.exists():
+        shutil.rmtree(user_storage, ignore_errors=True)
+
+    # FK ON DELETE CASCADE handles all child rows; we only need to delete the parent
     await db.delete(current_user)
     await db.commit()
+
+    # Best-effort cache eviction — non-fatal if Redis is unreachable
+    try:
+        from app.services.cache import invalidate_analytics_cache
+        await invalidate_analytics_cache(user_id)
+    except Exception:
+        pass
+
     return {"deleted": True}

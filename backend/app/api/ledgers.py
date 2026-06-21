@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,7 +19,6 @@ from app.models.expense_item import ExpenseItem
 from app.models.ledger import Ledger, LedgerAuditLog, LedgerMembership
 from app.models.partner import PARTNER_STATUS_ACCEPTED, PartnerRequest
 from app.models.user import User
-from app.services.spendhound import serialize_expense
 
 router = APIRouter()
 logger = structlog.get_logger(__name__)
@@ -120,14 +119,14 @@ async def list_ledgers(
     user_result = await db.execute(select(User).where(User.id.in_(user_ids)))
     user_map = {u.id: u for u in user_result.scalars().all()}
     for m in all_memberships:
-        m.user = user_map.get(m.user_id)
+        m.user = user_map.get(m.user_id)  # type: ignore[assignment]
 
     memberships_by_ledger: dict[uuid.UUID, list[LedgerMembership]] = {}
     for m in all_memberships:
         memberships_by_ledger.setdefault(m.ledger_id, []).append(m)
 
     return {
-        "ledgers": [_serialize_ledger(l, memberships_by_ledger.get(l.id, [])) for l in ledgers]
+        "ledgers": [_serialize_ledger(ldg, memberships_by_ledger.get(ldg.id, [])) for ldg in ledgers]
     }
 
 
@@ -178,9 +177,9 @@ async def create_ledger(
     user_result = await db.execute(select(User).where(User.id.in_(user_ids)))
     user_map = {u.id: u for u in user_result.scalars().all()}
     for m in memberships:
-        m.user = user_map.get(m.user_id)
+        m.user = user_map.get(m.user_id)  # type: ignore[assignment]
 
-    return _serialize_ledger(ledger, memberships)
+    return _serialize_ledger(ledger, list(memberships))
 
 
 @router.patch("/{ledger_id}")
@@ -195,7 +194,7 @@ async def update_ledger(
         raise HTTPException(status_code=403, detail="Only the ledger owner can rename it")
     if body.name:
         ledger.name = body.name.strip()
-        ledger.updated_at = datetime.now(timezone.utc)
+        ledger.updated_at = datetime.now(UTC)
     await db.commit()
     return _serialize_ledger(ledger)
 
@@ -256,8 +255,8 @@ async def add_ledger_members(
     user_result = await db.execute(select(User).where(User.id.in_(user_ids)))
     user_map = {u.id: u for u in user_result.scalars().all()}
     for m in memberships:
-        m.user = user_map.get(m.user_id)
-    return _serialize_ledger(ledger, memberships)
+        m.user = user_map.get(m.user_id)  # type: ignore[assignment]
+    return _serialize_ledger(ledger, list(memberships))
 
 
 @router.delete("/{ledger_id}/leave")
@@ -419,7 +418,7 @@ async def copy_expenses(
                     description=item.description,
                     quantity=item.quantity,
                     unit_price=item.unit_price,
-                    total=item.total,
+                    total_price=item.total_price,
                     subcategory=item.subcategory,
                 ))
 

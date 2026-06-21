@@ -1,16 +1,19 @@
 """
-In-process rate limiter using slowapi (a FastAPI port of Flask-Limiter).
+Rate limiter using slowapi (a FastAPI port of Flask-Limiter) backed by Redis.
 
 Key design decisions:
 - Per-user-ID key for authenticated endpoints (JWT sub claim), per-IP for auth endpoints.
-- In-memory storage — correct for single uvicorn worker (--workers 1).
-  If you ever move to multiple workers, replace with a Redis backend.
+- Redis storage: counters survive backend restarts and are consistent across deploys.
+  The storage_uri is driven by settings.redis_url so the backend and any future
+  workers all share the same counter store.
 - Limits are configurable via settings so you can tune without code changes.
 """
 
+from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from fastapi import Request
+
+from app.config import settings
 
 
 def _rate_limit_key(request: Request) -> str:
@@ -31,4 +34,4 @@ def _rate_limit_key(request: Request) -> str:
     return f"ip:{get_remote_address(request)}"
 
 
-limiter = Limiter(key_func=_rate_limit_key)
+limiter = Limiter(key_func=_rate_limit_key, storage_uri=settings.redis_url, strategy="moving-window")

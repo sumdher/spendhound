@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.expense import Expense
+    from app.models.user import User
 
 
 class Receipt(Base):
@@ -34,5 +39,5 @@ class Receipt(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    user: Mapped["User"] = relationship("User", back_populates="receipts")
-    expenses: Mapped[list["Expense"]] = relationship("Expense", back_populates="receipt")
+    user: Mapped[User] = relationship("User", back_populates="receipts")
+    expenses: Mapped[list[Expense]] = relationship("Expense", back_populates="receipt")

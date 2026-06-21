@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 PARTNER_STATUS_PENDING = "pending"
 PARTNER_STATUS_ACCEPTED = "accepted"
@@ -27,5 +31,5 @@ class PartnerRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    requester: Mapped["User"] = relationship("User", foreign_keys=[requester_id], back_populates="sent_partner_requests")
-    recipient: Mapped["User | None"] = relationship("User", foreign_keys=[recipient_id], back_populates="received_partner_requests")
+    requester: Mapped[User] = relationship("User", foreign_keys=[requester_id], back_populates="sent_partner_requests")
+    recipient: Mapped[User | None] = relationship("User", foreign_keys=[recipient_id], back_populates="received_partner_requests")

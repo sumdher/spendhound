@@ -47,7 +47,8 @@ function RefreshIcon({ spinning }: { spinning: boolean }) {
 
 function Avatar({ name, avatarUrl }: { name?: string | null; avatarUrl?: string | null }) {
   const initials = (name || "?").split(/\s+/).filter(Boolean).slice(0, 2).map((c) => c[0]?.toUpperCase() || "").join("");
-  if (avatarUrl) return <img src={avatarUrl} alt={name ?? ""} className="h-5 w-5 rounded-full object-cover border border-border" referrerPolicy="no-referrer" title={name ?? ""} />;
+  const [broken, setBroken] = useState(false);
+  if (avatarUrl && !broken) return <img src={avatarUrl} alt={name ?? ""} className="h-5 w-5 rounded-full object-cover border border-border" referrerPolicy="no-referrer" title={name ?? ""} onError={() => setBroken(true)} />;
   return <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/20 text-[9px] font-bold text-primary border border-border" title={name ?? ""}>{initials}</div>;
 }
 

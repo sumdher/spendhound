@@ -9,7 +9,7 @@ services:
     container_name: spendhound_db_prod
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-spendhound}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-spendhound}
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -27,6 +27,28 @@ services:
         reservations:
           memory: 256M
 
+  redis:
+    image: redis:7-alpine
+    container_name: spendhound_redis_prod
+    # No host port — reachable only by containers on this network.
+    # cap_drop omitted: redis:alpine entrypoint uses setpriv to drop from root to
+    # the redis user at startup; CAP_SETUID/SETGID are required for that syscall.
+    # Redis is internal-only (no exposed port, no external traffic), so capability
+    # hardening here adds no meaningful protection.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 64M
+
   backend:
     build:
       context: ./backend
@@ -34,16 +56,37 @@ services:
       target: production
     container_name: spendhound_backend_prod
     env_file:
-      - ./backend/.env
+      - path: ./backend/.env    # non-secret config only — optional, all secrets via env block
+        required: false
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-spendhound}:${POSTGRES_PASSWORD:-change-me-in-production}@db:5432/${POSTGRES_DB:-spendhound}}
-    command: >
-      sh -c "alembic upgrade head &&
-             exec uvicorn app.main:app --host 0.0.0.0 --port 8000
-             --workers ${UVICORN_WORKERS:-1}
-             --access-log --timeout-keep-alive 30"
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-spendhound}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-spendhound}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # Secrets — injected by `infisical run` via Makefile
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET}
+      MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
+      MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
+      METRICS_TOKEN: ${METRICS_TOKEN}
+    volumes:
+      - receipt_storage:/app/storage/receipts
+    command:
+      - sh
+      - -c
+      - |
+        set -e
+        alembic upgrade head
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-1} --access-log --timeout-keep-alive 30
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     security_opt:
       - no-new-privileges:true
@@ -65,18 +108,127 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: spendhound_celery_worker_prod
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-spendhound}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-spendhound}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      # Secrets — injected by `infisical run` via Makefile
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      NEBIUS_API_KEY: ${NEBIUS_API_KEY:-}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET}
+      MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
+      MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=1
+    volumes:
+      - receipt_storage:/app/storage/receipts
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: spendhound_prometheus_prod
+    # Write METRICS_TOKEN to a file at startup; prometheus.prod.yml reads it via
+    # credentials_file so the secret is never hardcoded in the config file.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        printf '%s' "$$METRICS_TOKEN" > /run/metrics_token
+        exec /bin/prometheus \
+          --config.file=/etc/prometheus/prometheus.yml \
+          --storage.tsdb.path=/prometheus \
+          --web.listen-address=0.0.0.0:9090
+    environment:
+      METRICS_TOKEN: ${METRICS_TOKEN}
+    ports:
+      - "127.0.0.1:9090:9090"    # SSH tunnel: ssh -L 9090:localhost:9090 user@server
+    volumes:
+      - ./prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      backend:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: spendhound_grafana_prod
+    ports:
+      - "127.0.0.1:3004:3000"    # SSH tunnel: ssh -L 3004:localhost:3004 user@server
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
       target: production
     container_name: spendhound_frontend_prod
-    env_file:
-      - ./frontend/.env
     environment:
       INTERNAL_API_URL: http://backend:8000
       PORT: 3000
       HOSTNAME: 0.0.0.0
+      # Secrets — injected by `infisical run` via Makefile
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
+      MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
+      MONTHLY_REPORTS_BACKEND_JWT_SECRET: ${MONTHLY_REPORTS_BACKEND_JWT_SECRET}
+      MONTHLY_REPORTS_BACKEND_JWT_ALGORITHM: ${MONTHLY_REPORTS_BACKEND_JWT_ALGORITHM:-HS256}
+      PUPPETEER_EXECUTABLE_PATH: ${PUPPETEER_EXECUTABLE_PATH:-/usr/bin/chromium-browser}
     ports:
       - "${FRONTEND_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3002}:3000"
     depends_on:
@@ -119,3 +271,6 @@ services:
 
 volumes:
   postgres_data:
+  receipt_storage:
+  prometheus_data:
+  grafana_data:

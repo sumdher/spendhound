@@ -1,0 +1,180 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  backend:
+    name: Backend (lint · typecheck · test)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Type check (mypy)
+        run: mypy .
+
+      - name: Test (pytest)
+        run: pytest
+
+  migrations:
+    name: Migrations (upgrade · downgrade · upgrade)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: spendhound
+          POSTGRES_PASSWORD: spendhound
+          POSTGRES_DB: spendhound_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U spendhound"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://spendhound:spendhound@localhost:5432/spendhound_ci
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip setuptools wheel
+          pip install -e ".[dev]"
+
+      - name: Upgrade to head
+        run: alembic upgrade head
+
+      - name: Downgrade to SpendHound base (0007)
+        run: alembic downgrade 0007
+
+      - name: Upgrade to head again
+        run: alembic upgrade head
+
+  docker-build:
+    name: Docker build (production targets)
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        run: docker build --target production -f backend/Dockerfile backend/
+
+      - name: Build frontend image
+        run: docker build --target production -f frontend/Dockerfile frontend/
+
+  frontend:
+    name: Frontend (lint · typecheck)
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (ESLint)
+        run: npm run lint
+
+      - name: Type check (tsc)
+        run: npm run type-check
+
+  deploy:
+    name: Deploy to production (zoro)
+    runs-on: self-hosted
+    needs: [backend, migrations, frontend, docker-build]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate with Infisical
+        run: |
+          TOKEN=$(infisical login \
+            --method=universal-auth \
+            --client-id="${{ secrets.INFISICAL_CLIENT_ID }}" \
+            --client-secret="${{ secrets.INFISICAL_CLIENT_SECRET }}" \
+            --plain \
+            --silent \
+            --domain=https://eu.infisical.com/api)
+          echo "::add-mask::$TOKEN"
+          echo "INFISICAL_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Deploy
+        run: |
+          infisical run \
+            --env prod \
+            --path / \
+            --recursive \
+            --domain=https://eu.infisical.com/api \
+            -- docker compose -f docker-compose.prod.yml up --build --force-recreate -d
+
+      - name: Wait for backend healthy
+        run: |
+          echo "Waiting for spendhound_backend_prod to become healthy (max 2 min)..."
+          for i in $(seq 1 24); do
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' spendhound_backend_prod 2>/dev/null || echo "missing")
+            case "$STATUS" in
+              healthy)
+                echo "Healthy after $((i * 5))s."
+                exit 0
+                ;;
+              unhealthy)
+                echo "Container unhealthy. Recent logs:"
+                docker compose -f docker-compose.prod.yml logs --tail=50 backend
+                exit 1
+                ;;
+              *)
+                printf '[%d/24] %s — retrying in 5s...\n' "$i" "$STATUS"
+                sleep 5
+                ;;
+            esac
+          done
+          echo "Timed out waiting for healthy. Recent logs:"
+          docker compose -f docker-compose.prod.yml logs --tail=50
+          exit 1

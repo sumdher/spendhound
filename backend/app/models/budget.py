@@ -5,11 +5,16 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Date, DateTime, ForeignKey, Numeric, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+if TYPE_CHECKING:
+    from app.models.category import Category
+    from app.models.user import User
 
 
 class Budget(Base):
@@ -29,5 +34,5 @@ class Budget(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
-    user: Mapped["User"] = relationship("User", back_populates="budgets")
-    category: Mapped["Category | None"] = relationship("Category", back_populates="budgets")
+    user: Mapped[User] = relationship("User", back_populates="budgets")
+    category: Mapped[Category | None] = relationship("Category", back_populates="budgets")

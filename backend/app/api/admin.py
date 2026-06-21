@@ -1,7 +1,7 @@
 """Admin API router for user approval and account management."""
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from html import escape
 
 import structlog
@@ -36,7 +36,7 @@ async def get_admin_user(current_user: User = Depends(get_current_user)) -> User
 
 
 def create_action_token(user_id: uuid.UUID, action: str) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(hours=_ACTION_TOKEN_EXPIRY_HOURS)
+    expire = datetime.now(UTC) + timedelta(hours=_ACTION_TOKEN_EXPIRY_HOURS)
     return jwt.encode({"sub": str(user_id), "action": action, "exp": expire}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 

@@ -10,6 +10,7 @@ declare module "next-auth" {
     accessToken?: string;
     userStatus?: string;
     isAdmin?: boolean;
+    isDemo?: boolean;
     user: {
       id?: string;
       avatar_url?: string;
@@ -21,6 +22,7 @@ declare module "next-auth" {
     avatar_url?: string;
     userStatus?: string;
     isAdmin?: boolean;
+    isDemo?: boolean;
   }
 }
 
@@ -30,5 +32,6 @@ declare module "next-auth/jwt" {
     avatar_url?: string;
     userStatus?: string;
     isAdmin?: boolean;
+    isDemo?: boolean;
   }
 }

@@ -14,7 +14,18 @@ from app.models.budget import Budget
 from app.models.category import Category
 from app.models.expense import Expense
 from app.models.expense_item import ExpenseItem
-from app.services.spendhound import CADENCE_ONE_TIME, CADENCE_PREPAID, TRANSACTION_TYPE_CREDIT, TRANSACTION_TYPE_DEBIT, _compute_prepaid_end_date, derive_grocery_subcategory, month_start_from_string, next_month, serialize_budget, signed_amount
+from app.services.spendhound import (
+    CADENCE_ONE_TIME,
+    CADENCE_PREPAID,
+    TRANSACTION_TYPE_CREDIT,
+    TRANSACTION_TYPE_DEBIT,
+    _compute_prepaid_end_date,
+    derive_grocery_subcategory,
+    month_start_from_string,
+    next_month,
+    serialize_budget,
+    signed_amount,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -91,7 +102,7 @@ async def _build_grocery_insights(db: AsyncSession, user_id: uuid.UUID, selected
         f"Most grocery spend went to {top_subcategories[0]['name']}"
         + (f", followed by {top_subcategories[1]['name']}" if len(top_subcategories) > 1 else "")
         + (
-            f". Your lightest categories were {', '.join(item['name'] for item in least_subcategories)}."
+            f". Your lightest categories were {', '.join(str(item['name']) for item in least_subcategories)}."
             if least_subcategories
             else "."
         )
@@ -274,7 +285,7 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
             "net": net_total,
             "money_out_by_currency": {k: round(v, 2) for k, v in sorted(money_out_by_currency.items(), key=lambda item: (item[0] != "EUR", -item[1]))},
             "money_in_by_currency": {k: round(v, 2) for k, v in sorted(money_in_by_currency.items(), key=lambda item: (item[0] != "EUR", -item[1]))},
-            "net_by_currency": {k: v for k, v in sorted(net_by_currency.items(), key=lambda item: item[0] != "EUR")},
+            "net_by_currency": dict(sorted(net_by_currency.items(), key=lambda item: item[0] != "EUR")),
             "transaction_count": transaction_count,
             "average_transaction": average_transaction,
             "average_outflow": average_transaction,

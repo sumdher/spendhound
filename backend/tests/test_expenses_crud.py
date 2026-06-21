@@ -14,7 +14,12 @@ from app.models.category import Category
 from app.models.expense import Expense
 from app.models.expense_item import ExpenseItem
 from app.models.receipt import Receipt
-from app.services.spendhound import generate_recurring_expenses_for_month, normalize_money, recompute_recurring_expenses, replace_expense_items
+from app.services.spendhound import (
+    generate_recurring_expenses_for_month,
+    normalize_money,
+    recompute_recurring_expenses,
+    replace_expense_items,
+)
 
 pytestmark = pytest.mark.asyncio
 
