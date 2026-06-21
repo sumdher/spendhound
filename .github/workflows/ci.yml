@@ -131,8 +131,6 @@ jobs:
     environment: production
 
     steps:
-      - uses: actions/checkout@v4
-
       - name: Authenticate with Infisical
         run: |
           TOKEN=$(infisical login \
@@ -147,6 +145,8 @@ jobs:
 
       - name: Deploy
         run: |
+          cd /home/zorino/repos/spendhound
+          git pull
           infisical run \
             --projectId=1587b73d-ea93-43b2-8e44-bafee5ddba7d \
             --env prod \
@@ -167,7 +167,7 @@ jobs:
                 ;;
               unhealthy)
                 echo "Container unhealthy. Recent logs:"
-                docker compose -f docker-compose.prod.yml logs --tail=50 backend
+                docker compose -f /home/zorino/repos/spendhound/docker-compose.prod.yml logs --tail=50 backend
                 exit 1
                 ;;
               *)
@@ -177,5 +177,5 @@ jobs:
             esac
           done
           echo "Timed out waiting for healthy. Recent logs:"
-          docker compose -f docker-compose.prod.yml logs --tail=50
+          docker compose -f /home/zorino/repos/spendhound/docker-compose.prod.yml logs --tail=50
           exit 1
