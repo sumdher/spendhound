@@ -1,49 +1,75 @@
 # SpendHound
 
-SpendHound is a production-ready, full-stack AI expense tracker with multimodal receipt extraction, RAG-powered financial chat, multi-currency shared ledgers, recurring expense automation, budget analytics, and automated monthly PDF reports. Optimized for Italian receipts; works with any language.
+SpendHound is a self-hosted, full-stack AI expense tracker with multimodal receipt parsing,
+RAG-powered financial chat, multi-currency shared ledgers, recurring expense automation,
+budget analytics, and automated monthly PDF reports. Optimized for Italian receipts; works
+with any language.
+
+Licensed under the [GNU Affero General Public License v3.0](LICENSE).
+
+---
 
 ## Features
 
-- Google OAuth with admin approval flow
-- Multimodal receipt upload — extracts merchant, amount, date, and line items via LLM; falls back through a 3-tier OCR stack (pdfplumber → pdfminer → pytesseract) for large files
+- Google OAuth with admin approval gate
+- Multimodal receipt upload: extracts merchant, amount, date, and line items via LLM; falls
+  back through a 3-tier OCR stack (pdfplumber -> pdfminer -> pytesseract) for large files
 - Bank statement PDF import with per-transaction confidence scores
 - Manual expense entry with full edit support
-- RAG semantic item classification using pgvector + Ollama embeddings with a user-correction learning loop
+- RAG semantic item classification using pgvector + Ollama embeddings with a user-correction
+  learning loop
 - Editable categories, merchant rules, and item keyword rules (global admin-wide + per-user)
 - SSE-streaming financial chat grounded on 90 days of live expense data
 - Multi-currency shared ledgers with role-based membership and full audit trail
-- Recurring expenses (6 cadence types: monthly, quarterly, annual, custom-interval, prepaid, one-time) with auto-generation
+- Recurring expenses (monthly, yearly, custom-interval, prepaid, one-time) with auto-generation
 - Monthly dashboard analytics and budget-versus-actual tracking
 - Review queue for low-confidence or uncategorized items
 - CSV and JSON exports
 - Automated monthly PDF report delivery via Puppeteer + Resend
 - Admin approval panel with JWT-signed email-link tokens
-- Pluggable LLM providers: Ollama (default, local, no API key required), Anthropic Claude, OpenAI, Nebius, and OpenAI-compatible endpoints
+- Pluggable LLM providers: Ollama (default, local, no API key required), Anthropic Claude,
+  OpenAI, DeepSeek, Nebius, and any OpenAI-compatible endpoint (OpenRouter, Groq, Together AI,
+  Mistral)
+- Celery + Redis task queue: receipt extraction, statement parsing, and report delivery all
+  run as durable background tasks that survive process restarts
+- Prometheus metrics + Grafana dashboards for request latency, LLM latency, queue depth,
+  and rate-limit hits
+- Demo mode: public Bruce Wayne account, automatically reset every 30 minutes via Celery Beat
+- GDPR Article 17 compliance: full account erasure and selective data deletion endpoints
+
+---
 
 ## Stack
 
 | Layer | Technology |
 |---|---|
-| Backend | FastAPI 0.115 · Python 3.12 · SQLAlchemy 2.0 async · asyncpg |
+| Backend | FastAPI 0.115 + Python 3.12 + SQLAlchemy 2.0 async + asyncpg |
+| Task queue | Celery 5 + Redis 7 |
 | Database | PostgreSQL 16 + pgvector extension |
-| Migrations | Alembic |
-| Frontend | Next.js 14.2 App Router · NextAuth.js 4.24 · TailwindCSS · Recharts |
-| Auth | Google OAuth 2.0 · HS256 JWT (python-jose) |
-| LLM | Anthropic Claude · OpenAI · Ollama · Nebius (pluggable factory) |
-| PDF generation | Puppeteer (headless Chromium, via Next.js internal route) |
+| Migrations | Alembic (21 migration files, full up/down coverage) |
+| Frontend | Next.js 14.2 App Router + NextAuth.js 4.24 + TailwindCSS + Recharts |
+| Auth | Google OAuth 2.0 + HS256 JWT (python-jose) |
+| LLM | Anthropic Claude, OpenAI, Ollama, DeepSeek, Nebius, OpenRouter, Groq, Together AI, Mistral |
+| Embeddings | Ollama (768-dim) + pgvector |
+| PDF generation | Puppeteer (headless Chromium via Next.js internal route) |
 | Email | Resend API |
+| Observability | Prometheus + Grafana (provisioned dashboards) + Flower (Celery monitor) |
+| Secrets | Infisical (CLI-injected at runtime; no .env files in source) |
 | Containerization | Docker + Docker Compose |
 
 ---
 
 ## Prerequisites
 
-| Tool | Minimum version |
-|---|---|
-| Docker + Compose v2 plugin | Docker 24+ |
-| Python | 3.12+ (local dev only) |
-| Node.js | 18+ (local dev only) |
-| Ollama | any recent release (optional, for local LLM) |
+| Tool | Minimum version | Notes |
+|---|---|---|
+| Docker + Compose v2 plugin | Docker 24+ | Required for Docker-based setup |
+| Infisical CLI | any recent release | Required for the recommended dev/prod workflow |
+| Python | 3.12+ | Local dev only (without Docker) |
+| Node.js | 18+ | Local dev only (without Docker) |
+| Ollama | any recent release | Optional -- local LLM; no API key needed |
+
+Install Infisical CLI: https://infisical.com/docs/cli/overview
 
 ---
 
@@ -51,26 +77,37 @@ SpendHound is a production-ready, full-stack AI expense tracker with multimodal 
 
 SpendHound requires a Google OAuth 2.0 client for sign-in.
 
-1. Go to [console.cloud.google.com](https://console.cloud.google.com) → **APIs & Services** → **Credentials**
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) > **APIs & Services** > **Credentials**
 2. Create an **OAuth 2.0 Client ID** (type: Web application)
-3. Add these to **Authorised redirect URIs**:
-   - `http://localhost:3000/api/auth/callback/google` (local frontend dev)
-   - `http://localhost:3001/api/auth/callback/google` (Docker Compose)
+3. Add to **Authorised redirect URIs**:
+   - `http://localhost:3000/api/auth/callback/google` (local dev, Docker or bare)
    - `https://yourdomain.com/api/auth/callback/google` (production)
-4. Copy **Client ID** and **Client Secret** — you will need both below
+4. Copy **Client ID** and **Client Secret**
 
 ---
 
-## Local development with Docker Compose
+## Quick start (Docker Compose + Infisical)
 
-### 1. Clone and enter the repository
+This is the recommended path. Infisical injects secrets at runtime so no secrets are ever
+written to disk or committed to git.
+
+### 1. Clone
 
 ```bash
-git clone https://github.com/your-username/spendhound.git
+git clone https://github.com/sumdher/spendhound.git
 cd spendhound
 ```
 
-### 2. Generate secrets
+### 2. Create an Infisical project and populate secrets
+
+Sign up at https://infisical.com, create a project, and add the secrets listed in the
+[Environment variables reference](#environment-variables-reference) below. Then log in once:
+
+```bash
+infisical login
+```
+
+### 3. Generate secrets locally (values to paste into Infisical)
 
 ```bash
 # JWT signing key (backend)
@@ -79,100 +116,68 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 # NextAuth secret (frontend)
 python3 -c "import secrets; print(secrets.token_hex(32))"
 
-# Fernet key for encrypting user LLM API keys at rest (backend, optional but recommended)
+# Fernet key for encrypting user LLM API keys at rest (optional but recommended)
 python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+# Shared secret for the internal Puppeteer PDF endpoint (required if monthly reports enabled)
+python3 -c "import secrets; print(secrets.token_hex(32))"
 ```
 
-### 3. Configure environment files
+### 4. Start the stack
 
 ```bash
-cp .env.example .env
+make dev          # foreground (recommended for first run)
+make dev-detach   # background
+```
+
+The `make dev` target runs:
+```
+infisical run --env dev --path / --recursive -- docker compose up --build
+```
+
+Alembic migrations run automatically before the backend starts.
+
+### 5. Sign in
+
+Open http://localhost:3000, click **Sign in with Google**, and sign in with the email you
+configured as `ADMIN_EMAIL`. That account is auto-approved. All other accounts start as
+`pending` and require admin approval via the email link sent to `ADMIN_EMAIL`.
+
+---
+
+## Docker Compose services
+
+| Service | Dev URL | Notes |
+|---|---|---|
+| Frontend | http://localhost:3000 | Next.js app |
+| Backend API | http://localhost:8000 | FastAPI; `/docs` only when `DEBUG=true` |
+| PostgreSQL | localhost:5432 | pgvector-enabled |
+| Redis | (internal only) | Task broker + cache; no host port exposed |
+| Celery worker | (no HTTP) | Processes receipt extraction and report tasks |
+| Celery Beat | (no HTTP) | Runs scheduled tasks (demo reset, recurring expenses) |
+| Flower | http://localhost:5555 | Celery task monitor (dev only) |
+| Prometheus | http://localhost:9090 | Metrics scraper |
+| Grafana | http://localhost:3004 | Pre-provisioned dashboards; anonymous admin in dev |
+
+---
+
+## Quick start (manual .env, without Infisical)
+
+If you prefer not to use Infisical, create the env files manually.
+
+```bash
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env
 ```
 
-**`backend/.env` — required values:**
-
-```env
-GOOGLE_CLIENT_ID=<your Google OAuth client ID>
-GOOGLE_CLIENT_SECRET=<your Google OAuth client secret>
-JWT_SECRET=<strong random value from step 2 — app refuses to start without this>
-ADMIN_EMAIL=<your email — auto-approved on first sign-in, receives user approval requests>
-```
-
-**`backend/.env` — optional values:**
-
-```env
-# Approval emails (requires a Resend account)
-RESEND_API_KEY=<your Resend API key>
-RESEND_FROM_EMAIL=<a sender address verified on your Resend account>
-APP_URL=http://localhost:3001   # or your production URL — used in approval email links
-
-# LLM providers (Ollama is used by default and requires no key)
-OLLAMA_URL=http://host.docker.internal:11434
-OLLAMA_MODEL=gemma4:4b
-ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=claude-sonnet-4-20250514
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4o-mini
-
-# Encrypt user-supplied LLM API keys stored in the database
-LLM_KEY_ENCRYPTION_SECRET=<Fernet key from step 2>
-
-# Monthly PDF reports (requires Puppeteer-compatible Chromium in the frontend container)
-MONTHLY_REPORTS_ENABLED=false
-MONTHLY_REPORTS_FRONTEND_TOKEN=<strong random shared secret>
-
-# Recurring expense auto-generation
-RECURRING_GENERATION_ENABLED=false
-
-# Rate limits (defaults shown)
-RATE_LIMIT_AUTH_PER_MINUTE=10
-RATE_LIMIT_UPLOAD_PER_MINUTE=3
-RATE_LIMIT_CHAT_PER_MINUTE=20
-
-# Debug mode — enables /docs, /redoc, /openapi.json; skips startup secret check
-DEBUG=false
-```
-
-**`frontend/.env` — required values:**
-
-```env
-GOOGLE_CLIENT_ID=<same Google OAuth client ID>
-GOOGLE_CLIENT_SECRET=<same Google OAuth client secret>
-NEXTAUTH_SECRET=<strong random value from step 2>
-NEXTAUTH_URL=http://localhost:3001   # or your production URL
-```
-
-**`frontend/.env` — optional values:**
-
-```env
-# Required only if monthly reports are enabled
-MONTHLY_REPORTS_FRONTEND_TOKEN=<same value as backend>
-MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER=X-SpendHound-Internal-Token
-MONTHLY_REPORTS_BACKEND_JWT_SECRET=<same value as JWT_SECRET in backend>
-```
-
-### 4. Start the app
+Fill in the required values (see the reference tables below), then:
 
 ```bash
 docker compose up --build
 ```
 
-Services:
-
-| Service | URL |
-|---|---|
-| Frontend | http://localhost:3001 |
-| Backend API | http://localhost:8000 |
-| API docs (debug only) | http://localhost:8000/docs — only when `DEBUG=true` |
-| PostgreSQL | localhost:5432 |
-
-The backend container runs `alembic upgrade head` automatically before starting.
-
-### 5. Sign in
-
-Open http://localhost:3001, click **Sign in with Google**, and sign in with the email you set as `ADMIN_EMAIL`. That account is auto-approved. All other accounts start as `pending` and require admin approval via the email link sent to `ADMIN_EMAIL`.
+The Makefile targets (`make dev`, etc.) require Infisical. Use `docker compose` directly
+when running without it.
 
 ---
 
@@ -185,9 +190,16 @@ cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
-cp .env.example .env   # then fill in the values above
+cp .env.example .env   # fill in required values
 alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+Start the Celery worker and beat scheduler in separate terminals:
+
+```bash
+celery -A app.celery_app worker --loglevel=info --concurrency=1
+celery -A app.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
 ```
 
 ### Frontend
@@ -195,7 +207,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```bash
 cd frontend
 npm install
-cp .env.example .env   # then fill in the values above
+cp .env.example .env   # fill in required values
 npm run dev            # http://localhost:3000
 ```
 
@@ -214,8 +226,97 @@ NEXTAUTH_URL=http://localhost:3000
 ```bash
 cd backend
 pip install -e .[dev]
-pytest tests/test_expenses_crud.py tests/test_parser.py
+pytest
 ```
+
+Tests use SQLite in-memory + fakeredis. No external services required. pgvector-specific
+code (RAG embeddings) is not covered by the test suite; run the `migrations` CI job
+(real PostgreSQL) to verify pgvector migration SQL.
+
+---
+
+## Observability
+
+### Prometheus
+
+Custom metrics exposed at `GET /metrics` (requires `Authorization: Bearer <METRICS_TOKEN>`):
+
+| Metric | Type | Description |
+|---|---|---|
+| `receipt_queue_depth` | Gauge | Pending tasks in the Celery/Redis queue |
+| `llm_response_seconds` | Histogram | LLM `complete()` latency, labelled by provider |
+| `rate_limit_hits_total` | Counter | Rejected requests, labelled by endpoint and limit type |
+| `http_request_duration_seconds` | Histogram | Standard ASGI metrics via prometheus-fastapi-instrumentator |
+
+### Grafana
+
+Pre-provisioned dashboards are in `grafana/provisioning/`. Grafana reads from the
+Prometheus datasource automatically. In dev, anonymous admin access is enabled. In
+production, set `GRAFANA_ADMIN_PASSWORD` and disable anonymous access.
+
+In production, Prometheus and Grafana are bound to `127.0.0.1` only. Access via SSH tunnel:
+
+```bash
+ssh -L 9090:localhost:9090 -L 3004:localhost:3004 user@your-server
+```
+
+---
+
+## Demo mode
+
+SpendHound ships with a public demo account (Bruce Wayne, `bruce.wayne@wayneenterprises.com`)
+pre-seeded with 50+ expenses, budgets, categories, and chat history.
+
+- Click **Try demo** on the login page -- no Google account required
+- All changes are wiped and the seed data is restored every 30 minutes on the hour
+  (at `:00` and `:30`) by a Celery Beat task
+- The demo account cannot use the server's Ollama instance; a personal API key is required
+  to use AI features in the demo
+
+To enable demo mode, set `DEMO_USER_EMAIL=bruce.wayne@wayneenterprises.com` in your
+backend config. The demo reset task is always scheduled in Celery Beat; it is a no-op if
+no demo user exists in the database.
+
+---
+
+## CI/CD pipeline
+
+Two GitHub Actions workflows are in `.github/workflows/`.
+
+### CI (`ci.yml`)
+
+Triggers on every pull request to `main` and every push to `main`. Four jobs run in
+parallel on GitHub-hosted `ubuntu-latest` runners:
+
+| Job | What it does |
+|---|---|
+| `backend` | `ruff check` + `mypy` + `pytest` (SQLite + fakeredis) |
+| `migrations` | Alembic round-trip against real `pgvector/pgvector:pg16`: upgrade -> downgrade to 0007 -> upgrade |
+| `frontend` | ESLint + `tsc --noEmit` |
+| `docker-build` | `docker build --target production` for both backend and frontend |
+
+### CD (`cd.yml`)
+
+Triggers only after `ci.yml` completes successfully on `main`. Runs on a self-hosted
+runner on the production server.
+
+Steps:
+1. Authenticates with Infisical using short-lived machine credentials
+2. Pulls the validated commit from git
+3. Runs `infisical run --env prod -- docker compose -f docker-compose.prod.yml up --build --force-recreate -d`
+4. Polls `docker inspect` for `spendhound_backend_prod` health for up to 2 minutes; dumps
+   logs and exits 1 if the container becomes unhealthy or the timeout is reached
+
+The CD job is gated behind a GitHub environment (`production`) that requires a manual
+approval click before it runs.
+
+### Branch protection (main)
+
+- All four CI jobs must pass before merge
+- PR required before merge; up-to-date branches enforced
+- No force pushes; no branch deletion
+- Any PR from a non-collaborator requires manual approval before workflows run
+- `.github/CODEOWNERS` requires `@sumdher` review on any change to workflow files
 
 ---
 
@@ -223,81 +324,87 @@ pytest tests/test_expenses_crud.py tests/test_parser.py
 
 ### Docker Compose (recommended)
 
-A production-ready Compose file is provided at [`docker-compose.prod.yml`](docker-compose.prod.yml). It pins service versions, disables the dev volume mounts, and expects a `.env` at the repository root for shared credentials.
+A production Compose file is at [`docker-compose.prod.yml`](docker-compose.prod.yml). Key
+differences from dev: pinned image digests, no volume-mounted source code, `--target
+production` build stages, resource limits on every container, all capabilities dropped,
+`no-new-privileges:true`.
 
 ```bash
-docker compose -f docker-compose.prod.yml up -d --build
+make prod          # infisical run --env prod -- docker compose -f docker-compose.prod.yml up --build -d
+make prod-recreate # force-recreate (not zero-downtime)
+make prod-logs     # follow logs
 ```
 
-For HTTPS without a reverse proxy, an optional Cloudflare Tunnel service is included — add your `CLOUDFLARE_TUNNEL_TOKEN` to the root `.env`.
+### Public ingress
 
-### PostgreSQL backups (systemd)
+The prod stack includes a `cloudflared` sidecar that establishes a Cloudflare Tunnel.
+Set `CLOUDFLARE_TUNNEL_TOKEN` in Infisical and configure your Cloudflare dashboard to
+route your domain to `http://frontend:3000`. No port 443 needs to be open on the host.
 
-A host-side systemd backup setup lives under [`deploy/backup/`](deploy/backup/). Run this once on the production host from the repository root:
+### PostgreSQL backups
+
+A host-side systemd backup setup is in [`deploy/backup/`](deploy/backup/). Run once on
+the production host:
 
 ```bash
 sudo bash ./deploy/backup/install-spendhound-db-backup.sh
 ```
 
-This installs and enables a systemd timer that:
+This installs a systemd timer that:
+- Runs daily at 03:15 UTC (`Persistent=true` catches missed runs)
+- Dumps the `db` container with `pg_dump`
+- Validates the archive with `pg_restore --list` and writes a SHA-256 checksum
+- Atomically renames the validated archive into place
+- Prunes old backups after the configured retention period
+- Uses `set -Eeuo pipefail`, `umask 077`, and `flock` to prevent overlapping runs
 
-- runs daily at 03:15 UTC (with up to 15 min randomised delay; `Persistent=true` catches missed runs)
-- dumps the running `db` container with `pg_dump`
-- writes a compressed archive to a temp file, validates it with `pg_restore --list`, writes a SHA-256 checksum, then atomically renames both into place
-- prunes old backups after the configured retention period
-- runs with `set -Eeuo pipefail`, `umask 077`, and `flock` to prevent overlapping runs
-
-Backups are stored in `/var/backups/spendhound`. Useful commands:
+Backups are stored in `/var/backups/spendhound`.
 
 ```bash
 sudo systemctl status spendhound-db-backup.timer --no-pager
-sudo systemctl list-timers spendhound-db-backup.timer
 sudo journalctl -u spendhound-db-backup.service -n 50 --no-pager
 ```
 
-### LLM concurrency (single-machine / single-GPU)
+### Single-worker constraint
 
-SpendHound is designed for a single-worker deployment (`--workers 1`). The in-process `asyncio.Semaphore` that serialises Ollama calls and the in-memory `slowapi` rate counters both require a single process. If you scale to multiple workers, replace the in-memory rate limiter with a Redis backend and the semaphore with a distributed lock.
-
-Key concurrency settings in `backend/.env`:
-
-```env
-OLLAMA_MAX_CONCURRENT=1        # GPU semaphore width; increase only for CPU or multi-GPU
-LLM_SEMAPHORE_WAIT_TIMEOUT=5.0 # Seconds to wait before returning HTTP 503
-LLM_TIMEOUT_SECONDS=120        # Total timeout per LLM call
-RECEIPT_QUEUE_MAXSIZE=10       # Max queued receipt extraction jobs
-DB_POOL_SIZE=20
-DB_MAX_OVERFLOW=40
-```
+SpendHound is designed for `--workers 1`. The in-process `asyncio.Semaphore` that
+serializes Ollama calls and the in-memory slowapi rate counters both require a single
+process. To scale beyond one worker, replace the in-memory rate limiter with a Redis
+backend and the semaphore with a distributed lock.
 
 ---
 
 ## Security
 
-SpendHound applies defence-in-depth across the full stack.
-
 ### Secrets
 
-- `JWT_SECRET` must be a strong random value. The backend **raises `RuntimeError` and refuses to start** in production (`DEBUG=false`) if the default placeholder is detected.
-- User LLM API keys are Fernet-encrypted at rest; never returned in API responses (only a boolean `has_llm_api_key` is surfaced).
-- `LLM_KEY_ENCRYPTION_SECRET` should be set to a Fernet key (see step 2 above). Without it, user-supplied API keys are stored unencrypted.
+- `JWT_SECRET` must be a strong random value. The backend raises `RuntimeError` and
+  refuses to start in production (`DEBUG=false`) if the default placeholder is detected.
+- User LLM API keys are Fernet-encrypted at rest; never returned in API responses (only
+  a boolean `has_llm_api_key` is surfaced).
+- `LLM_KEY_ENCRYPTION_SECRET` must be set to a Fernet key. Without it, user-supplied API
+  keys are stored unencrypted.
 
 ### API surface
 
-- `/docs`, `/redoc`, and `/openapi.json` are only mounted when `DEBUG=true`. In production the full API schema is hidden.
-- User search (`/api/auth/users/search`) requires a minimum query length of 3 characters to prevent single-character enumeration of user accounts.
+- `/docs`, `/redoc`, and `/openapi.json` are only mounted when `DEBUG=true`.
+- User search (`/api/auth/users/search`) requires a minimum query length of 3 characters
+  to prevent single-character enumeration of accounts.
+- `/metrics` requires `Authorization: Bearer <METRICS_TOKEN>`.
 
 ### File uploads
 
 Uploads pass three validation layers before anything reaches disk:
 
-1. **Extension allowlist** — only `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.webp`, `.pdf` accepted; unknown extensions stored as `.bin`.
-2. **Magic-byte verification** — actual file header bytes are checked against known signatures; a `.jpg` file with non-JPEG content is rejected with HTTP 400.
-3. **Size cap** — 50 MB hard limit enforced before any I/O; returns HTTP 413.
+1. **Extension allowlist** -- only `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.webp`, `.pdf` accepted
+2. **Magic-byte verification** -- actual file header bytes are checked; mismatched content rejected with HTTP 400
+3. **Size cap** -- 50 MB hard limit enforced before any I/O; returns HTTP 413
 
-### Bot / automation blocking
+### Bot blocking
 
-A `block_bots` dependency is applied to `POST /api/auth/google` and `POST /api/receipts/upload`. It rejects empty `User-Agent` headers and known non-browser client signatures, returning HTTP 403 before rate-limit counters are consumed.
+A `block_bots` dependency is applied to `POST /api/auth/google` and
+`POST /api/receipts/upload`. It rejects empty `User-Agent` headers and known non-browser
+client signatures before rate-limit counters are consumed.
 
 ### HTTP security headers
 
@@ -310,24 +417,36 @@ All frontend routes include:
 | `Referrer-Policy` | `strict-origin-when-cross-origin` |
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=()` |
 | `Strict-Transport-Security` | `max-age=63072000; includeSubDomains; preload` |
-| `Content-Security-Policy` | `default-src 'self'`; `frame-ancestors 'none'`; `base-uri 'self'`; `form-action 'self'` |
+| `Content-Security-Policy` | `default-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` |
 
 ### Prompt injection hardening
 
-- **Chat:** All user-controlled data (merchant names, expense descriptions, receipt filenames, session titles, chat history) is wrapped in `<user_data>…</user_data>` XML delimiters in the LLM context. The system prompt explicitly instructs the model to treat inner content as untrusted read-only data, never as instructions.
-- **Receipt extraction:** Per-user prompt overrides are sandboxed — an immutable role anchor is prepended before any user-supplied text, wrapped in `<extraction_instructions>` tags. A malicious override cannot change the model's role or produce non-JSON output.
+- **Chat:** All user-controlled data (merchant names, expense descriptions, receipt
+  filenames, session titles, chat history) is wrapped in `<user_data>...</user_data>` XML
+  delimiters. The system prompt instructs the model to treat inner content as untrusted
+  read-only data, never as instructions.
+- **Receipt extraction:** Per-user prompt overrides are sandboxed -- an immutable role
+  anchor is prepended before any user-supplied text, wrapped in `<extraction_instructions>`
+  tags. A malicious override cannot change the model role or produce non-JSON output.
 
 ---
 
 ## Receipt extraction flow
 
 1. Open **Add expense** and switch to the **Upload receipt** tab
-2. SpendHound validates the file (extension, magic bytes, size), stores it under `storage/receipts/{user_id}/`
-3. The upload returns immediately; extraction is queued into a bounded `asyncio.Queue` and processed by a background worker
-4. For images ≤ 7.5 MB the raw image is sent to the configured multimodal LLM; larger files fall back to OCR text
-5. The extracted JSON is validated against the `ReceiptPreviewModel` schema; confidence < 0.75 flags the receipt for review
-6. The user reviews and edits the draft
+2. SpendHound validates the file (extension, magic bytes, size) and saves it under
+   `storage/receipts/{user_id}/`
+3. The upload endpoint enqueues a Celery task and returns immediately
+4. The Celery worker picks up the task from the Redis queue (`celery` list key). For
+   images <= 7.5 MB the raw image is sent to the configured multimodal LLM; larger
+   files fall back to OCR text
+5. The extracted JSON is validated against the `ReceiptPreviewModel` schema; confidence
+   below 0.75 flags the receipt as `needs_review`
+6. The user reviews and edits the draft in the UI
 7. Only the confirmed payload creates an expense record
+
+If the Celery worker is not running, uploaded receipts remain in `status="pending"`
+indefinitely and are never processed.
 
 ---
 
@@ -338,10 +457,12 @@ All frontend routes include:
 | `/dashboard` | Monthly analytics overview |
 | `/expenses` | Full expense list with filters |
 | `/expenses/new` | Manual entry or receipt upload |
+| `/receipts` | Upload and review queue |
 | `/budgets` | Budget management |
 | `/categories` | Category, rule, and knowledge-base management |
+| `/rules` | Merchant and item keyword rules |
 | `/chat` | AI financial chat |
-| `/settings` | LLM provider settings and account |
+| `/account` | LLM provider settings, monthly reports toggle, receipt prompt override |
 | `/admin` | User approval panel (admin only) |
 
 ---
@@ -353,28 +474,34 @@ All frontend routes include:
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `DATABASE_URL` | yes | (Docker default) | Async PostgreSQL connection string |
-| `GOOGLE_CLIENT_ID` | yes | — | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | yes | — | Google OAuth client secret |
-| `JWT_SECRET` | yes | — | HS256 JWT signing key; must not be the default placeholder |
-| `ADMIN_EMAIL` | yes | — | Auto-approved on sign-in; receives approval request emails |
+| `REDIS_URL` | yes | `redis://localhost:6379/0` | Redis connection string (broker + cache) |
+| `GOOGLE_CLIENT_ID` | yes | -- | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | yes | -- | Google OAuth client secret |
+| `JWT_SECRET` | yes | -- | HS256 JWT signing key; must not be the default placeholder in production |
+| `ADMIN_EMAIL` | yes | -- | Auto-approved on sign-in; receives approval request emails |
 | `APP_URL` | yes | `http://localhost:3000` | Public frontend URL (used in email links) |
-| `LLM_PROVIDER` | no | `ollama` | `ollama` / `openai` / `anthropic` / `nebius` |
+| `LLM_PROVIDER` | no | `ollama` | `ollama` / `openai` / `anthropic` / `nebius` / `openrouter` / `groq` / `together` / `mistral` / `deepseek` |
 | `OLLAMA_URL` | no | `http://host.docker.internal:11434` | Ollama base URL |
 | `OLLAMA_MODEL` | no | `gemma4:4b` | Ollama model name |
-| `ANTHROPIC_API_KEY` | no | — | Required when `LLM_PROVIDER=anthropic` |
-| `OPENAI_API_KEY` | no | — | Required when `LLM_PROVIDER=openai` |
-| `LLM_KEY_ENCRYPTION_SECRET` | no | — | Fernet key for encrypting user API keys at rest |
-| `RESEND_API_KEY` | no | — | Enables approval and report emails |
-| `RESEND_FROM_EMAIL` | no | — | Sender address for Resend |
+| `ANTHROPIC_API_KEY` | no | -- | Required when `LLM_PROVIDER=anthropic` |
+| `ANTHROPIC_MODEL` | no | `claude-sonnet-4-20250514` | Anthropic model ID |
+| `OPENAI_API_KEY` | no | -- | Required when `LLM_PROVIDER=openai` |
+| `OPENAI_MODEL` | no | `gpt-4o-mini` | OpenAI model ID |
+| `DEEPSEEK_API_KEY` | no | -- | Required when `LLM_PROVIDER=deepseek` |
+| `NEBIUS_API_KEY` | no | -- | Required when `LLM_PROVIDER=nebius` |
+| `LLM_KEY_ENCRYPTION_SECRET` | no | -- | Fernet key for encrypting user API keys at rest |
+| `METRICS_TOKEN` | no | -- | Bearer token required to scrape `GET /metrics` |
+| `RESEND_API_KEY` | no | -- | Enables approval and report emails |
+| `RESEND_FROM_EMAIL` | no | -- | Sender address for Resend |
 | `MONTHLY_REPORTS_ENABLED` | no | `false` | Enable scheduled monthly PDF delivery |
-| `MONTHLY_REPORTS_FRONTEND_TOKEN` | no | — | Shared secret for the internal Puppeteer PDF endpoint; required when reports are enabled |
+| `MONTHLY_REPORTS_FRONTEND_TOKEN` | no | -- | Shared secret for the internal Puppeteer PDF endpoint; required when reports are enabled |
 | `RECURRING_GENERATION_ENABLED` | no | `false` | Enable auto-generation of recurring expenses |
 | `RECEIPT_REVIEW_CONFIDENCE_THRESHOLD` | no | `0.75` | Extractions below this are flagged for review |
 | `RECEIPT_MULTIMODAL_MAX_BYTES` | no | `7500000` | Images above this size use OCR instead of direct multimodal |
-| `OLLAMA_MAX_CONCURRENT` | no | `1` | GPU semaphore width |
+| `OLLAMA_MAX_CONCURRENT` | no | `1` | GPU semaphore width; increase only for CPU or multi-GPU |
 | `LLM_SEMAPHORE_WAIT_TIMEOUT` | no | `5.0` | Seconds before returning HTTP 503 on a busy LLM |
 | `LLM_TIMEOUT_SECONDS` | no | `120` | Total timeout per LLM call |
-| `RECEIPT_QUEUE_MAXSIZE` | no | `10` | Max queued extraction jobs |
+| `RECEIPT_QUEUE_MAXSIZE` | no | `10` | Maximum pending tasks before uploads are rejected |
 | `RATE_LIMIT_AUTH_PER_MINUTE` | no | `10` | Auth requests per IP per minute |
 | `RATE_LIMIT_UPLOAD_PER_MINUTE` | no | `3` | Receipt uploads per user per minute |
 | `RATE_LIMIT_CHAT_PER_MINUTE` | no | `20` | Chat requests per user per minute |
@@ -389,8 +516,31 @@ All frontend routes include:
 | `GOOGLE_CLIENT_ID` | yes | Same Google OAuth client ID as backend |
 | `GOOGLE_CLIENT_SECRET` | yes | Same Google OAuth client secret as backend |
 | `NEXTAUTH_SECRET` | yes | Random secret for NextAuth session signing |
-| `NEXTAUTH_URL` | yes | Public frontend URL (e.g. `http://localhost:3001`) |
+| `NEXTAUTH_URL` | yes | Public frontend URL (e.g. `http://localhost:3000`) |
 | `NEXT_PUBLIC_API_URL` | no (non-Docker) | Backend API base URL for browser requests |
 | `INTERNAL_API_URL` | no (non-Docker) | Backend API base URL for server-side requests |
 | `MONTHLY_REPORTS_FRONTEND_TOKEN` | no | Must match backend value when reports are enabled |
 | `MONTHLY_REPORTS_BACKEND_JWT_SECRET` | no | Must match `JWT_SECRET` in backend when reports are enabled |
+
+### Production-only variables
+
+| Variable | Where | Description |
+|---|---|---|
+| `POSTGRES_PASSWORD` | root `.env` / Infisical | PostgreSQL superuser password |
+| `GRAFANA_ADMIN_PASSWORD` | root `.env` / Infisical | Grafana admin password (anonymous access disabled in prod) |
+| `CLOUDFLARE_TUNNEL_TOKEN` | root `.env` / Infisical | Cloudflare Tunnel token for HTTPS ingress |
+| `FRONTEND_PORT` | root `.env` / Infisical | Host port for the frontend container (default `3002` in prod) |
+
+---
+
+## License
+
+SpendHound is free software: you can redistribute it and/or modify it under the terms of
+the GNU Affero General Public License as published by the Free Software Foundation, either
+version 3 of the License, or (at your option) any later version.
+
+See [LICENSE](LICENSE) for the full license text.
+
+Under the AGPL v3, if you run a modified version of SpendHound as a network service
+accessible to others, you must make your modified source code available under the same
+license.
