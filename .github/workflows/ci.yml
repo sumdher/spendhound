@@ -148,6 +148,7 @@ jobs:
       - name: Deploy
         run: |
           infisical run \
+            --projectId=1587b73d-ea93-43b2-8e44-bafee5ddba7d \
             --env prod \
             --path / \
             --recursive \
