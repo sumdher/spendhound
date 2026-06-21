@@ -1,0 +1,72 @@
+name: CD
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: cd-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to production (zoro)
+    runs-on: self-hosted
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Authenticate with Infisical
+        run: |
+          TOKEN=$(infisical login \
+            --method=universal-auth \
+            --client-id="${{ secrets.INFISICAL_CLIENT_ID }}" \
+            --client-secret="${{ secrets.INFISICAL_CLIENT_SECRET }}" \
+            --plain \
+            --silent \
+            --domain=https://eu.infisical.com/api)
+          echo "::add-mask::$TOKEN"
+          echo "INFISICAL_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Deploy
+        run: |
+          cd /home/zorino/repos/spendhound
+          git pull
+          infisical run \
+            --projectId=1587b73d-ea93-43b2-8e44-bafee5ddba7d \
+            --env prod \
+            --path / \
+            --recursive \
+            --domain=https://eu.infisical.com/api \
+            -- docker compose -f docker-compose.prod.yml up --build --force-recreate -d
+
+      - name: Wait for backend healthy
+        run: |
+          echo "Waiting for spendhound_backend_prod to become healthy (max 2 min)..."
+          for i in $(seq 1 24); do
+            STATUS=$(docker inspect --format='{{.State.Health.Status}}' spendhound_backend_prod 2>/dev/null || echo "missing")
+            case "$STATUS" in
+              healthy)
+                echo "Healthy after $((i * 5))s."
+                exit 0
+                ;;
+              unhealthy)
+                echo "Container unhealthy. Recent logs:"
+                docker compose -f /home/zorino/repos/spendhound/docker-compose.prod.yml logs --tail=50 backend
+                exit 1
+                ;;
+              *)
+                printf '[%d/24] %s -- retrying in 5s...\n' "$i" "$STATUS"
+                sleep 5
+                ;;
+            esac
+          done
+          echo "Timed out waiting for healthy. Recent logs:"
+          docker compose -f /home/zorino/repos/spendhound/docker-compose.prod.yml logs --tail=50
+          exit 1
