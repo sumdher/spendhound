@@ -900,11 +900,11 @@ export default function NewExpensePage() {
     setUploading(false);
 
     // Poll until the background extraction finishes
-    if (receipt.extraction_status === "pending") {
+    if (receipt.extraction_status === "pending" || receipt.extraction_status === "processing") {
       setExtracting(true);
       let polled = receipt;
       try {
-        while (polled.extraction_status === "pending" && !pollingCancelledRef.current) {
+        while ((polled.extraction_status === "pending" || polled.extraction_status === "processing") && !pollingCancelledRef.current) {
           await new Promise<void>((resolve) => setTimeout(resolve, 2000));
           if (pollingCancelledRef.current) break;
           polled = await getReceipt(receipt.id);
@@ -1046,8 +1046,10 @@ export default function NewExpensePage() {
         <div className="flex items-start gap-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400">
           <span className="shrink-0">⚠️</span>
           <span>
-            You haven&apos;t configured an LLM provider API key yet — AI-powered receipt extraction will use the server defaults.{" "}
-            <a href="/settings" className="font-medium underline underline-offset-2">Set up your API key in Settings.</a>
+            {session?.isDemo
+              ? <>The demo account can&apos;t use the server&apos;s local AI model. Add your own API key to try receipt extraction.{" "}<a href="/settings" className="font-medium underline underline-offset-2">Set up your key in Settings.</a></>
+              : <>No AI provider key configured — receipt extraction will fall back to the server&apos;s default model.{" "}<a href="/settings" className="font-medium underline underline-offset-2">Add your key in Settings.</a></>
+            }
           </span>
         </div>
       )}
@@ -1414,7 +1416,7 @@ export default function NewExpensePage() {
                       let receipt = await uploadStatement(file);
                       setSelectedStatement(receipt);
                       // Statement extraction runs in a Celery worker — poll until it finishes.
-                      while (receipt.extraction_status === "pending") {
+                      while (receipt.extraction_status === "pending" || receipt.extraction_status === "processing") {
                         await new Promise<void>((resolve) => setTimeout(resolve, 2000));
                         receipt = await getReceipt(receipt.id);
                         setSelectedStatement(receipt);

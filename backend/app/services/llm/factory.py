@@ -65,10 +65,12 @@ def get_llm_provider(config: LLMConfig | None = None) -> BaseLLMProvider:
         return MeteredLLMProvider(OllamaProvider(), "ollama")
 
 
-_DEMO_USER_EMAILS = frozenset({
-    "bruce.wayne@wayneenterprises.com",
-    "peter.parker@dailybugle.com",
-})
+_DEMO_USER_EMAILS = frozenset(
+    {
+        "bruce.wayne@wayneenterprises.com",
+        "peter.parker@dailybugle.com",
+    }
+)
 
 
 def _is_demo_user(user: User) -> bool:
@@ -104,9 +106,8 @@ def resolve_user_llm_config(
         raise HTTPException(
             status_code=400,
             detail=(
-                "Demo mode: Ollama is disabled for the Bruce Wayne account. "
-                "Add your own API key in Settings → AI Provider to unlock AI features. "
-                "Bruce Wayne always pays his own way."
+                "Demo mode: the server's local AI model is not available for demo accounts. "
+                "Add your own API key in Settings → AI Provider to unlock AI features."
             ),
         )
 
@@ -114,8 +115,12 @@ def resolve_user_llm_config(
     if effective_provider == "ollama":
         return LLMConfig(
             provider=effective_provider,
-            model=(request_config.model if request_config else None) or user.llm_model or settings.ollama_model,
-            base_url=(request_config.base_url if request_config else None) or user.llm_base_url or settings.ollama_url,
+            model=(request_config.model if request_config else None)
+            or user.llm_model
+            or settings.ollama_model,
+            base_url=(request_config.base_url if request_config else None)
+            or user.llm_base_url
+            or settings.ollama_url,
             temperature=request_config.temperature if request_config else 0.1,
             max_tokens=request_config.max_tokens if request_config else 4096,
         )

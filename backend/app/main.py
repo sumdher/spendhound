@@ -142,7 +142,9 @@ def create_app() -> FastAPI:
     app.include_router(receipts.router, prefix="/api/receipts", tags=["receipts"])
     app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
     app.include_router(analytics.router, prefix="/api/analytics", tags=["analytics"])
-    app.include_router(monthly_reports.router, prefix="/api/monthly-reports", tags=["monthly-reports"])
+    app.include_router(
+        monthly_reports.router, prefix="/api/monthly-reports", tags=["monthly-reports"]
+    )
     app.include_router(ollama.router)
     app.include_router(llm_models.router)
 
@@ -154,9 +156,7 @@ def create_app() -> FastAPI:
     async def metrics_endpoint(authorization: str = Header(default="")) -> Response:
         """Prometheus scrape endpoint — bearer token required."""
         token = settings.metrics_token
-        if not token or not hmac.compare_digest(
-            authorization.encode(), f"Bearer {token}".encode()
-        ):
+        if not token or not hmac.compare_digest(authorization.encode(), f"Bearer {token}".encode()):
             raise HTTPException(status_code=403, detail="Forbidden")
         depth = await get_celery_queue_depth()
         RECEIPT_QUEUE_DEPTH.set(depth)

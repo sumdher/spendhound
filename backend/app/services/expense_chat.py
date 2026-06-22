@@ -74,7 +74,9 @@ class ExpenseChatService:
         )
         return [self._session_response(session) for session in result.scalars().all()]
 
-    async def create_session(self, user_id: uuid.UUID, *, title: str | None = None) -> ChatSessionResponse:
+    async def create_session(
+        self, user_id: uuid.UUID, *, title: str | None = None
+    ) -> ChatSessionResponse:
         clean_title = (title or "New Chat").strip() or "New Chat"
         session = ChatSession(
             user_id=user_id,
@@ -105,12 +107,16 @@ class ExpenseChatService:
         await self.db.delete(session)
         await self.db.flush()
 
-    async def get_history(self, user_id: uuid.UUID, *, session_id: uuid.UUID) -> ChatHistoryResponse:
+    async def get_history(
+        self, user_id: uuid.UUID, *, session_id: uuid.UUID
+    ) -> ChatHistoryResponse:
         session = await self._get_session(user_id, session_id, load_messages=True)
         messages = [self._message_response(message) for message in session.messages]
         return ChatHistoryResponse(session=self._session_response(session), messages=messages)
 
-    async def clear_history(self, user_id: uuid.UUID, *, session_id: uuid.UUID) -> ChatHistoryResponse:
+    async def clear_history(
+        self, user_id: uuid.UUID, *, session_id: uuid.UUID
+    ) -> ChatHistoryResponse:
         session = await self._get_session(user_id, session_id)
         await self.db.execute(delete(ChatMessage).where(ChatMessage.session_id == session.id))
         session.summary = None
@@ -146,7 +152,9 @@ class ExpenseChatService:
         self.db.add(user_message)
         await self.db.flush()
 
-        history_messages = [message for message in session.messages if message.id != user_message.id]
+        history_messages = [
+            message for message in session.messages if message.id != user_message.id
+        ]
         prompt_messages = await self._build_chat_prompt_messages(
             user_id=user_id,
             session=session,
@@ -208,7 +216,9 @@ class ExpenseChatService:
         self.db.add(assistant_message)
         session.last_message_at = datetime.now(UTC)
         session.max_tokens = request.max_tokens
-        session.token_count += (user_message.token_count or 0) + (assistant_message.token_count or 0)
+        session.token_count += (user_message.token_count or 0) + (
+            assistant_message.token_count or 0
+        )
         if session.title == TITLE_FALLBACK:
             session.title = await self._generate_title(user_message.content, llm_config)
         await self.db.flush()
@@ -246,7 +256,10 @@ class ExpenseChatService:
             session=session,
             history_messages=history_messages,
         )
-        messages = [Message(role="system", content=SYSTEM_PROMPT), Message(role="user", content=summary_prompt)]
+        messages = [
+            Message(role="system", content=SYSTEM_PROMPT),
+            Message(role="user", content=summary_prompt),
+        ]
 
         yield self._sse_event(
             "meta",
@@ -281,7 +294,9 @@ class ExpenseChatService:
     async def _get_session(
         self, user_id: uuid.UUID, session_id: uuid.UUID, *, load_messages: bool = False
     ) -> ChatSession:
-        statement = select(ChatSession).where(ChatSession.id == session_id, ChatSession.user_id == user_id)
+        statement = select(ChatSession).where(
+            ChatSession.id == session_id, ChatSession.user_id == user_id
+        )
         if load_messages:
             statement = statement.options(selectinload(ChatSession.messages))
         result = await self.db.execute(statement)
@@ -299,7 +314,11 @@ class ExpenseChatService:
         user_prompt: str,
     ) -> list[Message]:
         finance_context = await self._build_finance_context(user_id)
-        contextual_system = SYSTEM_PROMPT + "\n\n" + self._build_context_block(session=session, finance_context=finance_context)
+        contextual_system = (
+            SYSTEM_PROMPT
+            + "\n\n"
+            + self._build_context_block(session=session, finance_context=finance_context)
+        )
         prompt_messages: list[Message] = [Message(role="system", content=contextual_system)]
         for message in history_messages[-16:]:
             if message.role not in {"user", "assistant"}:
@@ -311,7 +330,11 @@ class ExpenseChatService:
     async def _build_finance_context(self, user_id: uuid.UUID) -> str:
         today = date.today()
         current_month = month_start_from_string(today.strftime("%Y-%m"))
-        next_month = date(current_month.year + (1 if current_month.month == 12 else 0), 1 if current_month.month == 12 else current_month.month + 1, 1)
+        next_month = date(
+            current_month.year + (1 if current_month.month == 12 else 0),
+            1 if current_month.month == 12 else current_month.month + 1,
+            1,
+        )
         lookback_date = today - timedelta(days=90)
 
         recent_expenses_result = await self.db.execute(
@@ -324,7 +347,9 @@ class ExpenseChatService:
         recent_expenses = recent_expenses_result.all()
 
         category_totals_result = await self.db.execute(
-            select(Category.name, Expense.transaction_type, Expense.currency, func.sum(Expense.amount))
+            select(
+                Category.name, Expense.transaction_type, Expense.currency, func.sum(Expense.amount)
+            )
             .select_from(Expense)
             .outerjoin(Category, Category.id == Expense.category_id)
             .where(Expense.user_id == user_id, Expense.expense_date >= lookback_date)
@@ -334,7 +359,9 @@ class ExpenseChatService:
         )
 
         merchant_totals_result = await self.db.execute(
-            select(Expense.merchant, Expense.currency, func.sum(Expense.amount), func.count(Expense.id))
+            select(
+                Expense.merchant, Expense.currency, func.sum(Expense.amount), func.count(Expense.id)
+            )
             .where(
                 Expense.user_id == user_id,
                 Expense.expense_date >= lookback_date,
@@ -346,7 +373,13 @@ class ExpenseChatService:
         )
 
         recurring_result = await self.db.execute(
-            select(Expense.merchant, Expense.cadence, Expense.currency, func.avg(Expense.amount), func.count(Expense.id))
+            select(
+                Expense.merchant,
+                Expense.cadence,
+                Expense.currency,
+                func.avg(Expense.amount),
+                func.count(Expense.id),
+            )
             .where(
                 Expense.user_id == user_id,
                 (Expense.is_recurring.is_(True)) | (Expense.cadence != "one_time"),
@@ -374,11 +407,12 @@ class ExpenseChatService:
             )
             .group_by(Expense.category_id)
         )
-        monthly_spend_by_category = {category_id: float(total or 0) for category_id, total in monthly_spend_result.all()}
+        monthly_spend_by_category = {
+            category_id: float(total or 0) for category_id, total in monthly_spend_result.all()
+        }
 
         month_total_result = await self.db.execute(
-            select(func.sum(Expense.amount))
-            .where(
+            select(func.sum(Expense.amount)).where(
                 Expense.user_id == user_id,
                 Expense.transaction_type == "debit",
                 Expense.expense_date >= current_month,
@@ -388,17 +422,29 @@ class ExpenseChatService:
         month_total_spend = float(month_total_result.scalar() or 0)
 
         receipt_items_result = await self.db.execute(
-            select(ExpenseItem.description, func.sum(ExpenseItem.total_price), func.count(ExpenseItem.id))
+            select(
+                ExpenseItem.description,
+                func.sum(ExpenseItem.total_price),
+                func.count(ExpenseItem.id),
+            )
             .select_from(ExpenseItem)
             .join(Expense, Expense.id == ExpenseItem.expense_id)
             .where(Expense.user_id == user_id, Expense.expense_date >= lookback_date)
             .group_by(ExpenseItem.description)
-            .order_by(func.sum(ExpenseItem.total_price).desc().nullslast(), func.count(ExpenseItem.id).desc())
+            .order_by(
+                func.sum(ExpenseItem.total_price).desc().nullslast(),
+                func.count(ExpenseItem.id).desc(),
+            )
             .limit(10)
         )
 
         receipt_result = await self.db.execute(
-            select(Receipt.original_filename, Receipt.document_kind, Receipt.extraction_status, Receipt.created_at)
+            select(
+                Receipt.original_filename,
+                Receipt.document_kind,
+                Receipt.extraction_status,
+                Receipt.created_at,
+            )
             .where(Receipt.user_id == user_id)
             .order_by(Receipt.created_at.desc())
             .limit(5)
@@ -407,8 +453,12 @@ class ExpenseChatService:
         sections: list[str] = []
         sections.append("=== DATE CONTEXT ===")
         sections.append(f"Today's date: {today.isoformat()} ({today.strftime('%A, %B %d, %Y')})")
-        sections.append(f"Current month: {today.strftime('%B %Y')} — starts {current_month.isoformat()}, ends {(next_month - timedelta(days=1)).isoformat()}")
-        sections.append(f"Expense data range: {lookback_date.isoformat()} to {today.isoformat()} (last 90 days)")
+        sections.append(
+            f"Current month: {today.strftime('%B %Y')} — starts {current_month.isoformat()}, ends {(next_month - timedelta(days=1)).isoformat()}"
+        )
+        sections.append(
+            f"Expense data range: {lookback_date.isoformat()} to {today.isoformat()} (last 90 days)"
+        )
         sections.append("====================")
         sections.append("")
         sections.append("Recent expenses:")
@@ -433,7 +483,11 @@ class ExpenseChatService:
         sections.append("Budgets for current month:")
         if budgets:
             for budget, category_name in budgets:
-                actual = month_total_spend if budget.category_id is None else monthly_spend_by_category.get(budget.category_id, 0.0)
+                actual = (
+                    month_total_spend
+                    if budget.category_id is None
+                    else monthly_spend_by_category.get(budget.category_id, 0.0)
+                )
                 sections.append(
                     f"- {budget.name}: budget {float(budget.amount):.2f} {budget.currency}, spent {actual:.2f} {budget.currency}, remaining {float(budget.amount) - actual:.2f} {budget.currency} | category {category_name or 'All spending'}"
                 )
@@ -500,7 +554,9 @@ class ExpenseChatService:
         session: ChatSession | None,
         history_messages: list[ChatMessage],
     ) -> str:
-        history_text = "\n".join(f"- {message.role}: {message.content}" for message in history_messages[-12:])
+        history_text = "\n".join(
+            f"- {message.role}: {message.content}" for message in history_messages[-12:]
+        )
         return (
             "Summarize the user's finances using the structured SpendHound context below. "
             "Prioritize notable spend trends, category outliers, budgets at risk, recurring charges, and helpful next actions.\n\n"
@@ -544,7 +600,9 @@ class ExpenseChatService:
             updated_at=message.updated_at,
         )
 
-    def _build_llm_config(self, request: ChatStreamRequest | ChatSummarizeStreamRequest) -> LLMConfig:
+    def _build_llm_config(
+        self, request: ChatStreamRequest | ChatSummarizeStreamRequest
+    ) -> LLMConfig:
         # Build a config from any explicit request params (may all be None)
         request_config = create_llm_config(
             provider=request.provider,

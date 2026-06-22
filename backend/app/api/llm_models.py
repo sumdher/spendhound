@@ -31,10 +31,28 @@ _TIMEOUT = 10.0
 # Helpers
 # ---------------------------------------------------------------------------
 
-OPENAI_INCLUDE_PREFIXES = ("gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo", "o1", "o3", "o4")
+OPENAI_INCLUDE_PREFIXES = (
+    "gpt-4o",
+    "gpt-4o-mini",
+    "gpt-4-turbo",
+    "gpt-4",
+    "gpt-3.5-turbo",
+    "o1",
+    "o3",
+    "o4",
+)
 OPENAI_EXCLUDE_SUBSTRINGS = (
-    "dall-e", "whisper", "tts", "embedding", "moderation", "audio",
-    "babbage", "davinci", "search", "realtime", "transcribe",
+    "dall-e",
+    "whisper",
+    "tts",
+    "embedding",
+    "moderation",
+    "audio",
+    "babbage",
+    "davinci",
+    "search",
+    "realtime",
+    "transcribe",
 )
 OPENAI_VISION_SUBSTRINGS = ("gpt-4o", "gpt-4-turbo", "o1", "o3", "o4")
 
@@ -54,6 +72,7 @@ def _get_effective_api_key(
     if user.llm_api_key:
         try:
             from app.services.llm.encryption import decrypt_api_key
+
             return decrypt_api_key(user.llm_api_key)
         except Exception:
             pass
@@ -77,6 +96,7 @@ def _get_effective_api_key(
 # ---------------------------------------------------------------------------
 # Provider helpers
 # ---------------------------------------------------------------------------
+
 
 async def _list_openai(api_key: str) -> list[LLMModelInfo]:
     """Fetch and filter models from the OpenAI API."""
@@ -140,7 +160,12 @@ async def _list_anthropic(api_key: str) -> list[LLMModelInfo]:
         display_name: str = m.get("display_name", model_id)
         if not model_id:
             continue
-        vision = "claude-3" in model_id or "claude-opus" in model_id or "claude-sonnet" in model_id or "claude-haiku" in model_id
+        vision = (
+            "claude-3" in model_id
+            or "claude-opus" in model_id
+            or "claude-sonnet" in model_id
+            or "claude-haiku" in model_id
+        )
         models.append(LLMModelInfo(id=model_id, name=display_name, supports_vision=vision))
 
     return sorted(models, key=lambda m: m.id)[:_MAX_MODELS]
@@ -335,11 +360,9 @@ async def _list_mistral(api_key: str) -> list[LLMModelInfo]:
 
 async def _list_nebius(api_key: str, base_url: str | None) -> list[LLMModelInfo]:
     """Fetch models from the Nebius (OpenAI-compatible) API."""
-    nebius_base = (
-        base_url
-        or settings.nebius_base_url
-        or "https://api.studio.nebius.ai"
-    ).rstrip("/")
+    nebius_base = (base_url or settings.nebius_base_url or "https://api.studio.nebius.ai").rstrip(
+        "/"
+    )
 
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -398,10 +421,13 @@ async def _list_ollama(base_url: str | None) -> list[LLMModelInfo]:
 # Route
 # ---------------------------------------------------------------------------
 
+
 @router.get("/models", response_model=list[LLMModelInfo])
 async def list_llm_models(
     provider: str = Query(..., description="LLM provider name"),
-    api_key: str | None = Query(default=None, description="Plaintext API key for this one-time fetch (never stored)"),
+    api_key: str | None = Query(
+        default=None, description="Plaintext API key for this one-time fetch (never stored)"
+    ),
     current_user: User = Depends(get_current_user),
 ) -> list[LLMModelInfo]:
     """
@@ -437,7 +463,11 @@ async def list_llm_models(
         elif provider_lower == "mistral":
             result = await _list_mistral(effective_key) if effective_key else []
         elif provider_lower == "nebius":
-            result = await _list_nebius(effective_key, current_user.llm_base_url) if effective_key else []
+            result = (
+                await _list_nebius(effective_key, current_user.llm_base_url)
+                if effective_key
+                else []
+            )
         elif provider_lower == "ollama":
             result = await _list_ollama(current_user.llm_base_url)
         else:
@@ -445,6 +475,8 @@ async def list_llm_models(
             result = []
 
     if use_cache and result:
-        await set_cached_llm_models(provider_lower, current_user.id, [m.model_dump() for m in result])
+        await set_cached_llm_models(
+            provider_lower, current_user.id, [m.model_dump() for m in result]
+        )
 
     return result

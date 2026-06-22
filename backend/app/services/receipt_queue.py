@@ -113,7 +113,9 @@ async def _run_extraction_job(job: ExtractionJob) -> None:
         )
         try:
             async with AsyncSessionLocal() as db:
-                receipt_result = await db.execute(select(Receipt).where(Receipt.id == job.receipt_id))
+                receipt_result = await db.execute(
+                    select(Receipt).where(Receipt.id == job.receipt_id)
+                )
                 receipt = receipt_result.scalar_one_or_none()
                 if receipt:
                     receipt.extraction_status = "error"

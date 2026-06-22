@@ -59,7 +59,9 @@ async def test_create_list_update_delete_expense(client: AsyncClient, auth_heade
     assert delete_response.status_code == 204
 
 
-async def test_create_credit_transaction_and_filter_by_type(client: AsyncClient, auth_headers: dict):
+async def test_create_credit_transaction_and_filter_by_type(
+    client: AsyncClient, auth_headers: dict
+):
     payload = {
         "merchant": "ACME Payroll",
         "amount": 3500.00,
@@ -76,7 +78,9 @@ async def test_create_credit_transaction_and_filter_by_type(client: AsyncClient,
     assert created["category_name"] == "Salary"
     assert created["signed_amount"] == 3500.0
 
-    credit_list_response = await client.get("/api/expenses?month=2026-04&transaction_type=credit", headers=auth_headers)
+    credit_list_response = await client.get(
+        "/api/expenses?month=2026-04&transaction_type=credit", headers=auth_headers
+    )
     assert credit_list_response.status_code == 200
     credit_listing = credit_list_response.json()
     assert any(item["id"] == created["id"] for item in credit_listing["items"])
@@ -113,7 +117,9 @@ async def test_all_time_listing_and_cadence_filter(client: AsyncClient, auth_hea
     assert all(item["id"] != created["id"] for item in current_month.json()["items"])
 
 
-async def test_recurring_settings_are_saved_and_cleared_on_update(client: AsyncClient, auth_headers: dict):
+async def test_recurring_settings_are_saved_and_cleared_on_update(
+    client: AsyncClient, auth_headers: dict
+):
     create_response = await client.post(
         "/api/expenses",
         json={
@@ -166,17 +172,25 @@ async def test_review_queue_and_export(client: AsyncClient, auth_headers: dict):
     assert len(review_data["expenses"]) >= 1
     assert review_data["expenses"][0]["needs_review"] is True
 
-    export_json = await client.get("/api/expenses/export?format=json&month=2026-04", headers=auth_headers)
+    export_json = await client.get(
+        "/api/expenses/export?format=json&month=2026-04", headers=auth_headers
+    )
     assert export_json.status_code == 200
     assert export_json.json()["total"] >= 1
 
-    export_csv = await client.get("/api/expenses/export?format=csv&month=2026-04", headers=auth_headers)
+    export_csv = await client.get(
+        "/api/expenses/export?format=csv&month=2026-04", headers=auth_headers
+    )
     assert export_csv.status_code == 200
     assert "merchant" in export_csv.text
 
 
-async def test_generate_recurring_expenses_for_month_creates_constant_and_variable_entries(db_session: AsyncSession, test_user):
-    bills_category = Category(user_id=test_user.id, name="Bills", color="#f87171", transaction_type="debit")
+async def test_generate_recurring_expenses_for_month_creates_constant_and_variable_entries(
+    db_session: AsyncSession, test_user
+):
+    bills_category = Category(
+        user_id=test_user.id, name="Bills", color="#f87171", transaction_type="debit"
+    )
     db_session.add(bills_category)
     await db_session.flush()
 
@@ -218,7 +232,9 @@ async def test_generate_recurring_expenses_for_month_creates_constant_and_variab
     await db_session.flush()
     await recompute_recurring_expenses(db_session, test_user.id)
 
-    generated = await generate_recurring_expenses_for_month(db_session, test_user.id, date(2026, 5, 1))
+    generated = await generate_recurring_expenses_for_month(
+        db_session, test_user.id, date(2026, 5, 1)
+    )
     await db_session.commit()
 
     assert len(generated) == 2
@@ -238,12 +254,16 @@ async def test_generate_recurring_expenses_for_month_creates_constant_and_variab
     assert power.expense_date == date(2026, 5, 18)
     assert power.needs_review is True
 
-    second_run = await generate_recurring_expenses_for_month(db_session, test_user.id, date(2026, 5, 1))
+    second_run = await generate_recurring_expenses_for_month(
+        db_session, test_user.id, date(2026, 5, 1)
+    )
     await db_session.commit()
     assert second_run == []
 
 
-async def test_create_expense_from_receipt_is_listed_in_saved_month(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+async def test_create_expense_from_receipt_is_listed_in_saved_month(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user
+):
     receipt = Receipt(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -307,7 +327,9 @@ async def test_create_expense_from_receipt_is_listed_in_saved_month(client: Asyn
     assert detail["items"][0]["description"] == "Soup"
 
 
-async def test_create_expense_from_statement_entry_updates_queue(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+async def test_create_expense_from_statement_entry_updates_queue(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user
+):
     statement = Receipt(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -373,7 +395,9 @@ async def test_create_expense_from_statement_entry_updates_queue(client: AsyncCl
     assert payload["statement"]["preview"]["entries"][1]["status"] == "pending"
 
 
-async def test_create_credit_transaction_from_statement_entry(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+async def test_create_credit_transaction_from_statement_entry(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user
+):
     statement = Receipt(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -430,7 +454,9 @@ async def test_create_credit_transaction_from_statement_entry(client: AsyncClien
     assert payload["expense"]["category_name"] == "Salary"
 
 
-async def test_replace_expense_items_replaces_rows_without_relationship_assignment(db_session: AsyncSession, test_user):
+async def test_replace_expense_items_replaces_rows_without_relationship_assignment(
+    db_session: AsyncSession, test_user
+):
     expense = Expense(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -464,7 +490,9 @@ async def test_replace_expense_items_replaces_rows_without_relationship_assignme
     stored_items = (
         (
             await db_session.execute(
-                select(ExpenseItem).where(ExpenseItem.expense_id == expense.id).order_by(ExpenseItem.created_at.asc())
+                select(ExpenseItem)
+                .where(ExpenseItem.expense_id == expense.id)
+                .order_by(ExpenseItem.created_at.asc())
             )
         )
         .scalars()
@@ -477,7 +505,9 @@ async def test_replace_expense_items_replaces_rows_without_relationship_assignme
     assert [item.description for item in expense.items] == ["Coffee"]
 
 
-async def test_replace_expense_items_assigns_deterministic_grocery_subcategories(db_session: AsyncSession, test_user):
+async def test_replace_expense_items_assigns_deterministic_grocery_subcategories(
+    db_session: AsyncSession, test_user
+):
     grocery_category = Category(user_id=test_user.id, name="Groceries", color="#34d399")
     db_session.add(grocery_category)
     await db_session.flush()
@@ -510,18 +540,26 @@ async def test_replace_expense_items_assigns_deterministic_grocery_subcategories
     stored_items = (
         (
             await db_session.execute(
-                select(ExpenseItem).where(ExpenseItem.expense_id == expense.id).order_by(ExpenseItem.created_at.asc())
+                select(ExpenseItem)
+                .where(ExpenseItem.expense_id == expense.id)
+                .order_by(ExpenseItem.created_at.asc())
             )
         )
         .scalars()
         .all()
     )
 
-    assert [item.subcategory for item in stored_items] == ["Vegetables", "Meat", "Cleaning Products"]
+    assert [item.subcategory for item in stored_items] == [
+        "Vegetables",
+        "Meat",
+        "Cleaning Products",
+    ]
     assert all(item.subcategory_confidence is not None for item in stored_items)
 
 
-async def test_dashboard_analytics_derives_grocery_subcategories_for_existing_blank_items(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+async def test_dashboard_analytics_derives_grocery_subcategories_for_existing_blank_items(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user
+):
     grocery_category = Category(user_id=test_user.id, name="Groceries", color="#34d399")
     db_session.add(grocery_category)
     await db_session.flush()
@@ -542,9 +580,27 @@ async def test_dashboard_analytics_derives_grocery_subcategories_for_existing_bl
     await db_session.flush()
     db_session.add_all(
         [
-            ExpenseItem(expense_id=expense.id, description="Bananas", quantity=1, unit_price=1.8, total_price=normalize_money(1.8)),
-            ExpenseItem(expense_id=expense.id, description="Laundry detergent", quantity=1, unit_price=5.4, total_price=normalize_money(5.4)),
-            ExpenseItem(expense_id=expense.id, description="Pasta", quantity=2, unit_price=1.5, total_price=normalize_money(3.0)),
+            ExpenseItem(
+                expense_id=expense.id,
+                description="Bananas",
+                quantity=1,
+                unit_price=1.8,
+                total_price=normalize_money(1.8),
+            ),
+            ExpenseItem(
+                expense_id=expense.id,
+                description="Laundry detergent",
+                quantity=1,
+                unit_price=5.4,
+                total_price=normalize_money(5.4),
+            ),
+            ExpenseItem(
+                expense_id=expense.id,
+                description="Pasta",
+                quantity=2,
+                unit_price=1.5,
+                total_price=normalize_money(3.0),
+            ),
         ]
     )
     await db_session.commit()
@@ -560,8 +616,12 @@ async def test_dashboard_analytics_derives_grocery_subcategories_for_existing_bl
     assert payload["grocery_insights"]["uncategorized_count"] == 0
 
 
-async def test_dashboard_grocery_insights_scale_item_totals_to_approved_expense_amount(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
-    grocery_category = Category(user_id=test_user.id, name="Groceries", color="#34d399", transaction_type="debit")
+async def test_dashboard_grocery_insights_scale_item_totals_to_approved_expense_amount(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user
+):
+    grocery_category = Category(
+        user_id=test_user.id, name="Groceries", color="#34d399", transaction_type="debit"
+    )
     db_session.add(grocery_category)
     await db_session.flush()
 
@@ -582,8 +642,20 @@ async def test_dashboard_grocery_insights_scale_item_totals_to_approved_expense_
     await db_session.flush()
     db_session.add_all(
         [
-            ExpenseItem(expense_id=expense.id, description="Bananas", quantity=1, unit_price=4.0, total_price=normalize_money(4.0)),
-            ExpenseItem(expense_id=expense.id, description="Pasta", quantity=1, unit_price=8.0, total_price=normalize_money(8.0)),
+            ExpenseItem(
+                expense_id=expense.id,
+                description="Bananas",
+                quantity=1,
+                unit_price=4.0,
+                total_price=normalize_money(4.0),
+            ),
+            ExpenseItem(
+                expense_id=expense.id,
+                description="Pasta",
+                quantity=1,
+                unit_price=8.0,
+                total_price=normalize_money(8.0),
+            ),
         ]
     )
     await db_session.commit()
@@ -593,7 +665,9 @@ async def test_dashboard_grocery_insights_scale_item_totals_to_approved_expense_
     assert response.status_code == 200
     payload = response.json()
     grocery_insights = payload["grocery_insights"]
-    top_subcategories = {item["name"]: item["amount"] for item in grocery_insights["top_subcategories"]}
+    top_subcategories = {
+        item["name"]: item["amount"] for item in grocery_insights["top_subcategories"]
+    }
 
     assert payload["summary"]["money_out"] == 10.0
     assert grocery_insights["total_itemized_spend"] == 10.0
@@ -601,9 +675,15 @@ async def test_dashboard_grocery_insights_scale_item_totals_to_approved_expense_
     assert top_subcategories["Fruit"] == 3.33
 
 
-async def test_dashboard_analytics_separates_money_in_and_out(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
-    grocery_category = Category(user_id=test_user.id, name="Groceries", color="#34d399", transaction_type="debit")
-    salary_category = Category(user_id=test_user.id, name="Salary", color="#10b981", transaction_type="credit")
+async def test_dashboard_analytics_separates_money_in_and_out(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user
+):
+    grocery_category = Category(
+        user_id=test_user.id, name="Groceries", color="#34d399", transaction_type="debit"
+    )
+    salary_category = Category(
+        user_id=test_user.id, name="Salary", color="#10b981", transaction_type="credit"
+    )
     db_session.add_all([grocery_category, salary_category])
     await db_session.flush()
 
@@ -650,9 +730,15 @@ async def test_dashboard_analytics_separates_money_in_and_out(client: AsyncClien
     assert payload["income_by_category"][0]["name"] == "Salary"
 
 
-async def test_dashboard_analytics_surfaces_yearly_and_major_one_time_transactions(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
-    bills_category = Category(user_id=test_user.id, name="Bills", color="#f87171", transaction_type="debit")
-    shopping_category = Category(user_id=test_user.id, name="Shopping", color="#22c55e", transaction_type="debit")
+async def test_dashboard_analytics_surfaces_yearly_and_major_one_time_transactions(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user
+):
+    bills_category = Category(
+        user_id=test_user.id, name="Bills", color="#f87171", transaction_type="debit"
+    )
+    shopping_category = Category(
+        user_id=test_user.id, name="Shopping", color="#22c55e", transaction_type="debit"
+    )
     db_session.add_all([bills_category, shopping_category])
     await db_session.flush()
 
@@ -704,7 +790,9 @@ async def test_dashboard_analytics_surfaces_yearly_and_major_one_time_transactio
     assert major_purchases["Tech Store"]["is_major_purchase"] is True
 
 
-async def test_create_expense_from_receipt_is_idempotent_for_repeated_submission(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+async def test_create_expense_from_receipt_is_idempotent_for_repeated_submission(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user
+):
     receipt = Receipt(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -738,14 +826,20 @@ async def test_create_expense_from_receipt_is_idempotent_for_repeated_submission
         "category_name": "Dining",
         "confidence": 0.92,
     }
-    first_response = await client.post("/api/expenses/from-receipt", json=payload, headers=auth_headers)
-    second_response = await client.post("/api/expenses/from-receipt", json=payload, headers=auth_headers)
+    first_response = await client.post(
+        "/api/expenses/from-receipt", json=payload, headers=auth_headers
+    )
+    second_response = await client.post(
+        "/api/expenses/from-receipt", json=payload, headers=auth_headers
+    )
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
     assert first_response.json()["id"] == second_response.json()["id"]
 
-    expense_count = await db_session.scalar(select(func.count(Expense.id)).where(Expense.receipt_id == receipt.id))
+    expense_count = await db_session.scalar(
+        select(func.count(Expense.id)).where(Expense.receipt_id == receipt.id)
+    )
     assert expense_count == 1
 
     await db_session.refresh(receipt)
@@ -753,7 +847,9 @@ async def test_create_expense_from_receipt_is_idempotent_for_repeated_submission
     assert receipt.finalized_at is not None
 
 
-async def test_create_expense_from_statement_entry_is_idempotent_for_repeated_submission(client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user):
+async def test_create_expense_from_statement_entry_is_idempotent_for_repeated_submission(
+    client: AsyncClient, auth_headers: dict, db_session: AsyncSession, test_user
+):
     statement = Receipt(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -797,16 +893,27 @@ async def test_create_expense_from_statement_entry_is_idempotent_for_repeated_su
         "category_name": "Transport",
         "confidence": 0.86,
     }
-    first_response = await client.post("/api/expenses/from-statement-entry", json=payload, headers=auth_headers)
-    second_response = await client.post("/api/expenses/from-statement-entry", json=payload, headers=auth_headers)
+    first_response = await client.post(
+        "/api/expenses/from-statement-entry", json=payload, headers=auth_headers
+    )
+    second_response = await client.post(
+        "/api/expenses/from-statement-entry", json=payload, headers=auth_headers
+    )
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
     assert first_response.json()["expense"]["id"] == second_response.json()["expense"]["id"]
 
-    expense_count = await db_session.scalar(select(func.count(Expense.id)).where(Expense.receipt_id == statement.id, Expense.source == "statement"))
+    expense_count = await db_session.scalar(
+        select(func.count(Expense.id)).where(
+            Expense.receipt_id == statement.id, Expense.source == "statement"
+        )
+    )
     assert expense_count == 1
 
     await db_session.refresh(statement)
     assert statement.preview_data["entries"][0]["status"] == "finalized"
-    assert statement.preview_data["entries"][0]["saved_expense_id"] == first_response.json()["expense"]["id"]
+    assert (
+        statement.preview_data["entries"][0]["saved_expense_id"]
+        == first_response.json()["expense"]["id"]
+    )

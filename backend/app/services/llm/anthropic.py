@@ -80,7 +80,9 @@ class AnthropicProvider(BaseLLMProvider):
         max_tokens = config.max_tokens if config else 4096
 
         system_prompt, user_messages = _split_system(messages)
-        anthropic_messages = [{"role": m.role, "content": _build_content_blocks(m)} for m in user_messages]
+        anthropic_messages = [
+            {"role": m.role, "content": _build_content_blocks(m)} for m in user_messages
+        ]
 
         kwargs: dict = {
             "model": model,
@@ -110,7 +112,9 @@ class AnthropicProvider(BaseLLMProvider):
         max_tokens = config.max_tokens if config else 4096
 
         system_prompt, user_messages = _split_system(messages)
-        anthropic_messages = [{"role": m.role, "content": _build_content_blocks(m)} for m in user_messages]
+        anthropic_messages = [
+            {"role": m.role, "content": _build_content_blocks(m)} for m in user_messages
+        ]
 
         kwargs: dict = {
             "model": model,

@@ -71,7 +71,9 @@ def _resolve_cadence_fields(
     if resolved_cadence == CADENCE_CUSTOM:
         interval = cadence_interval or 3
         if interval < 2:
-            raise HTTPException(status_code=422, detail="cadence_interval must be at least 2 for custom cadence")
+            raise HTTPException(
+                status_code=422, detail="cadence_interval must be at least 2 for custom cadence"
+            )
         return interval, None, None
     if resolved_cadence == CADENCE_PREPAID:
         months = prepaid_months or 12
@@ -88,11 +90,15 @@ def _normalize_major_purchase(value: bool | None, *, transaction_type: str) -> b
     return bool(value) and normalize_transaction_type(transaction_type) == TRANSACTION_TYPE_DEBIT
 
 
-async def _get_existing_receipt_expense(db: AsyncSession, *, user_id: uuid.UUID, receipt_id: uuid.UUID, source: str = "receipt") -> tuple[Expense, str | None] | None:
+async def _get_existing_receipt_expense(
+    db: AsyncSession, *, user_id: uuid.UUID, receipt_id: uuid.UUID, source: str = "receipt"
+) -> tuple[Expense, str | None] | None:
     result = await db.execute(
         select(Expense, Category.name)
         .outerjoin(Category, Category.id == Expense.category_id)
-        .where(Expense.user_id == user_id, Expense.receipt_id == receipt_id, Expense.source == source)
+        .where(
+            Expense.user_id == user_id, Expense.receipt_id == receipt_id, Expense.source == source
+        )
         .order_by(Expense.created_at.asc())
         .limit(1)
     )
@@ -100,7 +106,9 @@ async def _get_existing_receipt_expense(db: AsyncSession, *, user_id: uuid.UUID,
     return (row[0], row[1]) if row is not None else None
 
 
-async def _get_expense_with_category_name(db: AsyncSession, *, user_id: uuid.UUID, expense_id: uuid.UUID) -> tuple[Expense, str | None] | None:
+async def _get_expense_with_category_name(
+    db: AsyncSession, *, user_id: uuid.UUID, expense_id: uuid.UUID
+) -> tuple[Expense, str | None] | None:
     result = await db.execute(
         select(Expense, Category.name)
         .outerjoin(Category, Category.id == Expense.category_id)
@@ -123,9 +131,9 @@ class ExpenseCreate(BaseModel):
     notes: str | None = None
     items: list[dict] | None = None
     cadence: str | None = None
-    cadence_interval: int | None = None      # for cadence="custom", must be >= 2
-    prepaid_months: int | None = None        # for cadence="prepaid"
-    prepaid_start_date: str | None = None    # ISO date; defaults to expense_date for prepaid
+    cadence_interval: int | None = None  # for cadence="custom", must be >= 2
+    prepaid_months: int | None = None  # for cadence="prepaid"
+    prepaid_start_date: str | None = None  # ISO date; defaults to expense_date for prepaid
     recurring_variable: bool = False
     recurring_auto_add: bool = False
     is_major_purchase: bool = False
@@ -194,7 +202,12 @@ async def list_expenses(
                 try:
                     lid = uuid.UUID(p)
                     # Verify membership
-                    m = await db.execute(select(LedgerMembership).where(LedgerMembership.ledger_id == lid, LedgerMembership.user_id == current_user.id))
+                    m = await db.execute(
+                        select(LedgerMembership).where(
+                            LedgerMembership.ledger_id == lid,
+                            LedgerMembership.user_id == current_user.id,
+                        )
+                    )
                     if m.scalar_one_or_none():
                         parsed_ledger_ids.append(lid)
                 except ValueError:
@@ -221,12 +234,22 @@ async def list_expenses(
         conditions.append(sql_and(Expense.user_id == current_user.id, Expense.ledger_id.is_(None)))
 
     base = base.where(sql_or(*conditions))
-    base = apply_expense_filters(base, user_id=None, month=month, category_id=category_id, transaction_type=transaction_type, cadence=cadence, review_only=review_only, search=search).order_by(Expense.expense_date.desc(), Expense.created_at.desc())
+    base = apply_expense_filters(
+        base,
+        user_id=None,
+        month=month,
+        category_id=category_id,
+        transaction_type=transaction_type,
+        cadence=cadence,
+        review_only=review_only,
+        search=search,
+    ).order_by(Expense.expense_date.desc(), Expense.created_at.desc())
     result = await db.execute(base)
     rows = result.all()
 
     if show_duplicates:
         from collections import defaultdict
+
         key_map: dict[tuple, list] = defaultdict(list)
         for row in rows:
             exp = row[0]
@@ -246,20 +269,45 @@ async def list_expenses(
         added_by = None
         if expense.user_id != current_user.id and expense.user_id in shared_user_map:
             u = shared_user_map[expense.user_id]
-            added_by = {"id": str(u.id), "name": u.name, "email": u.email, "avatar_url": u.avatar_url}
-        items.append(serialize_expense(expense, category_name=category_name, receipt_filename=receipt_filename, ledger_name=ledger_name, added_by=added_by))
+            added_by = {
+                "id": str(u.id),
+                "name": u.name,
+                "email": u.email,
+                "avatar_url": u.avatar_url,
+            }
+        items.append(
+            serialize_expense(
+                expense,
+                category_name=category_name,
+                receipt_filename=receipt_filename,
+                ledger_name=ledger_name,
+                added_by=added_by,
+            )
+        )
 
     return {"items": items, "total": len(items)}
 
 
 @router.get("/review-queue")
-async def review_queue(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    receipt_result = await db.execute(select(Receipt).where(Receipt.user_id == current_user.id, (Receipt.needs_review.is_(True)) | (Receipt.extraction_status != "finalized")).order_by(Receipt.created_at.desc()))
+async def review_queue(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> dict:
+    receipt_result = await db.execute(
+        select(Receipt)
+        .where(
+            Receipt.user_id == current_user.id,
+            (Receipt.needs_review.is_(True)) | (Receipt.extraction_status != "finalized"),
+        )
+        .order_by(Receipt.created_at.desc())
+    )
     expense_result = await db.execute(
         select(Expense, Category.name, Receipt.original_filename)
         .outerjoin(Category, Category.id == Expense.category_id)
         .outerjoin(Receipt, Receipt.id == Expense.receipt_id)
-        .where(Expense.user_id == current_user.id, (Expense.needs_review.is_(True)) | (Expense.category_id.is_(None)))
+        .where(
+            Expense.user_id == current_user.id,
+            (Expense.needs_review.is_(True)) | (Expense.category_id.is_(None)),
+        )
         .order_by(Expense.expense_date.desc(), Expense.created_at.desc())
     )
     return {
@@ -275,28 +323,64 @@ async def review_queue(current_user: User = Depends(get_current_user), db: Async
             }
             for receipt in receipt_result.scalars().all()
         ],
-        "expenses": [serialize_expense(expense, category_name=category_name, receipt_filename=receipt_filename) for expense, category_name, receipt_filename in expense_result.all()],
+        "expenses": [
+            serialize_expense(
+                expense, category_name=category_name, receipt_filename=receipt_filename
+            )
+            for expense, category_name, receipt_filename in expense_result.all()
+        ],
     }
 
 
 @router.get("/export")
-async def export_expenses(export_format: str = Query(default="json"), month: str | None = Query(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> Response:
+async def export_expenses(
+    export_format: str = Query(default="json"),
+    month: str | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
     export_payload = await build_expense_export_payload(db, user_id=current_user.id, month=month)
     items = export_payload["items"]
 
     if export_format == "csv":
         output = io.StringIO()
-        fieldnames = ["id", "expense_date", "merchant", "description", "amount", "signed_amount", "transaction_type", "currency", "cadence", "cadence_override", "is_major_purchase", "category_name", "source", "needs_review", "is_recurring", "receipt_filename", "notes"]
+        fieldnames = [
+            "id",
+            "expense_date",
+            "merchant",
+            "description",
+            "amount",
+            "signed_amount",
+            "transaction_type",
+            "currency",
+            "cadence",
+            "cadence_override",
+            "is_major_purchase",
+            "category_name",
+            "source",
+            "needs_review",
+            "is_recurring",
+            "receipt_filename",
+            "notes",
+        ]
         writer = csv.DictWriter(output, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows({key: item.get(key) for key in fieldnames} for item in items)
-        return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=spendhound-expenses.csv"})
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=spendhound-expenses.csv"},
+        )
 
     return JSONResponse(export_payload)
 
 
 @router.post("")
-async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+async def create_expense(
+    body: ExpenseCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     await ensure_default_categories(db, current_user.id)
     transaction_type = normalize_transaction_type(body.transaction_type)
     cadence_override = _parse_cadence_override(body.cadence)
@@ -312,20 +396,27 @@ async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_c
         recurring_variable=body.recurring_variable,
         recurring_auto_add=body.recurring_auto_add,
     )
-    category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
+    category = await resolve_category(
+        db,
+        current_user.id,
+        category_id=body.category_id,
+        category_name=body.category_name,
+        merchant=body.merchant,
+        transaction_type=transaction_type,
+    )
 
     # Validate ledger membership if a ledger is specified
     ledger_id = body.ledger_id
     ledger_name: str | None = None
     if ledger_id:
-        ledger_result = await db.execute(
-            select(Ledger).where(Ledger.id == ledger_id)
-        )
+        ledger_result = await db.execute(select(Ledger).where(Ledger.id == ledger_id))
         ledger = ledger_result.scalar_one_or_none()
         if not ledger:
             raise HTTPException(status_code=404, detail="Ledger not found")
         membership = await db.execute(
-            select(LedgerMembership).where(LedgerMembership.ledger_id == ledger_id, LedgerMembership.user_id == current_user.id)
+            select(LedgerMembership).where(
+                LedgerMembership.ledger_id == ledger_id, LedgerMembership.user_id == current_user.id
+            )
         )
         if not membership.scalar_one_or_none():
             raise HTTPException(status_code=403, detail="You are not a member of this ledger")
@@ -351,30 +442,53 @@ async def create_expense(body: ExpenseCreate, current_user: User = Depends(get_c
         prepaid_start_date=resolved_prepaid_start,
         recurring_variable=recurring_variable,
         recurring_auto_add=recurring_auto_add,
-        is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
+        is_major_purchase=_normalize_major_purchase(
+            body.is_major_purchase, transaction_type=transaction_type
+        ),
         ledger_id=ledger_id,
     )
     db.add(expense)
     await db.flush()
-    await replace_expense_items(db, expense, body.items, category_name=category.name if category else body.category_name)
+    await replace_expense_items(
+        db, expense, body.items, category_name=category.name if category else body.category_name
+    )
     if ledger_id:
-        db.add(LedgerAuditLog(ledger_id=ledger_id, expense_id=expense.id, user_id=current_user.id, action="created"))
+        db.add(
+            LedgerAuditLog(
+                ledger_id=ledger_id,
+                expense_id=expense.id,
+                user_id=current_user.id,
+                action="created",
+            )
+        )
     await recompute_recurring_expenses(db, current_user.id)
     await db.refresh(expense)
     await invalidate_analytics_cache(current_user.id)
-    return serialize_expense(expense, category_name=category.name if category else None, ledger_name=ledger_name)
+    return serialize_expense(
+        expense, category_name=category.name if category else None, ledger_name=ledger_name
+    )
 
 
 @router.post("/from-receipt")
-async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    receipt_result = await db.execute(select(Receipt).where(Receipt.id == body.receipt_id, Receipt.user_id == current_user.id).with_for_update())
+async def create_expense_from_receipt(
+    body: ReceiptExpenseCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    receipt_result = await db.execute(
+        select(Receipt)
+        .where(Receipt.id == body.receipt_id, Receipt.user_id == current_user.id)
+        .with_for_update()
+    )
     receipt = receipt_result.scalar_one_or_none()
     if receipt is None:
         raise HTTPException(status_code=404, detail="Receipt not found")
     if receipt.document_kind != "receipt":
         raise HTTPException(status_code=400, detail="This document is not a receipt upload")
 
-    existing_expense_row = await _get_existing_receipt_expense(db, user_id=current_user.id, receipt_id=receipt.id)
+    existing_expense_row = await _get_existing_receipt_expense(
+        db, user_id=current_user.id, receipt_id=receipt.id
+    )
     if existing_expense_row is not None:
         existing_expense, existing_category_name = existing_expense_row
         if receipt.extraction_status != "finalized":
@@ -382,7 +496,11 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
             receipt.needs_review = existing_expense.needs_review
             receipt.finalized_at = receipt.finalized_at or datetime.now(UTC)
             await db.flush()
-        return serialize_expense(existing_expense, category_name=existing_category_name, receipt_filename=receipt.original_filename)
+        return serialize_expense(
+            existing_expense,
+            category_name=existing_category_name,
+            receipt_filename=receipt.original_filename,
+        )
 
     if receipt.extraction_status == "finalized":
         raise HTTPException(status_code=409, detail="Receipt has already been finalized")
@@ -401,8 +519,17 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
         recurring_variable=body.recurring_variable,
         recurring_auto_add=body.recurring_auto_add,
     )
-    category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
-    confidence = body.confidence if body.confidence is not None else receipt.extraction_confidence or 0.5
+    category = await resolve_category(
+        db,
+        current_user.id,
+        category_id=body.category_id,
+        category_name=body.category_name,
+        merchant=body.merchant,
+        transaction_type=transaction_type,
+    )
+    confidence = (
+        body.confidence if body.confidence is not None else receipt.extraction_confidence or 0.5
+    )
     expense = Expense(
         user_id=current_user.id,
         merchant=body.merchant.strip(),
@@ -424,7 +551,9 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
         prepaid_start_date=resolved_prepaid_start,
         recurring_variable=recurring_variable,
         recurring_auto_add=recurring_auto_add,
-        is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
+        is_major_purchase=_normalize_major_purchase(
+            body.is_major_purchase, transaction_type=transaction_type
+        ),
     )
     db.add(expense)
     receipt.preview_data = {
@@ -439,24 +568,45 @@ async def create_expense_from_receipt(body: ReceiptExpenseCreate, current_user: 
         "cadence": cadence_override or CADENCE_ONE_TIME,
         "recurring_variable": recurring_variable,
         "recurring_auto_add": recurring_auto_add,
-        "is_major_purchase": _normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
-        "items": body.items if body.items is not None else (receipt.preview_data or {}).get("items", []),
+        "is_major_purchase": _normalize_major_purchase(
+            body.is_major_purchase, transaction_type=transaction_type
+        ),
+        "items": body.items
+        if body.items is not None
+        else (receipt.preview_data or {}).get("items", []),
         "confidence": confidence,
     }
     receipt.needs_review = expense.needs_review
     receipt.extraction_status = "finalized"
     receipt.finalized_at = datetime.now(UTC)
     await db.flush()
-    await replace_expense_items(db, expense, body.items if body.items is not None else (receipt.preview_data or {}).get("items", []), category_name=category.name if category else body.category_name)
+    await replace_expense_items(
+        db,
+        expense,
+        body.items if body.items is not None else (receipt.preview_data or {}).get("items", []),
+        category_name=category.name if category else body.category_name,
+    )
     await recompute_recurring_expenses(db, current_user.id)
     await db.refresh(expense)
     await invalidate_analytics_cache(current_user.id)
-    return serialize_expense(expense, category_name=category.name if category else None, receipt_filename=receipt.original_filename)
+    return serialize_expense(
+        expense,
+        category_name=category.name if category else None,
+        receipt_filename=receipt.original_filename,
+    )
 
 
 @router.post("/from-statement-entry")
-async def create_expense_from_statement_entry(body: StatementExpenseCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    receipt_result = await db.execute(select(Receipt).where(Receipt.id == body.receipt_id, Receipt.user_id == current_user.id).with_for_update())
+async def create_expense_from_statement_entry(
+    body: StatementExpenseCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    receipt_result = await db.execute(
+        select(Receipt)
+        .where(Receipt.id == body.receipt_id, Receipt.user_id == current_user.id)
+        .with_for_update()
+    )
     receipt = receipt_result.scalar_one_or_none()
     if receipt is None:
         raise HTTPException(status_code=404, detail="Statement import not found")
@@ -471,11 +621,17 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
     if entry.get("status") == "finalized":
         saved_expense_id = entry.get("saved_expense_id")
         if saved_expense_id:
-            existing_expense_row = await _get_expense_with_category_name(db, user_id=current_user.id, expense_id=uuid.UUID(str(saved_expense_id)))
+            existing_expense_row = await _get_expense_with_category_name(
+                db, user_id=current_user.id, expense_id=uuid.UUID(str(saved_expense_id))
+            )
             if existing_expense_row is not None:
                 existing_expense, existing_category_name = existing_expense_row
                 return {
-                    "expense": serialize_expense(existing_expense, category_name=existing_category_name, receipt_filename=receipt.original_filename),
+                    "expense": serialize_expense(
+                        existing_expense,
+                        category_name=existing_category_name,
+                        receipt_filename=receipt.original_filename,
+                    ),
                     "statement": serialize_receipt(receipt),
                 }
         raise HTTPException(status_code=409, detail="Statement entry has already been finalized")
@@ -494,8 +650,19 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
         recurring_variable=body.recurring_variable,
         recurring_auto_add=body.recurring_auto_add,
     )
-    category = await resolve_category(db, current_user.id, category_id=body.category_id, category_name=body.category_name, merchant=body.merchant, transaction_type=transaction_type)
-    confidence = body.confidence if body.confidence is not None else float(entry.get("confidence") or receipt.extraction_confidence or 0.5)
+    category = await resolve_category(
+        db,
+        current_user.id,
+        category_id=body.category_id,
+        category_name=body.category_name,
+        merchant=body.merchant,
+        transaction_type=transaction_type,
+    )
+    confidence = (
+        body.confidence
+        if body.confidence is not None
+        else float(entry.get("confidence") or receipt.extraction_confidence or 0.5)
+    )
     expense = Expense(
         user_id=current_user.id,
         merchant=body.merchant.strip(),
@@ -517,7 +684,9 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
         prepaid_start_date=resolved_prepaid_start,
         recurring_variable=recurring_variable,
         recurring_auto_add=recurring_auto_add,
-        is_major_purchase=_normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
+        is_major_purchase=_normalize_major_purchase(
+            body.is_major_purchase, transaction_type=transaction_type
+        ),
     )
     db.add(expense)
     await db.flush()
@@ -535,7 +704,9 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
             "cadence": cadence_override or CADENCE_ONE_TIME,
             "recurring_variable": recurring_variable,
             "recurring_auto_add": recurring_auto_add,
-            "is_major_purchase": _normalize_major_purchase(body.is_major_purchase, transaction_type=transaction_type),
+            "is_major_purchase": _normalize_major_purchase(
+                body.is_major_purchase, transaction_type=transaction_type
+            ),
             "confidence": confidence,
             "status": "finalized",
             "saved_expense_id": str(expense.id),
@@ -554,13 +725,21 @@ async def create_expense_from_statement_entry(body: StatementExpenseCreate, curr
     await db.refresh(expense)
     await invalidate_analytics_cache(current_user.id)
     return {
-        "expense": serialize_expense(expense, category_name=category.name if category else None, receipt_filename=receipt.original_filename),
+        "expense": serialize_expense(
+            expense,
+            category_name=category.name if category else None,
+            receipt_filename=receipt.original_filename,
+        ),
         "statement": serialize_receipt(receipt),
     }
 
 
 @router.get("/{expense_id}")
-async def get_expense(expense_id: uuid.UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+async def get_expense(
+    expense_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     result = await db.execute(
         select(Expense)
         .options(selectinload(Expense.items), selectinload(Expense.receipt))
@@ -571,7 +750,11 @@ async def get_expense(expense_id: uuid.UUID, current_user: User = Depends(get_cu
         raise HTTPException(status_code=404, detail="Expense not found")
     category_name = None
     if expense.category_id:
-        category_result = await db.execute(select(Category.name).where(Category.id == expense.category_id, Category.user_id == current_user.id))
+        category_result = await db.execute(
+            select(Category.name).where(
+                Category.id == expense.category_id, Category.user_id == current_user.id
+            )
+        )
         category_name = category_result.scalar_one_or_none()
     receipt = expense.receipt
     return serialize_expense(
@@ -586,15 +769,28 @@ async def get_expense(expense_id: uuid.UUID, current_user: User = Depends(get_cu
 
 
 @router.patch("/{expense_id}")
-async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    result = await db.execute(select(Expense).where(Expense.id == expense_id, Expense.user_id == current_user.id))
+async def update_expense(
+    expense_id: uuid.UUID,
+    body: ExpenseUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(
+        select(Expense).where(Expense.id == expense_id, Expense.user_id == current_user.id)
+    )
     expense = result.scalar_one_or_none()
     if expense is None:
         raise HTTPException(status_code=404, detail="Expense not found")
 
     data = body.model_dump(exclude_unset=True)
-    next_transaction_type = normalize_transaction_type(data.get("transaction_type"), default=expense.transaction_type)
-    next_cadence = _parse_cadence_override(data.get("cadence")) if "cadence" in data else (expense.cadence_override or expense.cadence)
+    next_transaction_type = normalize_transaction_type(
+        data.get("transaction_type"), default=expense.transaction_type
+    )
+    next_cadence = (
+        _parse_cadence_override(data.get("cadence"))
+        if "cadence" in data
+        else (expense.cadence_override or expense.cadence)
+    )
     recurring_variable, recurring_auto_add = normalize_recurring_settings(
         next_cadence,
         recurring_variable=data.get("recurring_variable", expense.recurring_variable),
@@ -611,7 +807,9 @@ async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_use
     if "cadence_interval" in data and next_cadence == CADENCE_CUSTOM:
         interval = data["cadence_interval"] or 3
         if interval < 2:
-            raise HTTPException(status_code=422, detail="cadence_interval must be at least 2 for custom cadence")
+            raise HTTPException(
+                status_code=422, detail="cadence_interval must be at least 2 for custom cadence"
+            )
         expense.cadence_interval = interval
     if "prepaid_months" in data and next_cadence == CADENCE_PREPAID:
         expense.prepaid_months = data["prepaid_months"]
@@ -625,9 +823,22 @@ async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_use
         category_name = data.get("category_name") if "category_name" in data else None
         merchant = data.get("merchant", expense.merchant)
         if "category_id" in data or "category_name" in data:
-            category = await resolve_category(db, current_user.id, category_id=category_id, category_name=category_name, merchant=merchant, transaction_type=next_transaction_type)
+            category = await resolve_category(
+                db,
+                current_user.id,
+                category_id=category_id,
+                category_name=category_name,
+                merchant=merchant,
+                transaction_type=next_transaction_type,
+            )
         else:
-            category = await resolve_category(db, current_user.id, category_id=expense.category_id, merchant=merchant, transaction_type=next_transaction_type)
+            category = await resolve_category(
+                db,
+                current_user.id,
+                category_id=expense.category_id,
+                merchant=merchant,
+                transaction_type=next_transaction_type,
+            )
         expense.category_id = category.id if category else None
     for field, value in data.items():
         if field == "amount" and value is not None:
@@ -637,33 +848,61 @@ async def update_expense(expense_id: uuid.UUID, body: ExpenseUpdate, current_use
         elif field == "expense_date" and value is not None:
             expense.expense_date = datetime.fromisoformat(value).date()
         elif field == "is_major_purchase":
-            expense.is_major_purchase = _normalize_major_purchase(value, transaction_type=next_transaction_type)
+            expense.is_major_purchase = _normalize_major_purchase(
+                value, transaction_type=next_transaction_type
+            )
         elif field == "cadence":
             continue
-        elif field in {"recurring_variable", "recurring_auto_add", "cadence_interval", "prepaid_months", "prepaid_start_date"}:
+        elif field in {
+            "recurring_variable",
+            "recurring_auto_add",
+            "cadence_interval",
+            "prepaid_months",
+            "prepaid_start_date",
+        }:
             continue
         elif field not in {"category_id", "category_name"}:
             setattr(expense, field, value)
 
     current_category = None
     if expense.category_id:
-        category_result = await db.execute(select(Category).where(Category.id == expense.category_id, Category.user_id == current_user.id))
+        category_result = await db.execute(
+            select(Category).where(
+                Category.id == expense.category_id, Category.user_id == current_user.id
+            )
+        )
         current_category = category_result.scalar_one_or_none()
-    expense.needs_review = body.needs_review if body.needs_review is not None else expense_requires_review(current_category, expense.confidence, expense.source)
+    expense.needs_review = (
+        body.needs_review
+        if body.needs_review is not None
+        else expense_requires_review(current_category, expense.confidence, expense.source)
+    )
     await db.flush()
     await recompute_recurring_expenses(db, current_user.id)
     await db.refresh(expense)
     receipt_filename = None
     if expense.receipt_id:
-        receipt_result = await db.execute(select(Receipt.original_filename).where(Receipt.id == expense.receipt_id))
+        receipt_result = await db.execute(
+            select(Receipt.original_filename).where(Receipt.id == expense.receipt_id)
+        )
         receipt_filename = receipt_result.scalar_one_or_none()
     await invalidate_analytics_cache(current_user.id)
-    return serialize_expense(expense, category_name=current_category.name if current_category else None, receipt_filename=receipt_filename)
+    return serialize_expense(
+        expense,
+        category_name=current_category.name if current_category else None,
+        receipt_filename=receipt_filename,
+    )
 
 
 @router.delete("/{expense_id}", status_code=204)
-async def delete_expense(expense_id: uuid.UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-    result = await db.execute(select(Expense).where(Expense.id == expense_id, Expense.user_id == current_user.id))
+async def delete_expense(
+    expense_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    result = await db.execute(
+        select(Expense).where(Expense.id == expense_id, Expense.user_id == current_user.id)
+    )
     expense = result.scalar_one_or_none()
     if expense is None:
         raise HTTPException(status_code=404, detail="Expense not found")

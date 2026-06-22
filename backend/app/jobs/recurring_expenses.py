@@ -29,7 +29,11 @@ class RecurringExpenseGenerationSummary:
 
 def current_calendar_month_start(reference_datetime: datetime | None = None) -> date:
     timezone_name = ZoneInfo(settings.recurring_generation_timezone)
-    local_now = reference_datetime.astimezone(timezone_name) if reference_datetime else datetime.now(timezone_name)
+    local_now = (
+        reference_datetime.astimezone(timezone_name)
+        if reference_datetime
+        else datetime.now(timezone_name)
+    )
     return date(local_now.year, local_now.month, 1)
 
 
@@ -38,7 +42,9 @@ async def generate_recurring_expenses_for_all_users(
     target_month: date,
 ) -> RecurringExpenseGenerationSummary:
     summary = RecurringExpenseGenerationSummary(target_month=target_month.strftime("%Y-%m"))
-    users_result = await db.execute(select(User).where(User.status == "approved").order_by(User.created_at.asc()))
+    users_result = await db.execute(
+        select(User).where(User.status == "approved").order_by(User.created_at.asc())
+    )
 
     for user in users_result.scalars().all():
         summary.processed_users += 1

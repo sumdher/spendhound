@@ -459,8 +459,10 @@ export default function ChatPage() {
           <div className="mb-3 flex items-start gap-2 rounded-lg border border-yellow-500/40 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-400">
             <span className="shrink-0">⚠️</span>
             <span>
-              You haven&apos;t configured an LLM provider API key yet — AI chat will use the server defaults.{" "}
-              <a href="/settings" className="font-medium underline underline-offset-2">Set up your API key in Settings.</a>
+              {session?.isDemo
+                ? <>The demo account can&apos;t use the server&apos;s local AI model. Add your own API key to use chat.{" "}<a href="/settings" className="font-medium underline underline-offset-2">Set up your key in Settings.</a></>
+                : <>No AI provider key configured — chat will fall back to the server&apos;s default model.{" "}<a href="/settings" className="font-medium underline underline-offset-2">Add your key in Settings.</a></>
+              }
             </span>
           </div>
         )}

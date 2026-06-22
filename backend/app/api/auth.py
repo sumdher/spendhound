@@ -68,16 +68,27 @@ def serialize_user_profile(user: User) -> UserResponse:
 
 @router.post("/google", response_model=AuthResponse)
 @limiter.limit(f"{settings.rate_limit_auth_per_minute}/minute")
-async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSession = Depends(get_db), _bot_check: None = Depends(block_bots)) -> AuthResponse:
+async def google_auth(
+    request: Request,
+    body: GoogleTokenRequest,
+    db: AsyncSession = Depends(get_db),
+    _bot_check: None = Depends(block_bots),
+) -> AuthResponse:
     try:
-        id_info = id_token.verify_oauth2_token(body.id_token, google_requests.Request(), settings.google_client_id)  # type: ignore[no-untyped-call]
+        id_info = id_token.verify_oauth2_token(
+            body.id_token, google_requests.Request(), settings.google_client_id
+        )  # type: ignore[no-untyped-call]
     except ValueError as error:
         logger.warning("Invalid Google ID token", error=str(error))
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid Google token: {error}") from error
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid Google token: {error}"
+        ) from error
 
     email = id_info.get("email")
     if not email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google token missing email claim")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Google token missing email claim"
+        )
 
     normalized_email = email.strip().lower()
     result = await db.execute(select(User).where(func.lower(User.email) == normalized_email))
@@ -85,8 +96,17 @@ async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSessi
     is_new_user = user is None
 
     if user is None:
-        initial_status = "approved" if (is_admin_email(normalized_email) or not (settings.admin_email or "").strip()) else "pending"
-        user = User(email=normalized_email, name=id_info.get("name"), avatar_url=id_info.get("picture"), status=initial_status)
+        initial_status = (
+            "approved"
+            if (is_admin_email(normalized_email) or not (settings.admin_email or "").strip())
+            else "pending"
+        )
+        user = User(
+            email=normalized_email,
+            name=id_info.get("name"),
+            avatar_url=id_info.get("picture"),
+            status=initial_status,
+        )
         db.add(user)
         await db.flush()
         logger.info("New user created", email=email, status=initial_status)
@@ -106,7 +126,12 @@ async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSessi
         reject_token = create_action_token(user.id, "reject")
         approve_url = f"{settings.app_url}/backend/api/admin/approve?token={approve_token}"
         reject_url = f"{settings.app_url}/backend/api/admin/reject?token={reject_token}"
-        await send_approval_request_email(user_email=user.email, user_name=user.name, approve_url=approve_url, reject_url=reject_url)
+        await send_approval_request_email(
+            user_email=user.email,
+            user_name=user.name,
+            approve_url=approve_url,
+            reject_url=reject_url,
+        )
 
     token = create_access_token(user.id, user.email)
     is_admin = is_admin_email(normalized_email)
@@ -125,6 +150,7 @@ async def google_auth(request: Request, body: GoogleTokenRequest, db: AsyncSessi
 
 
 @router.post("/demo-login", response_model=AuthResponse)
+@limiter.limit(f"{settings.rate_limit_auth_per_minute}/minute")
 async def demo_login(request: Request, db: AsyncSession = Depends(get_db)) -> AuthResponse:
     """Issue a backend JWT for the Bruce Wayne demo account — no Google auth required.
 
@@ -153,6 +179,7 @@ async def demo_login(request: Request, db: AsyncSession = Depends(get_db)) -> Au
 
 
 @router.post("/demo-login-peter", response_model=AuthResponse)
+@limiter.limit(f"{settings.rate_limit_auth_per_minute}/minute")
 async def demo_login_peter(request: Request, db: AsyncSession = Depends(get_db)) -> AuthResponse:
     """Issue a backend JWT for the Peter Parker demo account — no Google auth required."""
     from app.services.demo_seed import seed_peter_data
@@ -230,6 +257,7 @@ async def update_llm_settings(
     await db.commit()
     await db.refresh(current_user)
     from app.services.cache import invalidate_llm_models_cache
+
     await invalidate_llm_models_cache(current_user.id)
     return serialize_user_profile(current_user)
 
@@ -291,7 +319,11 @@ async def get_me_stats(
     """Return current user's join date, expense count, and needs-review count."""
     expense_count_result, needs_review_result = await asyncio.gather(
         db.execute(select(func.count(Expense.id)).where(Expense.user_id == current_user.id)),
-        db.execute(select(func.count(Expense.id)).where(Expense.user_id == current_user.id, Expense.needs_review.is_(True))),
+        db.execute(
+            select(func.count(Expense.id)).where(
+                Expense.user_id == current_user.id, Expense.needs_review.is_(True)
+            )
+        ),
     )
     return {
         "created_at": current_user.created_at.isoformat(),
@@ -311,18 +343,24 @@ async def search_users(
     if len(q) < 3:
         return []
     from sqlalchemy import or_
+
     result = await db.execute(
-        select(User).where(
+        select(User)
+        .where(
             User.status == "approved",
             User.id != current_user.id,
             or_(
                 func.lower(User.email).contains(q),
                 func.lower(User.name).contains(q),
             ),
-        ).limit(10)
+        )
+        .limit(10)
     )
     users = result.scalars().all()
-    return [{"id": str(u.id), "name": u.name, "email": u.email, "avatar_url": u.avatar_url} for u in users]
+    return [
+        {"id": str(u.id), "name": u.name, "email": u.email, "avatar_url": u.avatar_url}
+        for u in users
+    ]
 
 
 @router.delete("/me/data")
@@ -380,6 +418,11 @@ async def delete_my_account(
     - Uploaded receipt/statement files on disk
     - Redis cache entries for this user (best-effort)
     """
+    from app.services.llm.factory import _is_demo_user
+
+    if _is_demo_user(current_user):
+        raise HTTPException(status_code=403, detail="Demo accounts cannot be deleted.")
+
     import shutil
     from pathlib import Path
 
@@ -397,6 +440,7 @@ async def delete_my_account(
     # Best-effort cache eviction — non-fatal if Redis is unreachable
     try:
         from app.services.cache import invalidate_analytics_cache
+
         await invalidate_analytics_cache(user_id)
     except Exception:
         pass

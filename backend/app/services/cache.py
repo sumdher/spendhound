@@ -85,9 +85,7 @@ async def get_cached_analytics(user_id: uuid.UUID, month: str | None) -> dict | 
         return None
 
 
-async def set_cached_analytics(
-    user_id: uuid.UUID, month: str | None, data: dict
-) -> None:
+async def set_cached_analytics(user_id: uuid.UUID, month: str | None, data: dict) -> None:
     """Write dashboard analytics to cache. Silently ignores Redis errors."""
     if _redis_client is None:
         return
@@ -153,9 +151,7 @@ async def get_cached_llm_models(provider: str, user_id: uuid.UUID) -> list | Non
         return None
 
 
-async def set_cached_llm_models(
-    provider: str, user_id: uuid.UUID, data: list
-) -> None:
+async def set_cached_llm_models(provider: str, user_id: uuid.UUID, data: list) -> None:
     """Write model list to cache. Silently ignores Redis errors."""
     if _redis_client is None:
         return

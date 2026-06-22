@@ -24,21 +24,33 @@ router = APIRouter()
 logger = structlog.get_logger(__name__)
 
 
-async def _get_accessible_ledger(db: AsyncSession, *, ledger_id: uuid.UUID, user_id: uuid.UUID) -> Ledger:
+async def _get_accessible_ledger(
+    db: AsyncSession, *, ledger_id: uuid.UUID, user_id: uuid.UUID
+) -> Ledger:
     """Return ledger if user is a member; raise 404/403 otherwise."""
     result = await db.execute(select(Ledger).where(Ledger.id == ledger_id))
     ledger = result.scalar_one_or_none()
     if not ledger:
         raise HTTPException(status_code=404, detail="Ledger not found")
     membership = await db.execute(
-        select(LedgerMembership).where(LedgerMembership.ledger_id == ledger_id, LedgerMembership.user_id == user_id)
+        select(LedgerMembership).where(
+            LedgerMembership.ledger_id == ledger_id, LedgerMembership.user_id == user_id
+        )
     )
     if not membership.scalar_one_or_none():
         raise HTTPException(status_code=403, detail="You are not a member of this ledger")
     return ledger
 
 
-async def _log_audit(db: AsyncSession, *, ledger_id: uuid.UUID, user_id: uuid.UUID, expense_id: uuid.UUID | None, action: str, changes: dict | None = None) -> None:
+async def _log_audit(
+    db: AsyncSession,
+    *,
+    ledger_id: uuid.UUID,
+    user_id: uuid.UUID,
+    expense_id: uuid.UUID | None,
+    action: str,
+    changes: dict | None = None,
+) -> None:
     log = LedgerAuditLog(
         ledger_id=ledger_id,
         expense_id=expense_id,
@@ -126,7 +138,9 @@ async def list_ledgers(
         memberships_by_ledger.setdefault(m.ledger_id, []).append(m)
 
     return {
-        "ledgers": [_serialize_ledger(ldg, memberships_by_ledger.get(ldg.id, [])) for ldg in ledgers]
+        "ledgers": [
+            _serialize_ledger(ldg, memberships_by_ledger.get(ldg.id, [])) for ldg in ledgers
+        ]
     }
 
 
@@ -147,14 +161,18 @@ async def create_ledger(
             partner_check = await db.execute(
                 select(PartnerRequest).where(
                     or_(
-                        (PartnerRequest.requester_id == current_user.id) & (PartnerRequest.recipient_id == uid),
-                        (PartnerRequest.requester_id == uid) & (PartnerRequest.recipient_id == current_user.id),
+                        (PartnerRequest.requester_id == current_user.id)
+                        & (PartnerRequest.recipient_id == uid),
+                        (PartnerRequest.requester_id == uid)
+                        & (PartnerRequest.recipient_id == current_user.id),
                     ),
                     PartnerRequest.status == PARTNER_STATUS_ACCEPTED,
                 )
             )
             if not partner_check.scalar_one_or_none():
-                raise HTTPException(status_code=400, detail=f"User {uid} is not your expense partner")
+                raise HTTPException(
+                    status_code=400, detail=f"User {uid} is not your expense partner"
+                )
             partner_ids.add(uid)
 
     ledger = Ledger(name=body.name.strip(), type=body.type, created_by=current_user.id)
@@ -171,7 +189,9 @@ async def create_ledger(
     await db.commit()
     await db.refresh(ledger)
 
-    membership_result = await db.execute(select(LedgerMembership).where(LedgerMembership.ledger_id == ledger.id))
+    membership_result = await db.execute(
+        select(LedgerMembership).where(LedgerMembership.ledger_id == ledger.id)
+    )
     memberships = membership_result.scalars().all()
     user_ids = [m.user_id for m in memberships]
     user_result = await db.execute(select(User).where(User.id.in_(user_ids)))
@@ -233,8 +253,10 @@ async def add_ledger_members(
         partner_check = await db.execute(
             select(PartnerRequest).where(
                 or_(
-                    (PartnerRequest.requester_id == current_user.id) & (PartnerRequest.recipient_id == uid),
-                    (PartnerRequest.requester_id == uid) & (PartnerRequest.recipient_id == current_user.id),
+                    (PartnerRequest.requester_id == current_user.id)
+                    & (PartnerRequest.recipient_id == uid),
+                    (PartnerRequest.requester_id == uid)
+                    & (PartnerRequest.recipient_id == current_user.id),
                 ),
                 PartnerRequest.status == PARTNER_STATUS_ACCEPTED,
             )
@@ -242,14 +264,18 @@ async def add_ledger_members(
         if not partner_check.scalar_one_or_none():
             raise HTTPException(status_code=400, detail=f"User {uid} is not your expense partner")
         existing = await db.execute(
-            select(LedgerMembership).where(LedgerMembership.ledger_id == ledger_id, LedgerMembership.user_id == uid)
+            select(LedgerMembership).where(
+                LedgerMembership.ledger_id == ledger_id, LedgerMembership.user_id == uid
+            )
         )
         if not existing.scalar_one_or_none():
             db.add(LedgerMembership(ledger_id=ledger_id, user_id=uid, role="member"))
 
     await db.commit()
 
-    membership_result = await db.execute(select(LedgerMembership).where(LedgerMembership.ledger_id == ledger_id))
+    membership_result = await db.execute(
+        select(LedgerMembership).where(LedgerMembership.ledger_id == ledger_id)
+    )
     memberships = membership_result.scalars().all()
     user_ids = [m.user_id for m in memberships]
     user_result = await db.execute(select(User).where(User.id.in_(user_ids)))
@@ -268,9 +294,13 @@ async def leave_ledger(
     """Leave a shared ledger. The owner must delete instead."""
     ledger = await _get_accessible_ledger(db, ledger_id=ledger_id, user_id=current_user.id)
     if ledger.created_by == current_user.id:
-        raise HTTPException(status_code=400, detail="You are the owner — delete the ledger instead of leaving")
+        raise HTTPException(
+            status_code=400, detail="You are the owner — delete the ledger instead of leaving"
+        )
     membership = await db.execute(
-        select(LedgerMembership).where(LedgerMembership.ledger_id == ledger_id, LedgerMembership.user_id == current_user.id)
+        select(LedgerMembership).where(
+            LedgerMembership.ledger_id == ledger_id, LedgerMembership.user_id == current_user.id
+        )
     )
     m = membership.scalar_one_or_none()
     if m:
@@ -311,8 +341,12 @@ async def get_audit_log(
                     "id": str(log.user_id),
                     "name": user_map[log.user_id].name if log.user_id in user_map else None,
                     "email": user_map[log.user_id].email if log.user_id in user_map else None,
-                    "avatar_url": user_map[log.user_id].avatar_url if log.user_id in user_map else None,
-                } if log.user_id else None,
+                    "avatar_url": user_map[log.user_id].avatar_url
+                    if log.user_id in user_map
+                    else None,
+                }
+                if log.user_id
+                else None,
                 "changes": json.loads(log.changes) if log.changes else None,
                 "created_at": log.created_at.isoformat(),
             }
@@ -333,9 +367,7 @@ async def move_expenses(
 
     moved = 0
     for eid in body.expense_ids:
-        result = await db.execute(
-            select(Expense).where(Expense.id == eid)
-        )
+        result = await db.execute(select(Expense).where(Expense.id == eid))
         expense = result.scalar_one_or_none()
         if not expense:
             continue
@@ -344,7 +376,10 @@ async def move_expenses(
         has_access = expense.user_id == current_user.id
         if not has_access and expense.ledger_id:
             m = await db.execute(
-                select(LedgerMembership).where(LedgerMembership.ledger_id == expense.ledger_id, LedgerMembership.user_id == current_user.id)
+                select(LedgerMembership).where(
+                    LedgerMembership.ledger_id == expense.ledger_id,
+                    LedgerMembership.user_id == current_user.id,
+                )
             )
             has_access = m.scalar_one_or_none() is not None
 
@@ -354,9 +389,25 @@ async def move_expenses(
         old_ledger_id = expense.ledger_id
         expense.ledger_id = body.target_ledger_id
         if body.target_ledger_id:
-            await _log_audit(db, ledger_id=body.target_ledger_id, user_id=current_user.id, expense_id=eid, action="moved_in", changes={"from_ledger_id": str(old_ledger_id) if old_ledger_id else None})
+            await _log_audit(
+                db,
+                ledger_id=body.target_ledger_id,
+                user_id=current_user.id,
+                expense_id=eid,
+                action="moved_in",
+                changes={"from_ledger_id": str(old_ledger_id) if old_ledger_id else None},
+            )
         if old_ledger_id:
-            await _log_audit(db, ledger_id=old_ledger_id, user_id=current_user.id, expense_id=eid, action="moved_out", changes={"to_ledger_id": str(body.target_ledger_id) if body.target_ledger_id else None})
+            await _log_audit(
+                db,
+                ledger_id=old_ledger_id,
+                user_id=current_user.id,
+                expense_id=eid,
+                action="moved_out",
+                changes={
+                    "to_ledger_id": str(body.target_ledger_id) if body.target_ledger_id else None
+                },
+            )
         moved += 1
 
     await db.commit()
@@ -376,9 +427,7 @@ async def copy_expenses(
 
     copied = 0
     for eid in body.expense_ids:
-        result = await db.execute(
-            select(Expense).where(Expense.id == eid)
-        )
+        result = await db.execute(select(Expense).where(Expense.id == eid))
         src = result.scalar_one_or_none()
         if not src:
             continue
@@ -413,17 +462,26 @@ async def copy_expenses(
             await db.flush()
 
             for item in src_items:
-                db.add(ExpenseItem(
-                    expense_id=new_expense.id,
-                    description=item.description,
-                    quantity=item.quantity,
-                    unit_price=item.unit_price,
-                    total_price=item.total_price,
-                    subcategory=item.subcategory,
-                ))
+                db.add(
+                    ExpenseItem(
+                        expense_id=new_expense.id,
+                        description=item.description,
+                        quantity=item.quantity,
+                        unit_price=item.unit_price,
+                        total_price=item.total_price,
+                        subcategory=item.subcategory,
+                    )
+                )
 
             if target_id:
-                await _log_audit(db, ledger_id=target_id, user_id=current_user.id, expense_id=new_expense.id, action="copied_in", changes={"source_expense_id": str(eid)})
+                await _log_audit(
+                    db,
+                    ledger_id=target_id,
+                    user_id=current_user.id,
+                    expense_id=new_expense.id,
+                    action="copied_in",
+                    changes={"source_expense_id": str(eid)},
+                )
             copied += 1
 
     await db.commit()

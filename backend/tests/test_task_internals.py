@@ -60,11 +60,19 @@ def test_reset_called_before_each_task():
     # Compare line numbers so docstring mentions of 'asyncio.run()' don't confuse us.
     lines = inspect.getsource(receipt_tasks).splitlines()
     reset_line = next(
-        (i for i, line in enumerate(lines) if "_reset_ollama_semaphore()" in line and not line.strip().startswith("#")),
+        (
+            i
+            for i, line in enumerate(lines)
+            if "_reset_ollama_semaphore()" in line and not line.strip().startswith("#")
+        ),
         None,
     )
     run_line = next(
-        (i for i, line in enumerate(lines) if "asyncio.run(" in line and not line.strip().startswith(("\"\"\"", "#", "``"))),
+        (
+            i
+            for i, line in enumerate(lines)
+            if "asyncio.run(" in line and not line.strip().startswith(('"""', "#", "``"))
+        ),
         None,
     )
     assert reset_line is not None, "_reset_ollama_semaphore() call not found in receipt_tasks"
@@ -85,6 +93,7 @@ def test_semaphore_lazily_recreated_after_reset():
 
     async def _check():
         from app.services.llm.ollama import _get_semaphore
+
         sema = _get_semaphore()
         assert sema is not None
         assert isinstance(sema, asyncio.Semaphore)

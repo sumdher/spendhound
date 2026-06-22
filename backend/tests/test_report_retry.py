@@ -53,9 +53,9 @@ def test_backoff_arithmetic():
 @pytest.mark.parametrize(
     "attempt, expected_countdown",
     [
-        (0, 2),   # 2 ** (0 + 1) = 2 s
-        (1, 4),   # 2 ** (1 + 1) = 4 s
-        (2, 8),   # 2 ** (2 + 1) = 8 s
+        (0, 2),  # 2 ** (0 + 1) = 2 s
+        (1, 4),  # 2 ** (1 + 1) = 4 s
+        (2, 8),  # 2 ** (2 + 1) = 8 s
     ],
     ids=["attempt-1", "attempt-2", "attempt-3"],
 )

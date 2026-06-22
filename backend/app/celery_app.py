@@ -24,7 +24,12 @@ celery_app = Celery(
     "spendhound",
     broker=settings.redis_url,
     backend=None,  # results discarded — status lives in Postgres
-    include=["app.tasks.receipt_tasks", "app.tasks.statement_tasks", "app.tasks.report_tasks", "app.tasks.demo_tasks"],
+    include=[
+        "app.tasks.receipt_tasks",
+        "app.tasks.statement_tasks",
+        "app.tasks.report_tasks",
+        "app.tasks.demo_tasks",
+    ],
 )
 
 celery_app.conf.update(

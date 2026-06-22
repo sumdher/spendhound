@@ -22,14 +22,24 @@ def upgrade() -> None:
     category_columns = {column["name"] for column in inspector.get_columns("categories")}
     category_indexes = {index["name"] for index in inspector.get_indexes("categories")}
     if "transaction_type" not in category_columns:
-        op.add_column("categories", sa.Column("transaction_type", sa.String(length=20), nullable=False, server_default="debit"))
+        op.add_column(
+            "categories",
+            sa.Column(
+                "transaction_type", sa.String(length=20), nullable=False, server_default="debit"
+            ),
+        )
     if "ix_categories_transaction_type" not in category_indexes:
         op.create_index("ix_categories_transaction_type", "categories", ["transaction_type"])
 
     expense_columns = {column["name"] for column in inspector.get_columns("expenses")}
     expense_indexes = {index["name"] for index in inspector.get_indexes("expenses")}
     if "transaction_type" not in expense_columns:
-        op.add_column("expenses", sa.Column("transaction_type", sa.String(length=20), nullable=False, server_default="debit"))
+        op.add_column(
+            "expenses",
+            sa.Column(
+                "transaction_type", sa.String(length=20), nullable=False, server_default="debit"
+            ),
+        )
     if "ix_expenses_transaction_type" not in expense_indexes:
         op.create_index("ix_expenses_transaction_type", "expenses", ["transaction_type"])
 

@@ -36,8 +36,15 @@ def upgrade() -> None:
         "expenses",
         sa.Column("generated_for_month", sa.Date(), nullable=True),
     )
-    op.create_index(op.f("ix_expenses_generated_for_month"), "expenses", ["generated_for_month"], unique=False)
-    op.create_index(op.f("ix_expenses_recurring_source_expense_id"), "expenses", ["recurring_source_expense_id"], unique=False)
+    op.create_index(
+        op.f("ix_expenses_generated_for_month"), "expenses", ["generated_for_month"], unique=False
+    )
+    op.create_index(
+        op.f("ix_expenses_recurring_source_expense_id"),
+        "expenses",
+        ["recurring_source_expense_id"],
+        unique=False,
+    )
     op.create_foreign_key(
         "fk_expenses_recurring_source_expense_id_expenses",
         "expenses",
@@ -49,7 +56,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_constraint("fk_expenses_recurring_source_expense_id_expenses", "expenses", type_="foreignkey")
+    op.drop_constraint(
+        "fk_expenses_recurring_source_expense_id_expenses", "expenses", type_="foreignkey"
+    )
     op.drop_index(op.f("ix_expenses_recurring_source_expense_id"), table_name="expenses")
     op.drop_index(op.f("ix_expenses_generated_for_month"), table_name="expenses")
     op.drop_column("expenses", "generated_for_month")

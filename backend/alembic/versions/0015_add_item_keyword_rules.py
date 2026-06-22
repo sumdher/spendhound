@@ -26,12 +26,18 @@ def upgrade() -> None:
         sa.Column("priority", sa.Integer(), nullable=False, server_default="100"),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("notes", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+        ),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index(op.f("ix_item_keyword_rules_user_id"), "item_keyword_rules", ["user_id"], unique=False)
+    op.create_index(
+        op.f("ix_item_keyword_rules_user_id"), "item_keyword_rules", ["user_id"], unique=False
+    )
 
 
 def downgrade() -> None:

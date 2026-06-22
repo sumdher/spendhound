@@ -90,16 +90,28 @@ class ItemKeywordRuleUpdate(BaseModel):
 
 
 @router.get("")
-async def list_categories(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[dict]:
+async def list_categories(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> list[dict]:
     await ensure_default_categories(db, current_user.id)
-    result = await db.execute(select(Category).where(Category.user_id == current_user.id).order_by(Category.name.asc()))
+    result = await db.execute(
+        select(Category).where(Category.user_id == current_user.id).order_by(Category.name.asc())
+    )
     return [serialize_category(category) for category in result.scalars().all()]
 
 
 @router.post("")
-async def create_category(body: CategoryCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+async def create_category(
+    body: CategoryCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     await ensure_default_categories(db, current_user.id)
-    existing = await db.execute(select(Category).where(Category.user_id == current_user.id, Category.name.ilike(body.name.strip())))
+    existing = await db.execute(
+        select(Category).where(
+            Category.user_id == current_user.id, Category.name.ilike(body.name.strip())
+        )
+    )
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(status_code=400, detail="Category already exists")
     is_admin = is_admin_email(current_user.email)
@@ -119,8 +131,15 @@ async def create_category(body: CategoryCreate, current_user: User = Depends(get
 
 
 @router.patch("/{category_id}")
-async def update_category(category_id: uuid.UUID, body: CategoryUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    result = await db.execute(select(Category).where(Category.id == category_id, Category.user_id == current_user.id))
+async def update_category(
+    category_id: uuid.UUID,
+    body: CategoryUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(
+        select(Category).where(Category.id == category_id, Category.user_id == current_user.id)
+    )
     category = result.scalar_one_or_none()
     if category is None:
         raise HTTPException(status_code=404, detail="Category not found")
@@ -133,8 +152,14 @@ async def update_category(category_id: uuid.UUID, body: CategoryUpdate, current_
 
 
 @router.delete("/{category_id}", status_code=204)
-async def delete_category(category_id: uuid.UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-    result = await db.execute(select(Category).where(Category.id == category_id, Category.user_id == current_user.id))
+async def delete_category(
+    category_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    result = await db.execute(
+        select(Category).where(Category.id == category_id, Category.user_id == current_user.id)
+    )
     category = result.scalar_one_or_none()
     if category is None:
         raise HTTPException(status_code=404, detail="Category not found")
@@ -142,7 +167,9 @@ async def delete_category(category_id: uuid.UUID, current_user: User = Depends(g
 
 
 @router.get("/rules")
-async def list_rules(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[dict]:
+async def list_rules(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> list[dict]:
     result = await db.execute(
         select(MerchantRule, Category.name)
         .outerjoin(Category, Category.id == MerchantRule.category_id)
@@ -152,13 +179,19 @@ async def list_rules(current_user: User = Depends(get_current_user), db: AsyncSe
                 MerchantRule.is_global.is_(True),
             )
         )
-        .order_by(MerchantRule.is_global.asc(), MerchantRule.priority.asc(), MerchantRule.created_at.asc())
+        .order_by(
+            MerchantRule.is_global.asc(), MerchantRule.priority.asc(), MerchantRule.created_at.asc()
+        )
     )
     return [serialize_rule(rule, category_name) for rule, category_name in result.all()]
 
 
 @router.post("/rules")
-async def create_rule(body: MerchantRuleCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+async def create_rule(
+    body: MerchantRuleCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     is_admin = is_admin_email(current_user.email)
     rule = MerchantRule(
         user_id=current_user.id,
@@ -174,14 +207,27 @@ async def create_rule(body: MerchantRuleCreate, current_user: User = Depends(get
     await db.flush()
     category_name = None
     if rule.category_id:
-        category_result = await db.execute(select(Category.name).where(Category.id == rule.category_id, Category.user_id == current_user.id))
+        category_result = await db.execute(
+            select(Category.name).where(
+                Category.id == rule.category_id, Category.user_id == current_user.id
+            )
+        )
         category_name = category_result.scalar_one_or_none()
     return serialize_rule(rule, category_name)
 
 
 @router.patch("/rules/{rule_id}")
-async def update_rule(rule_id: uuid.UUID, body: MerchantRuleUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    result = await db.execute(select(MerchantRule).where(MerchantRule.id == rule_id, MerchantRule.user_id == current_user.id))
+async def update_rule(
+    rule_id: uuid.UUID,
+    body: MerchantRuleUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(
+        select(MerchantRule).where(
+            MerchantRule.id == rule_id, MerchantRule.user_id == current_user.id
+        )
+    )
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail="Rule not found")
@@ -195,14 +241,26 @@ async def update_rule(rule_id: uuid.UUID, body: MerchantRuleUpdate, current_user
     await db.flush()
     category_name = None
     if rule.category_id:
-        category_result = await db.execute(select(Category.name).where(Category.id == rule.category_id, Category.user_id == current_user.id))
+        category_result = await db.execute(
+            select(Category.name).where(
+                Category.id == rule.category_id, Category.user_id == current_user.id
+            )
+        )
         category_name = category_result.scalar_one_or_none()
     return serialize_rule(rule, category_name)
 
 
 @router.delete("/rules/{rule_id}", status_code=204)
-async def delete_rule(rule_id: uuid.UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-    result = await db.execute(select(MerchantRule).where(MerchantRule.id == rule_id, MerchantRule.user_id == current_user.id))
+async def delete_rule(
+    rule_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    result = await db.execute(
+        select(MerchantRule).where(
+            MerchantRule.id == rule_id, MerchantRule.user_id == current_user.id
+        )
+    )
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail="Rule not found")
@@ -211,8 +269,11 @@ async def delete_rule(rule_id: uuid.UUID, current_user: User = Depends(get_curre
 
 # ── Item keyword rules ───────────────────────────────────────────────────────
 
+
 @router.get("/item-rules")
-async def list_item_rules(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[dict]:
+async def list_item_rules(
+    current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> list[dict]:
     """Return user's own rules plus all global rules."""
     result = await db.execute(
         select(ItemKeywordRule)
@@ -222,15 +283,26 @@ async def list_item_rules(current_user: User = Depends(get_current_user), db: As
                 ItemKeywordRule.is_global.is_(True),
             )
         )
-        .order_by(ItemKeywordRule.is_global.asc(), ItemKeywordRule.priority.asc(), ItemKeywordRule.created_at.asc())
+        .order_by(
+            ItemKeywordRule.is_global.asc(),
+            ItemKeywordRule.priority.asc(),
+            ItemKeywordRule.created_at.asc(),
+        )
     )
     return [serialize_item_rule(rule) for rule in result.scalars().all()]
 
 
 @router.post("/item-rules")
-async def create_item_rule(body: ItemKeywordRuleCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+async def create_item_rule(
+    body: ItemKeywordRuleCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     if body.pattern_type not in _VALID_PATTERN_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid pattern_type. Choose from: {', '.join(sorted(_VALID_PATTERN_TYPES))}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid pattern_type. Choose from: {', '.join(sorted(_VALID_PATTERN_TYPES))}",
+        )
     # Only admin can create global rules
     is_admin = is_admin_email(current_user.email)
     is_global = body.is_global and is_admin
@@ -250,15 +322,27 @@ async def create_item_rule(body: ItemKeywordRuleCreate, current_user: User = Dep
 
 
 @router.patch("/item-rules/{rule_id}")
-async def update_item_rule(rule_id: uuid.UUID, body: ItemKeywordRuleUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    result = await db.execute(select(ItemKeywordRule).where(ItemKeywordRule.id == rule_id, ItemKeywordRule.user_id == current_user.id))
+async def update_item_rule(
+    rule_id: uuid.UUID,
+    body: ItemKeywordRuleUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(
+        select(ItemKeywordRule).where(
+            ItemKeywordRule.id == rule_id, ItemKeywordRule.user_id == current_user.id
+        )
+    )
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail="Item rule not found")
     is_admin = is_admin_email(current_user.email)
     data = body.model_dump(exclude_unset=True)
     if "pattern_type" in data and data["pattern_type"] not in _VALID_PATTERN_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid pattern_type. Choose from: {', '.join(sorted(_VALID_PATTERN_TYPES))}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid pattern_type. Choose from: {', '.join(sorted(_VALID_PATTERN_TYPES))}",
+        )
     for field, value in data.items():
         if field == "is_global":
             # Only admin can promote/demote global flag
@@ -271,8 +355,16 @@ async def update_item_rule(rule_id: uuid.UUID, body: ItemKeywordRuleUpdate, curr
 
 
 @router.delete("/item-rules/{rule_id}", status_code=204)
-async def delete_item_rule(rule_id: uuid.UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-    result = await db.execute(select(ItemKeywordRule).where(ItemKeywordRule.id == rule_id, ItemKeywordRule.user_id == current_user.id))
+async def delete_item_rule(
+    rule_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    result = await db.execute(
+        select(ItemKeywordRule).where(
+            ItemKeywordRule.id == rule_id, ItemKeywordRule.user_id == current_user.id
+        )
+    )
     rule = result.scalar_one_or_none()
     if rule is None:
         raise HTTPException(status_code=404, detail="Item rule not found")
@@ -280,6 +372,7 @@ async def delete_item_rule(rule_id: uuid.UUID, current_user: User = Depends(get_
 
 
 # ── Knowledge base (RAG embeddings) ─────────────────────────────────────────
+
 
 def _serialize_kb_entry(entry: ItemEmbedding) -> dict:
     return {
@@ -335,7 +428,9 @@ async def upload_knowledge_base(
     """
     is_admin = is_admin_email(current_user.email)
     if is_global and not is_admin:
-        raise HTTPException(status_code=403, detail="Only admin can upload global knowledge-base entries")
+        raise HTTPException(
+            status_code=403, detail="Only admin can upload global knowledge-base entries"
+        )
 
     content_bytes = await file.read()
     try:
@@ -359,7 +454,10 @@ async def upload_knowledge_base(
             entries.append((desc, subcat))
 
     if not entries:
-        raise HTTPException(status_code=400, detail="No valid entries found. Expected CSV with columns: description,subcategory")
+        raise HTTPException(
+            status_code=400,
+            detail="No valid entries found. Expected CSV with columns: description,subcategory",
+        )
 
     inserted = await bulk_upsert_embeddings(
         db,

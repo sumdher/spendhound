@@ -22,21 +22,41 @@ def upgrade() -> None:
 
     receipt_columns = {column["name"] for column in inspector.get_columns("receipts")}
     if "document_kind" not in receipt_columns:
-        op.add_column("receipts", sa.Column("document_kind", sa.String(length=20), nullable=False, server_default="receipt"))
+        op.add_column(
+            "receipts",
+            sa.Column(
+                "document_kind", sa.String(length=20), nullable=False, server_default="receipt"
+            ),
+        )
 
     if not inspector.has_table("expense_items"):
         op.create_table(
             "expense_items",
             sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-            sa.Column("expense_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("expenses.id", ondelete="CASCADE"), nullable=False),
+            sa.Column(
+                "expense_id",
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("expenses.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
             sa.Column("description", sa.String(length=300), nullable=False),
             sa.Column("quantity", sa.Float(), nullable=True),
             sa.Column("unit_price", sa.Numeric(12, 2), nullable=True),
             sa.Column("total_price", sa.Numeric(12, 2), nullable=True),
             sa.Column("subcategory", sa.String(length=120), nullable=True),
             sa.Column("subcategory_confidence", sa.Float(), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
         )
         op.create_index("ix_expense_items_expense_id", "expense_items", ["expense_id"])
         op.create_index("ix_expense_items_subcategory", "expense_items", ["subcategory"])

@@ -54,24 +54,34 @@ _ITALIAN_SUPERMARKET_MERCHANTS = {
     "despar": "Despar",
 }
 
-_GENERIC_CATEGORY_NAMES = {"misc", "miscellaneous", "other", "other expense", "shopping", "spesa varia", "varie"}
+_GENERIC_CATEGORY_NAMES = {
+    "misc",
+    "miscellaneous",
+    "other",
+    "other expense",
+    "shopping",
+    "spesa varia",
+    "varie",
+}
 
 # ── Upload validation ─────────────────────────────────────────────────────────
-_ALLOWED_EXTENSIONS: frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".pdf"})
+_ALLOWED_EXTENSIONS: frozenset[str] = frozenset(
+    {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".pdf"}
+)
 _UPLOAD_MAX_BYTES: int = 50 * 1024 * 1024  # 50 MB hard cap before any processing
 
 # Limits to prevent resource exhaustion from crafted PDF uploads.
-_MAX_PDF_PAGES = 50    # no real receipt or statement needs more than this
+_MAX_PDF_PAGES = 50  # no real receipt or statement needs more than this
 
 # First-bytes signatures for each allowed extension.
 # WebP is handled separately (RIFF....WEBP layout).
 _MAGIC_BYTES: dict[str, list[bytes]] = {
-    ".jpg":  [b"\xff\xd8\xff"],
+    ".jpg": [b"\xff\xd8\xff"],
     ".jpeg": [b"\xff\xd8\xff"],
-    ".png":  [b"\x89PNG\r\n\x1a\n"],
-    ".gif":  [b"GIF87a", b"GIF89a"],
-    ".bmp":  [b"BM"],
-    ".pdf":  [b"%PDF"],
+    ".png": [b"\x89PNG\r\n\x1a\n"],
+    ".gif": [b"GIF87a", b"GIF89a"],
+    ".bmp": [b"BM"],
+    ".pdf": [b"%PDF"],
 }
 
 
@@ -173,15 +183,22 @@ async def store_upload(user_id: uuid.UUID, upload: UploadFile) -> StoredReceipt:
     content = await upload.read()
 
     if len(content) > _UPLOAD_MAX_BYTES:
-        raise HTTPException(status_code=413, detail=f"File too large. Maximum allowed size is {_UPLOAD_MAX_BYTES // (1024 * 1024)} MB.")
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum allowed size is {_UPLOAD_MAX_BYTES // (1024 * 1024)} MB.",
+        )
 
     if suffix and not _check_magic_bytes(content, suffix):
-        raise HTTPException(status_code=400, detail="File content does not match its declared type.")
+        raise HTTPException(
+            status_code=400, detail="File content does not match its declared type."
+        )
 
     stored_filename = f"{uuid.uuid4()}{suffix}"
     target_path = receipt_dir / stored_filename
     target_path.write_bytes(content)
-    return StoredReceipt(stored_filename=stored_filename, storage_path=str(target_path), file_size=len(content))
+    return StoredReceipt(
+        stored_filename=stored_filename, storage_path=str(target_path), file_size=len(content)
+    )
 
 
 async def extract_text_from_file(storage_path: str, content_type: str | None) -> str:
@@ -203,7 +220,9 @@ async def extract_text_from_file(storage_path: str, content_type: str | None) ->
             return "\n\n".join(plumber_text).strip()
         try:
             reader = PdfReader(storage_path)
-            return "\n".join((page.extract_text() or "") for page in reader.pages[:_MAX_PDF_PAGES]).strip()
+            return "\n".join(
+                (page.extract_text() or "") for page in reader.pages[:_MAX_PDF_PAGES]
+            ).strip()
         except Exception:
             return ""
     return ""
@@ -249,7 +268,12 @@ def _canonical_supermarket_name(value: str | None) -> str | None:
         return None
     compact = normalized.replace(" ", "")
     for candidate, label in _ITALIAN_SUPERMARKET_MERCHANTS.items():
-        if candidate == normalized or candidate == compact or candidate in normalized or normalized in candidate:
+        if (
+            candidate == normalized
+            or candidate == compact
+            or candidate in normalized
+            or normalized in candidate
+        ):
             return label
     return None
 
@@ -258,7 +282,24 @@ def _looks_like_noise_line(line: str) -> bool:
     normalized = normalize_match_text(line)
     if not normalized:
         return True
-    if any(token in normalized for token in {"totale", "subtotal", "pagamento", "contanti", "resto", "iva", "telefono", "scontrino", "documento", "eur", "euro", "bancomat", "cassa"}):
+    if any(
+        token in normalized
+        for token in {
+            "totale",
+            "subtotal",
+            "pagamento",
+            "contanti",
+            "resto",
+            "iva",
+            "telefono",
+            "scontrino",
+            "documento",
+            "eur",
+            "euro",
+            "bancomat",
+            "cassa",
+        }
+    ):
         return True
     if re.search(r"\d{2}[/-]\d{2}[/-]\d{2,4}", line):
         return True
@@ -291,36 +332,82 @@ def _looks_like_grocery_item(description: str | None) -> bool:
     if not normalized:
         return False
     grocery_terms = {
-        "pomodoro", "pomodori", "latte", "pane", "pasta", "riso", "banana", "mele", "mela", "insalata", "zucchine", "pollo", "uova", "mozzarella", "yogurt", "acqua", "detersivo", "sapone", "shampoo", "cien", "verdura", "frutta",
+        "pomodoro",
+        "pomodori",
+        "latte",
+        "pane",
+        "pasta",
+        "riso",
+        "banana",
+        "mele",
+        "mela",
+        "insalata",
+        "zucchine",
+        "pollo",
+        "uova",
+        "mozzarella",
+        "yogurt",
+        "acqua",
+        "detersivo",
+        "sapone",
+        "shampoo",
+        "cien",
+        "verdura",
+        "frutta",
     }
     return any(term in normalized for term in grocery_terms)
 
 
 def _should_force_groceries(preview: ReceiptPreviewModel, context_text: str | None = None) -> bool:
-    if normalize_transaction_type(preview.transaction_type, default=TRANSACTION_TYPE_DEBIT) != TRANSACTION_TYPE_DEBIT:
+    if (
+        normalize_transaction_type(preview.transaction_type, default=TRANSACTION_TYPE_DEBIT)
+        != TRANSACTION_TYPE_DEBIT
+    ):
         return False
     if _is_supermarket_merchant(preview.merchant):
         return True
     item_descriptions = [item.description for item in (preview.items or []) if item.description]
-    if item_descriptions and sum(1 for description in item_descriptions if _looks_like_grocery_item(description)) >= max(1, len(item_descriptions) // 2):
+    if item_descriptions and sum(
+        1 for description in item_descriptions if _looks_like_grocery_item(description)
+    ) >= max(1, len(item_descriptions) // 2):
         return True
     return _canonical_supermarket_name(context_text or "") is not None
 
 
-async def _apply_category_heuristics(db: AsyncSession, user_id: uuid.UUID, preview: ReceiptPreviewModel, *, context_text: str | None = None) -> ReceiptPreviewModel:
+async def _apply_category_heuristics(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    preview: ReceiptPreviewModel,
+    *,
+    context_text: str | None = None,
+) -> ReceiptPreviewModel:
     if _should_force_groceries(preview, context_text=context_text):
         preview.category_name = "Groceries"
         preview.confidence = max(preview.confidence or 0.35, 0.86)
 
     normalized_category_name = normalize_match_text(preview.category_name)
     if preview.merchant:
-        matched_category = await find_matching_category(db, user_id, preview.merchant, transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT)
-        if matched_category is not None and (not normalized_category_name or normalized_category_name in _GENERIC_CATEGORY_NAMES or _is_supermarket_merchant(preview.merchant)):
+        matched_category = await find_matching_category(
+            db,
+            user_id,
+            preview.merchant,
+            transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT,
+        )
+        if matched_category is not None and (
+            not normalized_category_name
+            or normalized_category_name in _GENERIC_CATEGORY_NAMES
+            or _is_supermarket_merchant(preview.merchant)
+        ):
             preview.category_name = matched_category.name
             preview.confidence = max(preview.confidence or 0.35, 0.82)
 
     if preview.category_name:
-        existing_category = await get_category_by_name(db, user_id, preview.category_name, transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT)
+        existing_category = await get_category_by_name(
+            db,
+            user_id,
+            preview.category_name,
+            transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT,
+        )
         if existing_category is not None:
             preview.category_name = existing_category.name
     return preview
@@ -361,7 +448,9 @@ _CREDIT_DIRECTION_MARKERS = {"credit", "cr", "incoming", "in"}
 _DEBIT_DIRECTION_MARKERS = {"debit", "dr", "outgoing", "out"}
 
 
-def _infer_transaction_type(description: str | None, amount: float | None, *, direction_hint: str | None = None) -> str:
+def _infer_transaction_type(
+    description: str | None, amount: float | None, *, direction_hint: str | None = None
+) -> str:
     normalized_description = re.sub(r"\s+", " ", (description or "").lower()).strip()
     normalized_hint = re.sub(r"[^a-z]", "", (direction_hint or "").lower())
     if normalized_hint in _CREDIT_DIRECTION_MARKERS:
@@ -377,7 +466,9 @@ def _infer_transaction_type(description: str | None, amount: float | None, *, di
     return TRANSACTION_TYPE_DEBIT
 
 
-def _normalize_statement_entries(entries: list[StatementPreviewEntryModel] | None) -> list[StatementPreviewEntryModel]:
+def _normalize_statement_entries(
+    entries: list[StatementPreviewEntryModel] | None,
+) -> list[StatementPreviewEntryModel]:
     normalized: list[StatementPreviewEntryModel] = []
     for entry in (entries or [])[:200]:
         cleaned = StatementPreviewEntryModel.model_validate(entry)
@@ -386,10 +477,18 @@ def _normalize_statement_entries(entries: list[StatementPreviewEntryModel] | Non
                 normalized_amount = float(Decimal(str(cleaned.amount)).quantize(Decimal("0.01")))
             except (InvalidOperation, ValueError):
                 normalized_amount = None
-            cleaned.transaction_type = normalize_transaction_type(cleaned.transaction_type or _infer_transaction_type(f"{cleaned.description or ''} {cleaned.notes or ''}", normalized_amount), default=TRANSACTION_TYPE_DEBIT)
+            cleaned.transaction_type = normalize_transaction_type(
+                cleaned.transaction_type
+                or _infer_transaction_type(
+                    f"{cleaned.description or ''} {cleaned.notes or ''}", normalized_amount
+                ),
+                default=TRANSACTION_TYPE_DEBIT,
+            )
             cleaned.amount = abs(normalized_amount) if normalized_amount is not None else None
         else:
-            cleaned.transaction_type = normalize_transaction_type(cleaned.transaction_type, default=TRANSACTION_TYPE_DEBIT)
+            cleaned.transaction_type = normalize_transaction_type(
+                cleaned.transaction_type, default=TRANSACTION_TYPE_DEBIT
+            )
         cleaned.currency = _normalize_currency(cleaned.currency)
         cleaned.expense_date = _parse_date_candidate(cleaned.expense_date)
         cleaned.merchant = (cleaned.merchant or "").strip()[:255] or None
@@ -397,7 +496,9 @@ def _normalize_statement_entries(entries: list[StatementPreviewEntryModel] | Non
         cleaned.category_name = (cleaned.category_name or "").strip()[:120] or None
         cleaned.notes = (cleaned.notes or "").strip()[:2000] or None
         cleaned.status = cleaned.status if cleaned.status in {"pending", "finalized"} else "pending"
-        cleaned.confidence = min(max(cleaned.confidence if cleaned.confidence is not None else 0.45, 0.0), 1.0)
+        cleaned.confidence = min(
+            max(cleaned.confidence if cleaned.confidence is not None else 0.45, 0.0), 1.0
+        )
         if cleaned.amount is None or not cleaned.merchant or cleaned.expense_date is None:
             continue
         normalized.append(cleaned)
@@ -453,7 +554,9 @@ def _merchant_hint_from_filename(filename: str) -> str | None:
     return candidate.title()[:255]
 
 
-def _preview_context_defaults(*, filename: str | None, context_text: str | None) -> dict[str, str | float | None]:
+def _preview_context_defaults(
+    *, filename: str | None, context_text: str | None
+) -> dict[str, str | float | None]:
     text = (context_text or "").strip()
     lines = [line.strip() for line in text.splitlines() if line.strip()]
     amount = None
@@ -486,7 +589,9 @@ def _preview_context_defaults(*, filename: str | None, context_text: str | None)
     }
 
 
-def _finalize_preview_model(model: ReceiptPreviewModel, *, filename: str | None = None, context_text: str | None = None) -> ReceiptPreviewModel:
+def _finalize_preview_model(
+    model: ReceiptPreviewModel, *, filename: str | None = None, context_text: str | None = None
+) -> ReceiptPreviewModel:
     defaults = _preview_context_defaults(filename=filename, context_text=context_text)
     if not model.merchant:
         model.merchant = defaults["merchant"] if isinstance(defaults["merchant"], str) else None
@@ -498,14 +603,20 @@ def _finalize_preview_model(model: ReceiptPreviewModel, *, filename: str | None 
             model.amount = None
     elif isinstance(defaults["amount"], float):
         model.amount = defaults["amount"]
-    model.transaction_type = normalize_transaction_type(model.transaction_type, default=TRANSACTION_TYPE_DEBIT)
+    model.transaction_type = normalize_transaction_type(
+        model.transaction_type, default=TRANSACTION_TYPE_DEBIT
+    )
     model.currency = _normalize_currency(model.currency)
     if model.merchant:
-        model.merchant = (_canonical_supermarket_name(model.merchant) or model.merchant.strip())[:255]
+        model.merchant = (_canonical_supermarket_name(model.merchant) or model.merchant.strip())[
+            :255
+        ]
     elif isinstance(defaults["merchant"], str):
         model.merchant = defaults["merchant"][:255]
     parsed_expense_date = _parse_date_candidate(model.expense_date)
-    model.expense_date = parsed_expense_date or (defaults["expense_date"] if isinstance(defaults["expense_date"], str) else None)
+    model.expense_date = parsed_expense_date or (
+        defaults["expense_date"] if isinstance(defaults["expense_date"], str) else None
+    )
     if model.description:
         model.description = model.description.strip()[:300]
     elif isinstance(defaults["description"], str):
@@ -514,12 +625,20 @@ def _finalize_preview_model(model: ReceiptPreviewModel, *, filename: str | None 
         model.category_name = model.category_name.strip()[:120] or None
     if model.notes:
         model.notes = model.notes.strip()[:2000] or None
-    model.confidence = min(max(model.confidence if model.confidence is not None else 0.35, 0.0), 1.0)
+    model.confidence = min(
+        max(model.confidence if model.confidence is not None else 0.35, 0.0), 1.0
+    )
     model.items = _normalize_items(model.items)
     return model
 
 
-async def _apply_receipt_category_heuristics(db: AsyncSession, user_id: uuid.UUID, preview: ReceiptPreviewModel, *, context_text: str | None = None) -> ReceiptPreviewModel:
+async def _apply_receipt_category_heuristics(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    preview: ReceiptPreviewModel,
+    *,
+    context_text: str | None = None,
+) -> ReceiptPreviewModel:
     if _should_force_groceries(preview, context_text=context_text):
         preview.category_name = "Groceries"
         preview.confidence = max(preview.confidence or 0.35, 0.86)
@@ -552,10 +671,14 @@ async def _apply_receipt_category_heuristics(db: AsyncSession, user_id: uuid.UUI
     return preview
 
 
-def _finalize_statement_preview(model: StatementPreviewModel, *, text: str | None = None) -> StatementPreviewModel:
+def _finalize_statement_preview(
+    model: StatementPreviewModel, *, text: str | None = None
+) -> StatementPreviewModel:
     model.summary = (model.summary or "").strip()[:500] or None
     model.notes = (model.notes or "").strip()[:2000] or None
-    model.confidence = min(max(model.confidence if model.confidence is not None else 0.45, 0.0), 1.0)
+    model.confidence = min(
+        max(model.confidence if model.confidence is not None else 0.45, 0.0), 1.0
+    )
     model.entries = _normalize_statement_entries(model.entries)
     if model.summary is None and model.entries:
         merchants = ", ".join(entry.merchant or "Unknown" for entry in model.entries[:3])
@@ -570,7 +693,9 @@ def _extract_json_object(raw_text: str) -> dict | None:
     if not text:
         return None
 
-    fenced_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE)
+    fenced_match = re.search(
+        r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL | re.IGNORECASE
+    )
     if fenced_match:
         text = fenced_match.group(1).strip()
 
@@ -623,7 +748,7 @@ def _response_preview(raw_text: str, *, limit: int = 400) -> str:
 
 
 def _effective_provider_name(llm_config: LLMConfig | None) -> str:
-    return (llm_config.provider if llm_config and llm_config.provider else settings.llm_provider)
+    return llm_config.provider if llm_config and llm_config.provider else settings.llm_provider
 
 
 def _effective_model_name(llm_config: LLMConfig | None) -> str:
@@ -641,20 +766,33 @@ def _effective_model_name(llm_config: LLMConfig | None) -> str:
 
 def fallback_preview_from_text(text: str, filename: str) -> ReceiptPreviewModel:
     defaults = _preview_context_defaults(filename=filename, context_text=text)
-    return _finalize_preview_model(ReceiptPreviewModel(
-        merchant=defaults["merchant"] if isinstance(defaults["merchant"], str) else None,
-        amount=defaults["amount"] if isinstance(defaults["amount"], float) else None,
-        transaction_type=TRANSACTION_TYPE_DEBIT,
-        expense_date=defaults["expense_date"] if isinstance(defaults["expense_date"], str) else None,
-        description=defaults["description"] if isinstance(defaults["description"], str) else None,
-        notes="Fallback text extraction used after multimodal receipt extraction was unavailable or failed.",
-        confidence=0.4 if isinstance(defaults["amount"], float) else 0.25,
-    ), filename=filename, context_text=text)
+    return _finalize_preview_model(
+        ReceiptPreviewModel(
+            merchant=defaults["merchant"] if isinstance(defaults["merchant"], str) else None,
+            amount=defaults["amount"] if isinstance(defaults["amount"], float) else None,
+            transaction_type=TRANSACTION_TYPE_DEBIT,
+            expense_date=defaults["expense_date"]
+            if isinstance(defaults["expense_date"], str)
+            else None,
+            description=defaults["description"]
+            if isinstance(defaults["description"], str)
+            else None,
+            notes="Fallback text extraction used after multimodal receipt extraction was unavailable or failed.",
+            confidence=0.4 if isinstance(defaults["amount"], float) else 0.25,
+        ),
+        filename=filename,
+        context_text=text,
+    )
 
 
 def _merchant_from_statement_description(description: str) -> str | None:
     normalized = re.sub(r"\s+", " ", description).strip(" -")
-    normalized = re.sub(r"\b(?:card|visa|pos|debit|purchase|payment|transaction|auth|ref)\b", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(
+        r"\b(?:card|visa|pos|debit|purchase|payment|transaction|auth|ref)\b",
+        "",
+        normalized,
+        flags=re.IGNORECASE,
+    )
     normalized = re.sub(r"\s+", " ", normalized).strip(" -")
     if not normalized:
         return None
@@ -683,7 +821,14 @@ def fallback_statement_preview_from_text(text: str, filename: str) -> StatementP
             StatementPreviewEntryModel(
                 merchant=merchant,
                 amount=abs(amount),
-                transaction_type=normalize_transaction_type(_infer_transaction_type(f"{description} {direction_marker or ''}", amount, direction_hint=direction_marker), default=TRANSACTION_TYPE_DEBIT),
+                transaction_type=normalize_transaction_type(
+                    _infer_transaction_type(
+                        f"{description} {direction_marker or ''}",
+                        amount,
+                        direction_hint=direction_marker,
+                    ),
+                    default=TRANSACTION_TYPE_DEBIT,
+                ),
                 currency=settings.default_currency,
                 expense_date=expense_date,
                 description=description[:300],
@@ -793,7 +938,11 @@ async def llm_receipt_preview_from_image(
                 Message(
                     role="user",
                     content=_receipt_prompt(filename),
-                    images=[ImageInput(media_type=media_type, data=base64.b64encode(file_bytes).decode("utf-8"))],
+                    images=[
+                        ImageInput(
+                            media_type=media_type, data=base64.b64encode(file_bytes).decode("utf-8")
+                        )
+                    ],
                 ),
             ],
             request_config,
@@ -824,7 +973,9 @@ async def llm_receipt_preview_from_image(
         return None
 
 
-async def llm_receipt_preview(text: str, filename: str, llm_config: LLMConfig | None, system_prompt: str | None = None) -> ReceiptPreviewModel | None:
+async def llm_receipt_preview(
+    text: str, filename: str, llm_config: LLMConfig | None, system_prompt: str | None = None
+) -> ReceiptPreviewModel | None:
     if not text.strip():
         return None
     try:
@@ -902,7 +1053,9 @@ def _statement_prompt(filename: str, text: str) -> str:
     )
 
 
-async def llm_statement_preview(text: str, filename: str, llm_config: LLMConfig | None) -> StatementPreviewModel | None:
+async def llm_statement_preview(
+    text: str, filename: str, llm_config: LLMConfig | None
+) -> StatementPreviewModel | None:
     if not text.strip():
         return None
     try:
@@ -968,7 +1121,9 @@ async def build_receipt_preview(
                 select(User.receipt_prompt_override).where(User.email == admin_email).limit(1)
             )
             prompt_override = admin_prompt_result.scalar_one_or_none()
-    preview = await llm_receipt_preview_from_image(storage_path, filename, content_type, effective_config, prompt_override)
+    preview = await llm_receipt_preview_from_image(
+        storage_path, filename, content_type, effective_config, prompt_override
+    )
     if preview is None:
         logger.info(
             "receipt_extraction.using_text_fallback",
@@ -976,8 +1131,12 @@ async def build_receipt_preview(
             content_type=content_type,
         )
         extracted_text = await extract_text_from_file(storage_path, content_type)
-        used_text_fallback = bool(extracted_text.strip()) or not _is_supported_image(content_type, filename)
-        preview = await llm_receipt_preview(extracted_text, filename, effective_config, prompt_override)
+        used_text_fallback = bool(extracted_text.strip()) or not _is_supported_image(
+            content_type, filename
+        )
+        preview = await llm_receipt_preview(
+            extracted_text, filename, effective_config, prompt_override
+        )
         if preview is None:
             logger.info(
                 "receipt_extraction.using_rule_based_fallback",
@@ -987,13 +1146,22 @@ async def build_receipt_preview(
             )
             preview = fallback_preview_from_text(extracted_text, filename)
     if preview.category_name is None and preview.merchant:
-        category = await resolve_category(db, user.id, merchant=preview.merchant, transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT)
+        category = await resolve_category(
+            db,
+            user.id,
+            merchant=preview.merchant,
+            transaction_type=preview.transaction_type or TRANSACTION_TYPE_DEBIT,
+        )
         if category is not None:
             preview.category_name = category.name
             preview.confidence = max(preview.confidence or 0.0, 0.72)
-    preview = await _apply_receipt_category_heuristics(db, user.id, preview, context_text=extracted_text)
+    preview = await _apply_receipt_category_heuristics(
+        db, user.id, preview, context_text=extracted_text
+    )
     preview = _finalize_preview_model(preview, filename=filename, context_text=extracted_text)
-    return ReceiptExtractionResult(preview=preview, extracted_text=extracted_text, used_text_fallback=used_text_fallback)
+    return ReceiptExtractionResult(
+        preview=preview, extracted_text=extracted_text, used_text_fallback=used_text_fallback
+    )
 
 
 async def build_statement_preview(
@@ -1011,13 +1179,22 @@ async def build_statement_preview(
     extracted_text = await extract_text_from_file(storage_path, content_type)
     preview = await llm_statement_preview(extracted_text, filename, effective_config)
     if preview is None:
-        logger.info("receipt_extraction.using_statement_fallback", filename=filename, content_type=content_type)
+        logger.info(
+            "receipt_extraction.using_statement_fallback",
+            filename=filename,
+            content_type=content_type,
+        )
         preview = fallback_statement_preview_from_text(extracted_text, filename)
     resolved_entries: list[dict[str, Any]] = []
     for entry in preview.entries:
         payload = entry.model_dump()
         if payload.get("category_name") is None and payload.get("merchant"):
-            category = await resolve_category(db, user.id, merchant=payload["merchant"], transaction_type=payload.get("transaction_type") or TRANSACTION_TYPE_DEBIT)
+            category = await resolve_category(
+                db,
+                user.id,
+                merchant=payload["merchant"],
+                transaction_type=payload.get("transaction_type") or TRANSACTION_TYPE_DEBIT,
+            )
             if category is not None:
                 payload["category_name"] = category.name
                 payload["confidence"] = max(float(payload.get("confidence") or 0.45), 0.72)
@@ -1031,10 +1208,19 @@ async def build_statement_preview(
         ),
         text=extracted_text,
     )
-    return ReceiptExtractionResult(preview=preview, extracted_text=extracted_text, used_text_fallback=True)
+    return ReceiptExtractionResult(
+        preview=preview, extracted_text=extracted_text, used_text_fallback=True
+    )
 
 
-def create_llm_config(*, provider: str | None, model: str | None, api_key: str | None, base_url: str | None) -> LLMConfig | None:
+def create_llm_config(
+    *, provider: str | None, model: str | None, api_key: str | None, base_url: str | None
+) -> LLMConfig | None:
     if not any([provider, model, api_key, base_url]):
         return None
-    return LLMConfig(provider=provider or None, model=model or None, api_key=api_key or None, base_url=base_url or None)
+    return LLMConfig(
+        provider=provider or None,
+        model=model or None,
+        api_key=api_key or None,
+        base_url=base_url or None,
+    )

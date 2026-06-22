@@ -50,9 +50,7 @@ async def test_analytics_cache_invalidated_on_expense_create(
     )
 
 
-async def test_analytics_cache_all_months_invalidated(
-    client, auth_headers, test_user, fake_redis
-):
+async def test_analytics_cache_all_months_invalidated(client, auth_headers, test_user, fake_redis):
     """invalidate_analytics_cache uses scan+delete with a wildcard — all month variants go."""
     keys = [
         f"analytics:dashboard:{test_user.id}:2026-04",

@@ -34,4 +34,6 @@ def _rate_limit_key(request: Request) -> str:
     return f"ip:{get_remote_address(request)}"
 
 
-limiter = Limiter(key_func=_rate_limit_key, storage_uri=settings.redis_url, strategy="moving-window")
+limiter = Limiter(
+    key_func=_rate_limit_key, storage_uri=settings.redis_url, strategy="moving-window"
+)

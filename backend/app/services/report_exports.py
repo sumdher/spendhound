@@ -15,7 +15,9 @@ from app.models.receipt import Receipt
 from app.services.spendhound import apply_expense_filters, serialize_expense
 
 
-async def build_expense_export_payload(db: AsyncSession, *, user_id: uuid.UUID, month: str | None) -> dict:
+async def build_expense_export_payload(
+    db: AsyncSession, *, user_id: uuid.UUID, month: str | None
+) -> dict:
     statement = apply_expense_filters(
         select(Expense, Category.name, Receipt.original_filename)
         .outerjoin(Category, Category.id == Expense.category_id)
@@ -36,6 +38,8 @@ async def build_expense_export_payload(db: AsyncSession, *, user_id: uuid.UUID, 
     }
 
 
-async def build_expense_export_json_bytes(db: AsyncSession, *, user_id: uuid.UUID, month: str | None) -> bytes:
+async def build_expense_export_json_bytes(
+    db: AsyncSession, *, user_id: uuid.UUID, month: str | None
+) -> bytes:
     payload = await build_expense_export_payload(db, user_id=user_id, month=month)
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")

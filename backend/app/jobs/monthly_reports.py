@@ -41,7 +41,11 @@ class MonthlyReportSendResult:
 
 def previous_calendar_month_start(reference_datetime: datetime | None = None) -> date:
     timezone_name = ZoneInfo(settings.monthly_reports_timezone)
-    local_now = reference_datetime.astimezone(timezone_name) if reference_datetime else datetime.now(timezone_name)
+    local_now = (
+        reference_datetime.astimezone(timezone_name)
+        if reference_datetime
+        else datetime.now(timezone_name)
+    )
     if local_now.month == 1:
         return date(local_now.year - 1, 12, 1)
     return date(local_now.year, local_now.month - 1, 1)
@@ -53,7 +57,9 @@ async def fetch_monthly_report_pdf(user: User, report_month: date) -> bytes:
 
     headers = {"Accept": "application/pdf"}
     if settings.monthly_reports_frontend_token:
-        headers[settings.monthly_reports_frontend_token_header] = settings.monthly_reports_frontend_token
+        headers[settings.monthly_reports_frontend_token_header] = (
+            settings.monthly_reports_frontend_token
+        )
 
     payload = {
         "user_id": str(user.id),
@@ -62,8 +68,12 @@ async def fetch_monthly_report_pdf(user: User, report_month: date) -> bytes:
         "report_month": report_month.strftime("%Y-%m"),
     }
 
-    async with httpx.AsyncClient(timeout=settings.monthly_reports_frontend_timeout_seconds) as client:
-        response = await client.post(settings.monthly_reports_frontend_pdf_url, headers=headers, json=payload)
+    async with httpx.AsyncClient(
+        timeout=settings.monthly_reports_frontend_timeout_seconds
+    ) as client:
+        response = await client.post(
+            settings.monthly_reports_frontend_pdf_url, headers=headers, json=payload
+        )
         response.raise_for_status()
 
     if not response.content:
@@ -94,7 +104,9 @@ async def get_or_create_monthly_report_delivery(
     )
     delivery = delivery_result.scalar_one_or_none()
     if delivery is None:
-        delivery = MonthlyReportDelivery(user_id=user_id, report_month=report_month, status="pending")
+        delivery = MonthlyReportDelivery(
+            user_id=user_id, report_month=report_month, status="pending"
+        )
         db.add(delivery)
         await db.flush()
     return delivery
@@ -108,7 +120,9 @@ async def send_monthly_report_for_user(
     force: bool = False,
 ) -> MonthlyReportSendResult:
     report_month_key = report_month.strftime("%Y-%m")
-    delivery = await get_or_create_monthly_report_delivery(db, user_id=user.id, report_month=report_month)
+    delivery = await get_or_create_monthly_report_delivery(
+        db, user_id=user.id, report_month=report_month
+    )
 
     if not force and delivery.status == "sent":
         logger.info(
@@ -118,7 +132,9 @@ async def send_monthly_report_for_user(
             report_month=report_month_key,
             reason="already_sent",
         )
-        return MonthlyReportSendResult(report_month=report_month_key, outcome="skipped", delivery=delivery)
+        return MonthlyReportSendResult(
+            report_month=report_month_key, outcome="skipped", delivery=delivery
+        )
 
     try:
         attempted_at = datetime.now(UTC)
@@ -129,7 +145,9 @@ async def send_monthly_report_for_user(
         delivery.resend_email_id = None
         delivery.pdf_source_url = settings.monthly_reports_frontend_pdf_url or None
 
-        expense_json_bytes = await build_expense_export_json_bytes(db, user_id=user.id, month=report_month_key)
+        expense_json_bytes = await build_expense_export_json_bytes(
+            db, user_id=user.id, month=report_month_key
+        )
         dashboard_pdf_bytes = await fetch_monthly_report_pdf(user, report_month)
         resend_email_id = await send_monthly_report_email(
             user.email,
@@ -154,7 +172,9 @@ async def send_monthly_report_for_user(
             resend_email_id=resend_email_id,
             forced=force,
         )
-        return MonthlyReportSendResult(report_month=report_month_key, outcome="sent", delivery=delivery)
+        return MonthlyReportSendResult(
+            report_month=report_month_key, outcome="sent", delivery=delivery
+        )
     except Exception as error:
         delivery.status = "failed"
         delivery.error_message = str(error)
@@ -169,13 +189,19 @@ async def send_monthly_report_for_user(
             error=str(error),
             forced=force,
         )
-        return MonthlyReportSendResult(report_month=report_month_key, outcome="failed", delivery=delivery)
+        return MonthlyReportSendResult(
+            report_month=report_month_key, outcome="failed", delivery=delivery
+        )
 
 
-async def send_monthly_reports_for_month(db: AsyncSession, report_month: date) -> MonthlyReportJobSummary:
+async def send_monthly_reports_for_month(
+    db: AsyncSession, report_month: date
+) -> MonthlyReportJobSummary:
     report_month_key = report_month.strftime("%Y-%m")
     summary = MonthlyReportJobSummary(report_month=report_month_key)
-    users_result = await db.execute(select(User).where(User.status == "approved").order_by(User.created_at.asc()))
+    users_result = await db.execute(
+        select(User).where(User.status == "approved").order_by(User.created_at.asc())
+    )
 
     for user in users_result.scalars().all():
         summary.processed_users += 1

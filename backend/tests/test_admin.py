@@ -48,13 +48,17 @@ async def test_admin_panel_access_and_review_controls(client, db_session):
         assert status_response.status_code == 200
         assert status_response.json() == {"status": "approved", "is_admin": True}
 
-        panel_response = await client.get("/api/admin/panel/users", headers=_auth_headers(admin_user))
+        panel_response = await client.get(
+            "/api/admin/panel/users", headers=_auth_headers(admin_user)
+        )
         assert panel_response.status_code == 200
         returned_emails = {user["email"] for user in panel_response.json()}
         assert settings.admin_email in returned_emails
         assert regular_user.email in returned_emails
 
-        forbidden_response = await client.get("/api/admin/panel/users", headers=_auth_headers(non_admin))
+        forbidden_response = await client.get(
+            "/api/admin/panel/users", headers=_auth_headers(non_admin)
+        )
         assert forbidden_response.status_code == 403
 
         invalid_status_response = await client.patch(

@@ -82,7 +82,9 @@ class OllamaProvider(BaseLLMProvider):
                 "ollama.complete.semaphore_timeout",
                 max_concurrent=settings.ollama_max_concurrent,
             )
-            raise HTTPException(status_code=503, detail="LLM is busy. Please try again in a moment.") from None
+            raise HTTPException(
+                status_code=503, detail="LLM is busy. Please try again in a moment."
+            ) from None
 
         try:
             url = f"{self._base_url(config)}/api/chat"
@@ -109,7 +111,9 @@ class OllamaProvider(BaseLLMProvider):
                 data = response.json()
                 content = data.get("message", {}).get("content")
                 if content is None:
-                    raise ValueError(f"Unexpected Ollama response payload keys: {sorted(data.keys())}")
+                    raise ValueError(
+                        f"Unexpected Ollama response payload keys: {sorted(data.keys())}"
+                    )
                 return content
         except httpx.HTTPStatusError as exc:
             raise ValueError(
