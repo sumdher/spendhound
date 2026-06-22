@@ -1,6 +1,5 @@
 """Ollama utility endpoints."""
 
-
 import httpx
 from fastapi import APIRouter, Depends
 
@@ -29,7 +28,9 @@ async def list_ollama_models(
     Filters out known embedding models.
     Returns empty list if Ollama is not reachable.
     """
-    ollama_base = (current_user.llm_base_url or settings.ollama_url or "http://localhost:11434").rstrip("/")
+    ollama_base = (
+        current_user.llm_base_url or settings.ollama_url or "http://localhost:11434"
+    ).rstrip("/")
 
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:

@@ -9,6 +9,24 @@ Licensed under the [GNU Affero General Public License v3.0](LICENSE).
 
 ---
 
+## Screenshots
+
+> Or, try it live [here](https://spendhound.dodecahedrons.com).
+
+| Dashboard | Expense list |
+|---|---|
+| ![Monthly analytics overview](docs/screenshots/dashboard.png) | ![Expense list with filters](docs/screenshots/expenses.png) |
+
+| Receipt extraction | AI chat |
+|---|---|
+| ![AI receipt parsing preview](docs/screenshots/receipt-extraction.png) | ![Financial chat grounded on 90 days of expenses](docs/screenshots/chat.png) |
+
+| Budgets | Categories and rules |
+|---|---|
+| ![Budget vs actual tracking](docs/screenshots/budgets.png) | ![Category and merchant rule management](docs/screenshots/categories.png) |
+
+---
+
 ## Features
 
 - Google OAuth with admin approval gate

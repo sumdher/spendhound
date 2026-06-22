@@ -46,7 +46,11 @@ class BudgetUpdate(BaseModel):
 
 
 @router.get("")
-async def list_budgets(month: str | None = Query(default=None), current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> list[dict]:
+async def list_budgets(
+    month: str | None = Query(default=None),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
     month_value = month_start_from_string(month)
     month_end = next_month(month_value)
     result = await db.execute(
@@ -74,11 +78,22 @@ async def list_budgets(month: str | None = Query(default=None), current_user: Us
         overall += amount
         actuals[category_name] = actuals.get(category_name, 0.0) + amount
 
-    return [serialize_budget(budget, category_name=category_name, actual=overall if category_name is None else actuals.get(category_name, 0.0)) for budget, category_name in budget_rows]
+    return [
+        serialize_budget(
+            budget,
+            category_name=category_name,
+            actual=overall if category_name is None else actuals.get(category_name, 0.0),
+        )
+        for budget, category_name in budget_rows
+    ]
 
 
 @router.post("")
-async def create_budget(body: BudgetCreate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
+async def create_budget(
+    body: BudgetCreate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     budget = Budget(
         user_id=current_user.id,
         name=body.name.strip(),
@@ -92,14 +107,25 @@ async def create_budget(body: BudgetCreate, current_user: User = Depends(get_cur
     await db.flush()
     category_name = None
     if budget.category_id:
-        result = await db.execute(select(Category.name).where(Category.id == budget.category_id, Category.user_id == current_user.id))
+        result = await db.execute(
+            select(Category.name).where(
+                Category.id == budget.category_id, Category.user_id == current_user.id
+            )
+        )
         category_name = result.scalar_one_or_none()
     return serialize_budget(budget, category_name=category_name)
 
 
 @router.patch("/{budget_id}")
-async def update_budget(budget_id: uuid.UUID, body: BudgetUpdate, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> dict:
-    result = await db.execute(select(Budget).where(Budget.id == budget_id, Budget.user_id == current_user.id))
+async def update_budget(
+    budget_id: uuid.UUID,
+    body: BudgetUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    result = await db.execute(
+        select(Budget).where(Budget.id == budget_id, Budget.user_id == current_user.id)
+    )
     budget = result.scalar_one_or_none()
     if budget is None:
         raise HTTPException(status_code=404, detail="Budget not found")
@@ -111,14 +137,24 @@ async def update_budget(budget_id: uuid.UUID, body: BudgetUpdate, current_user: 
     await db.flush()
     category_name = None
     if budget.category_id:
-        category_result = await db.execute(select(Category.name).where(Category.id == budget.category_id, Category.user_id == current_user.id))
+        category_result = await db.execute(
+            select(Category.name).where(
+                Category.id == budget.category_id, Category.user_id == current_user.id
+            )
+        )
         category_name = category_result.scalar_one_or_none()
     return serialize_budget(budget, category_name=category_name)
 
 
 @router.delete("/{budget_id}", status_code=204)
-async def delete_budget(budget_id: uuid.UUID, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)) -> None:
-    result = await db.execute(select(Budget).where(Budget.id == budget_id, Budget.user_id == current_user.id))
+async def delete_budget(
+    budget_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    result = await db.execute(
+        select(Budget).where(Budget.id == budget_id, Budget.user_id == current_user.id)
+    )
     budget = result.scalar_one_or_none()
     if budget is None:
         raise HTTPException(status_code=404, detail="Budget not found")

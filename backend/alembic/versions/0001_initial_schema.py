@@ -168,9 +168,7 @@ def upgrade() -> None:
         "ALTER TABLE job_description_embeddings "
         "ALTER COLUMN embedding TYPE vector(1536) USING embedding::vector"
     )
-    op.create_index(
-        "ix_jde_application_id", "job_description_embeddings", ["application_id"]
-    )
+    op.create_index("ix_jde_application_id", "job_description_embeddings", ["application_id"])
     # IVFFlat index for approximate nearest-neighbor search
     op.execute(
         "CREATE INDEX ix_jde_embedding_ivfflat "

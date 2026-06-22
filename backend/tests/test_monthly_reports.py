@@ -16,7 +16,9 @@ from app.services.spendhound import normalize_money
 pytestmark = pytest.mark.asyncio
 
 
-async def test_send_monthly_reports_for_month_records_success(monkeypatch, db_session: AsyncSession, test_user):
+async def test_send_monthly_reports_for_month_records_success(
+    monkeypatch, db_session: AsyncSession, test_user
+):
     expense = Expense(
         user_id=test_user.id,
         merchant="Metro Grocery",
@@ -34,23 +36,31 @@ async def test_send_monthly_reports_for_month_records_success(monkeypatch, db_se
     db_session.add(expense)
     await db_session.commit()
 
-    monkeypatch.setattr(monthly_reports.settings, "monthly_reports_frontend_pdf_url", "http://frontend:3000/api/internal/reports/monthly-pdf")
+    monkeypatch.setattr(
+        monthly_reports.settings,
+        "monthly_reports_frontend_pdf_url",
+        "http://frontend:3000/api/internal/reports/monthly-pdf",
+    )
 
     async def fake_fetch_monthly_report_pdf(user, report_month):
         assert user.id == test_user.id
         assert report_month == date(2026, 3, 1)
         return b"%PDF-1.4 fake pdf bytes"
 
-    async def fake_send_monthly_report_email(user_email, user_name, report_month, *, expense_json_bytes, dashboard_pdf_bytes):
+    async def fake_send_monthly_report_email(
+        user_email, user_name, report_month, *, expense_json_bytes, dashboard_pdf_bytes
+    ):
         assert user_email == test_user.email
         assert user_name == test_user.name
         assert report_month == date(2026, 3, 1)
-        assert b'Metro Grocery' in expense_json_bytes
+        assert b"Metro Grocery" in expense_json_bytes
         assert dashboard_pdf_bytes.startswith(b"%PDF-1.4")
         return "re_test_123"
 
     monkeypatch.setattr(monthly_reports, "fetch_monthly_report_pdf", fake_fetch_monthly_report_pdf)
-    monkeypatch.setattr(monthly_reports, "send_monthly_report_email", fake_send_monthly_report_email)
+    monkeypatch.setattr(
+        monthly_reports, "send_monthly_report_email", fake_send_monthly_report_email
+    )
 
     summary = await monthly_reports.send_monthly_reports_for_month(db_session, date(2026, 3, 1))
 
@@ -73,7 +83,9 @@ async def test_send_monthly_reports_for_month_records_success(monkeypatch, db_se
     assert delivery.error_message is None
 
 
-async def test_send_monthly_reports_for_month_skips_existing_sent_delivery(monkeypatch, db_session: AsyncSession, test_user):
+async def test_send_monthly_reports_for_month_skips_existing_sent_delivery(
+    monkeypatch, db_session: AsyncSession, test_user
+):
     db_session.add(
         MonthlyReportDelivery(
             user_id=test_user.id,
@@ -97,7 +109,9 @@ async def test_send_monthly_reports_for_month_skips_existing_sent_delivery(monke
     assert summary.failed_users == 0
 
 
-async def test_send_monthly_reports_for_month_skips_users_with_auto_send_disabled(monkeypatch, db_session: AsyncSession, test_user):
+async def test_send_monthly_reports_for_month_skips_users_with_auto_send_disabled(
+    monkeypatch, db_session: AsyncSession, test_user
+):
     test_user.automatic_monthly_reports = False
     await db_session.commit()
 
@@ -115,7 +129,9 @@ async def test_send_monthly_reports_for_month_skips_users_with_auto_send_disable
     assert summary.failed_users == 0
 
 
-async def test_manual_send_endpoint_resends_and_reuses_existing_delivery(monkeypatch, client, db_session: AsyncSession, test_user, auth_headers):
+async def test_manual_send_endpoint_resends_and_reuses_existing_delivery(
+    monkeypatch, client, db_session: AsyncSession, test_user, auth_headers
+):
     existing_delivery = MonthlyReportDelivery(
         user_id=test_user.id,
         report_month=date(2026, 3, 1),
@@ -130,7 +146,9 @@ async def test_manual_send_endpoint_resends_and_reuses_existing_delivery(monkeyp
         assert report_month == date(2026, 3, 1)
         return b"%PDF-1.4 manual pdf bytes"
 
-    async def fake_send_monthly_report_email(user_email, user_name, report_month, *, expense_json_bytes, dashboard_pdf_bytes):
+    async def fake_send_monthly_report_email(
+        user_email, user_name, report_month, *, expense_json_bytes, dashboard_pdf_bytes
+    ):
         assert user_email == test_user.email
         assert user_name == test_user.name
         assert report_month == date(2026, 3, 1)
@@ -138,7 +156,9 @@ async def test_manual_send_endpoint_resends_and_reuses_existing_delivery(monkeyp
         return "re_manual_456"
 
     monkeypatch.setattr(monthly_reports, "fetch_monthly_report_pdf", fake_fetch_monthly_report_pdf)
-    monkeypatch.setattr(monthly_reports, "send_monthly_report_email", fake_send_monthly_report_email)
+    monkeypatch.setattr(
+        monthly_reports, "send_monthly_report_email", fake_send_monthly_report_email
+    )
 
     response = await client.post(
         "/api/monthly-reports/send",
@@ -153,13 +173,17 @@ async def test_manual_send_endpoint_resends_and_reuses_existing_delivery(monkeyp
     assert payload["resend_email_id"] == "re_manual_456"
 
     deliveries = (
-        await db_session.execute(
-            select(MonthlyReportDelivery).where(
-                MonthlyReportDelivery.user_id == test_user.id,
-                MonthlyReportDelivery.report_month == date(2026, 3, 1),
+        (
+            await db_session.execute(
+                select(MonthlyReportDelivery).where(
+                    MonthlyReportDelivery.user_id == test_user.id,
+                    MonthlyReportDelivery.report_month == date(2026, 3, 1),
+                )
             )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert len(deliveries) == 1
     assert deliveries[0].id == existing_delivery.id
     assert deliveries[0].status == "sent"

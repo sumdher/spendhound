@@ -37,7 +37,11 @@ async def get_admin_user(current_user: User = Depends(get_current_user)) -> User
 
 def create_action_token(user_id: uuid.UUID, action: str) -> str:
     expire = datetime.now(UTC) + timedelta(hours=_ACTION_TOKEN_EXPIRY_HOURS)
-    return jwt.encode({"sub": str(user_id), "action": action, "exp": expire}, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+    return jwt.encode(
+        {"sub": str(user_id), "action": action, "exp": expire},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
 
 
 def _decode_action_token(token: str, expected_action: str) -> str:
@@ -85,10 +89,16 @@ async def approve_user(token: str = Query(...), db: AsyncSession = Depends(get_d
     if user is None:
         return _html_page("User Not Found", "No matching user found.", "#ef4444")
     if user.status == "approved":
-        return _html_page("Already Approved", f"{user.email} already has access to SpendHound.", "#22c55e")
+        return _html_page(
+            "Already Approved", f"{user.email} already has access to SpendHound.", "#22c55e"
+        )
     user.status = "approved"
     await db.commit()
-    return _html_page("Access Granted", f"{user.email} has been approved and can now sign in to SpendHound.", "#22c55e")
+    return _html_page(
+        "Access Granted",
+        f"{user.email} has been approved and can now sign in to SpendHound.",
+        "#22c55e",
+    )
 
 
 @router.get("/reject", response_class=HTMLResponse, include_in_schema=False)
@@ -125,16 +135,45 @@ class UpdateStatusRequest(BaseModel):
 
 
 @router.get("/panel/users", response_model=list[AdminUserResponse])
-async def list_users(_admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)) -> list[AdminUserResponse]:
-    counts_q = select(Expense.user_id, func.count(Expense.id).label("expense_count")).group_by(Expense.user_id).subquery()
-    result = await db.execute(select(User, func.coalesce(counts_q.c.expense_count, 0).label("expense_count")).outerjoin(counts_q, User.id == counts_q.c.user_id).order_by(User.created_at.desc()))
-    return [AdminUserResponse(id=str(user.id), email=user.email, name=user.name, avatar_url=user.avatar_url, status=user.status, is_admin=is_admin_email(user.email), expense_count=int(count), created_at=user.created_at.isoformat()) for user, count in result.all()]
+async def list_users(
+    _admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)
+) -> list[AdminUserResponse]:
+    counts_q = (
+        select(Expense.user_id, func.count(Expense.id).label("expense_count"))
+        .group_by(Expense.user_id)
+        .subquery()
+    )
+    result = await db.execute(
+        select(User, func.coalesce(counts_q.c.expense_count, 0).label("expense_count"))
+        .outerjoin(counts_q, User.id == counts_q.c.user_id)
+        .order_by(User.created_at.desc())
+    )
+    return [
+        AdminUserResponse(
+            id=str(user.id),
+            email=user.email,
+            name=user.name,
+            avatar_url=user.avatar_url,
+            status=user.status,
+            is_admin=is_admin_email(user.email),
+            expense_count=int(count),
+            created_at=user.created_at.isoformat(),
+        )
+        for user, count in result.all()
+    ]
 
 
 @router.patch("/panel/users/{user_id}/status")
-async def update_user_status(user_id: uuid.UUID, body: UpdateStatusRequest, admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)) -> dict:
+async def update_user_status(
+    user_id: uuid.UUID,
+    body: UpdateStatusRequest,
+    admin: User = Depends(get_admin_user),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     if body.status not in ("approved", "rejected"):
-        raise HTTPException(status_code=400, detail="Invalid status value. Expected 'approved' or 'rejected'.")
+        raise HTTPException(
+            status_code=400, detail="Invalid status value. Expected 'approved' or 'rejected'."
+        )
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
@@ -143,18 +182,24 @@ async def update_user_status(user_id: uuid.UUID, body: UpdateStatusRequest, admi
         raise HTTPException(status_code=400, detail="Cannot change admin's own status")
     user.status = body.status
     await db.commit()
-    logger.info("User status updated by admin", target=user.email, status=body.status, admin=admin.email)
+    logger.info(
+        "User status updated by admin", target=user.email, status=body.status, admin=admin.email
+    )
     return {"id": str(user.id), "status": user.status}
 
 
 @router.delete("/panel/users/{user_id}", status_code=204)
-async def delete_user(user_id: uuid.UUID, admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)) -> None:
+async def delete_user(
+    user_id: uuid.UUID, admin: User = Depends(get_admin_user), db: AsyncSession = Depends(get_db)
+) -> None:
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     if is_admin_email(user.email):
         raise HTTPException(status_code=400, detail="Cannot delete the admin account")
-    logger.info("Deleting user and all related SpendHound data", target=user.email, admin=admin.email)
+    logger.info(
+        "Deleting user and all related SpendHound data", target=user.email, admin=admin.email
+    )
     await db.delete(user)
     await db.commit()

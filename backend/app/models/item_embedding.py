@@ -30,15 +30,21 @@ class ItemEmbedding(Base):
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    is_global: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", index=True)
+    is_global: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", index=True
+    )
     description_text: Mapped[str] = mapped_column(String(300), nullable=False)
     # Vector dimension must match settings.embedding_dimensions (default 768).
     # If you change the dimension, create a new migration to alter the column.
-    embedding: Mapped[list[float]] = mapped_column(Vector(settings.embedding_dimensions), nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(
+        Vector(settings.embedding_dimensions), nullable=False
+    )
     subcategory_label: Mapped[str] = mapped_column(String(120), nullable=False)
     # source: "document" (admin upload) | "correction" (user-confirmed fix)
     source: Mapped[str] = mapped_column(String(50), nullable=False, server_default="document")
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
     user: Mapped[User | None] = relationship("User", back_populates="item_embeddings")

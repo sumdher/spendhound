@@ -22,11 +22,19 @@ def upgrade() -> None:
     expense_indexes = {index["name"] for index in inspector.get_indexes("expenses")}
 
     if "cadence" not in expense_columns:
-        op.add_column("expenses", sa.Column("cadence", sa.String(length=20), nullable=False, server_default="one_time"))
+        op.add_column(
+            "expenses",
+            sa.Column("cadence", sa.String(length=20), nullable=False, server_default="one_time"),
+        )
     if "cadence_override" not in expense_columns:
-        op.add_column("expenses", sa.Column("cadence_override", sa.String(length=20), nullable=True))
+        op.add_column(
+            "expenses", sa.Column("cadence_override", sa.String(length=20), nullable=True)
+        )
     if "is_major_purchase" not in expense_columns:
-        op.add_column("expenses", sa.Column("is_major_purchase", sa.Boolean(), nullable=False, server_default=sa.false()))
+        op.add_column(
+            "expenses",
+            sa.Column("is_major_purchase", sa.Boolean(), nullable=False, server_default=sa.false()),
+        )
     if "ix_expenses_cadence" not in expense_indexes:
         op.create_index("ix_expenses_cadence", "expenses", ["cadence"])
 

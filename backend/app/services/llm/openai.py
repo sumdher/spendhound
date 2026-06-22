@@ -23,9 +23,7 @@ class OpenAIProvider(BaseLLMProvider):
         try:
             from openai import AsyncOpenAI
         except ImportError as exc:
-            raise ValueError(
-                "openai package is not installed. Run: pip install openai"
-            ) from exc
+            raise ValueError("openai package is not installed. Run: pip install openai") from exc
 
         api_key = (config.api_key if config else None) or settings.openai_api_key
         base_url = (config.base_url if config else None) or None

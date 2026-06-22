@@ -30,7 +30,9 @@ from app.services.spendhound import (
 logger = structlog.get_logger(__name__)
 
 
-async def _build_grocery_insights(db: AsyncSession, user_id: uuid.UUID, selected_month: date, month_end: date) -> dict:
+async def _build_grocery_insights(
+    db: AsyncSession, user_id: uuid.UUID, selected_month: date, month_end: date
+) -> dict:
     result = await db.execute(
         select(ExpenseItem, Expense.amount)
         .join(Expense, Expense.id == ExpenseItem.expense_id)
@@ -62,7 +64,11 @@ async def _build_grocery_insights(db: AsyncSession, user_id: uuid.UUID, selected
     items_by_expense: dict[uuid.UUID, list[tuple[ExpenseItem, float]]] = defaultdict(list)
 
     for item, expense_amount in grocery_item_rows:
-        raw_amount = float(item.total_price) if item.total_price is not None else float(item.unit_price or 0) * float(item.quantity or 0)
+        raw_amount = (
+            float(item.total_price)
+            if item.total_price is not None
+            else float(item.unit_price or 0) * float(item.quantity or 0)
+        )
         approved_totals_by_expense[item.expense_id] = float(expense_amount)
         items_by_expense[item.expense_id].append((item, raw_amount))
 
@@ -117,20 +123,40 @@ async def _build_grocery_insights(db: AsyncSession, user_id: uuid.UUID, selected
     }
 
 
-async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, month: str | None) -> dict:
+async def build_dashboard_analytics(
+    db: AsyncSession, user_id: uuid.UUID, *, month: str | None
+) -> dict:
     selected_month = month_start_from_string(month)
     month_end = next_month(selected_month)
 
     expenses_result = await db.execute(
         select(Expense, Category.name)
         .outerjoin(Category, Category.id == Expense.category_id)
-        .where(Expense.user_id == user_id, Expense.expense_date >= selected_month, Expense.expense_date < month_end)
+        .where(
+            Expense.user_id == user_id,
+            Expense.expense_date >= selected_month,
+            Expense.expense_date < month_end,
+        )
         .order_by(Expense.expense_date.desc(), Expense.created_at.desc())
     )
     expense_rows = expenses_result.all()
 
-    money_out = round(sum(float(expense.amount) for expense, _ in expense_rows if expense.transaction_type == TRANSACTION_TYPE_DEBIT), 2)
-    money_in = round(sum(float(expense.amount) for expense, _ in expense_rows if expense.transaction_type == TRANSACTION_TYPE_CREDIT), 2)
+    money_out = round(
+        sum(
+            float(expense.amount)
+            for expense, _ in expense_rows
+            if expense.transaction_type == TRANSACTION_TYPE_DEBIT
+        ),
+        2,
+    )
+    money_in = round(
+        sum(
+            float(expense.amount)
+            for expense, _ in expense_rows
+            if expense.transaction_type == TRANSACTION_TYPE_CREDIT
+        ),
+        2,
+    )
     monthly_total = money_out
     net_total = round(money_in - money_out, 2)
 
@@ -143,10 +169,17 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
         else:
             money_in_by_currency[cur] += float(expense.amount)
     all_currencies = set(list(money_out_by_currency.keys()) + list(money_in_by_currency.keys()))
-    net_by_currency = {cur: round(money_in_by_currency.get(cur, 0.0) - money_out_by_currency.get(cur, 0.0), 2) for cur in all_currencies}
+    net_by_currency = {
+        cur: round(money_in_by_currency.get(cur, 0.0) - money_out_by_currency.get(cur, 0.0), 2)
+        for cur in all_currencies
+    }
     transaction_count = len(expense_rows)
-    debit_count = sum(1 for expense, _ in expense_rows if expense.transaction_type == TRANSACTION_TYPE_DEBIT)
-    credit_count = sum(1 for expense, _ in expense_rows if expense.transaction_type == TRANSACTION_TYPE_CREDIT)
+    debit_count = sum(
+        1 for expense, _ in expense_rows if expense.transaction_type == TRANSACTION_TYPE_DEBIT
+    )
+    credit_count = sum(
+        1 for expense, _ in expense_rows if expense.transaction_type == TRANSACTION_TYPE_CREDIT
+    )
     average_transaction = round(monthly_total / debit_count, 2) if debit_count else 0.0
     average_income = round(money_in / credit_count, 2) if credit_count else 0.0
 
@@ -180,7 +213,11 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
                     "is_major_purchase": expense.is_major_purchase,
                 }
             )
-        if expense.transaction_type == TRANSACTION_TYPE_DEBIT and expense.cadence == CADENCE_ONE_TIME and expense.is_major_purchase:
+        if (
+            expense.transaction_type == TRANSACTION_TYPE_DEBIT
+            and expense.cadence == CADENCE_ONE_TIME
+            and expense.is_major_purchase
+        ):
             major_one_time_purchases.append(
                 {
                     "id": str(expense.id),
@@ -199,11 +236,17 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
     trend_start = date(selected_month.year - 1, selected_month.month, 1)
     trend_result = await db.execute(
         select(Expense)
-        .where(Expense.user_id == user_id, Expense.expense_date >= trend_start, Expense.expense_date < month_end)
+        .where(
+            Expense.user_id == user_id,
+            Expense.expense_date >= trend_start,
+            Expense.expense_date < month_end,
+        )
         .order_by(Expense.expense_date.asc())
     )
     trend_expenses = trend_result.scalars().all()
-    monthly_trend_map: dict[str, dict[str, float]] = defaultdict(lambda: {"money_in": 0.0, "money_out": 0.0, "net": 0.0})
+    monthly_trend_map: dict[str, dict[str, float]] = defaultdict(
+        lambda: {"money_in": 0.0, "money_out": 0.0, "net": 0.0}
+    )
     for expense in trend_expenses:
         month_key = expense.expense_date.strftime("%Y-%m")
         if expense.transaction_type == TRANSACTION_TYPE_CREDIT:
@@ -226,7 +269,9 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
             category_actuals[category_name] += float(expense.amount)
     budgets = []
     for budget, category_name in budget_rows:
-        actual = monthly_total if category_name is None else category_actuals.get(category_name, 0.0)
+        actual = (
+            monthly_total if category_name is None else category_actuals.get(category_name, 0.0)
+        )
         budgets.append(serialize_budget(budget, category_name=category_name, actual=actual))
 
     grocery_insights = await _build_grocery_insights(db, user_id, selected_month, month_end)
@@ -283,9 +328,21 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
             "money_in": money_in,
             "money_out": money_out,
             "net": net_total,
-            "money_out_by_currency": {k: round(v, 2) for k, v in sorted(money_out_by_currency.items(), key=lambda item: (item[0] != "EUR", -item[1]))},
-            "money_in_by_currency": {k: round(v, 2) for k, v in sorted(money_in_by_currency.items(), key=lambda item: (item[0] != "EUR", -item[1]))},
-            "net_by_currency": dict(sorted(net_by_currency.items(), key=lambda item: item[0] != "EUR")),
+            "money_out_by_currency": {
+                k: round(v, 2)
+                for k, v in sorted(
+                    money_out_by_currency.items(), key=lambda item: (item[0] != "EUR", -item[1])
+                )
+            },
+            "money_in_by_currency": {
+                k: round(v, 2)
+                for k, v in sorted(
+                    money_in_by_currency.items(), key=lambda item: (item[0] != "EUR", -item[1])
+                )
+            },
+            "net_by_currency": dict(
+                sorted(net_by_currency.items(), key=lambda item: item[0] != "EUR")
+            ),
             "transaction_count": transaction_count,
             "average_transaction": average_transaction,
             "average_outflow": average_transaction,
@@ -294,19 +351,27 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
         },
         "spend_by_category": [
             {"name": name, "amount": round(amount, 2)}
-            for name, amount in sorted(by_category_map.items(), key=lambda item: item[1], reverse=True)
+            for name, amount in sorted(
+                by_category_map.items(), key=lambda item: item[1], reverse=True
+            )
         ],
         "income_by_category": [
             {"name": name, "amount": round(amount, 2)}
-            for name, amount in sorted(income_by_category_map.items(), key=lambda item: item[1], reverse=True)
+            for name, amount in sorted(
+                income_by_category_map.items(), key=lambda item: item[1], reverse=True
+            )
         ],
         "top_merchants": [
             {"merchant": name, "amount": round(amount, 2)}
-            for name, amount in sorted(by_merchant_map.items(), key=lambda item: item[1], reverse=True)[:8]
+            for name, amount in sorted(
+                by_merchant_map.items(), key=lambda item: item[1], reverse=True
+            )[:8]
         ],
         "top_income_sources": [
             {"merchant": name, "amount": round(amount, 2)}
-            for name, amount in sorted(income_by_merchant_map.items(), key=lambda item: item[1], reverse=True)[:8]
+            for name, amount in sorted(
+                income_by_merchant_map.items(), key=lambda item: item[1], reverse=True
+            )[:8]
         ],
         "monthly_trend": [
             {
@@ -320,7 +385,9 @@ async def build_dashboard_analytics(db: AsyncSession, user_id: uuid.UUID, *, mon
         ],
         "recurring_transactions": recurring_items,
         "recurring_expenses": recurring_items,
-        "major_one_time_purchases": sorted(major_one_time_purchases, key=lambda item: item["amount"], reverse=True)[:6],
+        "major_one_time_purchases": sorted(
+            major_one_time_purchases, key=lambda item: item["amount"], reverse=True
+        )[:6],
         "prepaid_subscriptions": prepaid_subscriptions,
         "budgets": budgets,
         "grocery_insights": grocery_insights,

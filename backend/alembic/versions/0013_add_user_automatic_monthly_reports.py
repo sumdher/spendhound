@@ -18,7 +18,9 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "users",
-        sa.Column("automatic_monthly_reports", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column(
+            "automatic_monthly_reports", sa.Boolean(), nullable=False, server_default=sa.true()
+        ),
     )
 
 

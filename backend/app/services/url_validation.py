@@ -21,27 +21,44 @@ from fastapi import HTTPException
 
 _PRIVATE_NETWORKS: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = [
     ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),      # includes Docker bridge (172.17-31.x)
+    ipaddress.ip_network("172.16.0.0/12"),  # includes Docker bridge (172.17-31.x)
     ipaddress.ip_network("192.168.0.0/16"),
-    ipaddress.ip_network("127.0.0.0/8"),         # loopback
-    ipaddress.ip_network("169.254.0.0/16"),      # link-local / AWS metadata (169.254.169.254)
+    ipaddress.ip_network("127.0.0.0/8"),  # loopback
+    ipaddress.ip_network("169.254.0.0/16"),  # link-local / AWS metadata (169.254.169.254)
     ipaddress.ip_network("0.0.0.0/8"),
-    ipaddress.ip_network("100.64.0.0/10"),       # carrier-grade NAT
-    ipaddress.ip_network("::1/128"),             # IPv6 loopback
-    ipaddress.ip_network("fe80::/10"),           # IPv6 link-local
-    ipaddress.ip_network("fc00::/7"),            # IPv6 unique local
+    ipaddress.ip_network("100.64.0.0/10"),  # carrier-grade NAT
+    ipaddress.ip_network("::1/128"),  # IPv6 loopback
+    ipaddress.ip_network("fe80::/10"),  # IPv6 link-local
+    ipaddress.ip_network("fc00::/7"),  # IPv6 unique local
 ]
 
 # Docker Compose service names and other known-internal hostnames that resolve
 # inside the container network. Blocked by name before DNS, because by the time
 # we try to resolve them from inside Docker they point to real (internal) IPs.
-_BLOCKED_HOSTNAMES: frozenset[str] = frozenset({
-    "localhost",
-    "db", "postgres", "postgresql", "mysql", "mariadb", "mongo", "mongodb",
-    "redis", "rabbitmq", "kafka", "zookeeper", "elasticsearch",
-    "backend", "frontend", "cloudflared", "nginx", "traefik",
-    "metadata", "metadata.google.internal",  # GCP metadata
-})
+_BLOCKED_HOSTNAMES: frozenset[str] = frozenset(
+    {
+        "localhost",
+        "db",
+        "postgres",
+        "postgresql",
+        "mysql",
+        "mariadb",
+        "mongo",
+        "mongodb",
+        "redis",
+        "rabbitmq",
+        "kafka",
+        "zookeeper",
+        "elasticsearch",
+        "backend",
+        "frontend",
+        "cloudflared",
+        "nginx",
+        "traefik",
+        "metadata",
+        "metadata.google.internal",  # GCP metadata
+    }
+)
 
 
 def _is_private_ip(ip: str) -> bool:

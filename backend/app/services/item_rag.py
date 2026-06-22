@@ -36,11 +36,15 @@ async def get_embedding(text: str) -> list[float] | None:
             data = response.json()
             embedding = data.get("embedding")
             if not isinstance(embedding, list) or not embedding:
-                logger.warning("item_rag.embedding.empty_response", model=settings.ollama_embedding_model)
+                logger.warning(
+                    "item_rag.embedding.empty_response", model=settings.ollama_embedding_model
+                )
                 return None
             return embedding
     except Exception as exc:
-        logger.warning("item_rag.embedding.failed", error=str(exc), model=settings.ollama_embedding_model)
+        logger.warning(
+            "item_rag.embedding.failed", error=str(exc), model=settings.ollama_embedding_model
+        )
         return None
 
 

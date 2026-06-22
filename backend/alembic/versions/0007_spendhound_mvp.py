@@ -44,7 +44,9 @@ def upgrade() -> None:
 
         chat_message_columns = {column["name"] for column in inspector.get_columns("chat_messages")}
         if "session_id" in chat_message_columns:
-            chat_message_indexes = {index["name"] for index in inspector.get_indexes("chat_messages")}
+            chat_message_indexes = {
+                index["name"] for index in inspector.get_indexes("chat_messages")
+            }
             if "ix_chat_messages_session_id" in chat_message_indexes:
                 logger.info("Dropping legacy index ix_chat_messages_session_id")
                 op.drop_index("ix_chat_messages_session_id", table_name="chat_messages")
@@ -76,14 +78,29 @@ def upgrade() -> None:
         op.create_table(
             "categories",
             sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-            sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+            sa.Column(
+                "user_id",
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("users.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
             sa.Column("name", sa.String(80), nullable=False),
             sa.Column("color", sa.String(20), nullable=False, server_default="#60a5fa"),
             sa.Column("icon", sa.String(32), nullable=True),
             sa.Column("description", sa.Text(), nullable=True),
             sa.Column("is_system", sa.Boolean(), nullable=False, server_default="false"),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
             sa.UniqueConstraint("user_id", "name", name="uq_categories_user_name"),
         )
         op.create_index("ix_categories_user_id", "categories", ["user_id"])
@@ -92,15 +109,35 @@ def upgrade() -> None:
         op.create_table(
             "merchant_rules",
             sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-            sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-            sa.Column("category_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("categories.id", ondelete="SET NULL"), nullable=True),
+            sa.Column(
+                "user_id",
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("users.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column(
+                "category_id",
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("categories.id", ondelete="SET NULL"),
+                nullable=True,
+            ),
             sa.Column("merchant_pattern", sa.String(255), nullable=False),
             sa.Column("pattern_type", sa.String(20), nullable=False, server_default="contains"),
             sa.Column("priority", sa.Integer(), nullable=False, server_default="100"),
             sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
             sa.Column("notes", sa.Text(), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
         )
         op.create_index("ix_merchant_rules_user_id", "merchant_rules", ["user_id"])
         op.create_index("ix_merchant_rules_category_id", "merchant_rules", ["category_id"])
@@ -109,7 +146,12 @@ def upgrade() -> None:
         op.create_table(
             "receipts",
             sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-            sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
+            sa.Column(
+                "user_id",
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("users.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
             sa.Column("original_filename", sa.String(255), nullable=False),
             sa.Column("stored_filename", sa.String(255), nullable=False),
             sa.Column("content_type", sa.String(120), nullable=True),
@@ -118,11 +160,23 @@ def upgrade() -> None:
             sa.Column("ocr_text", sa.Text(), nullable=True),
             sa.Column("preview_data", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
             sa.Column("extraction_confidence", sa.Float(), nullable=True),
-            sa.Column("extraction_status", sa.String(30), nullable=False, server_default="uploaded"),
+            sa.Column(
+                "extraction_status", sa.String(30), nullable=False, server_default="uploaded"
+            ),
             sa.Column("needs_review", sa.Boolean(), nullable=False, server_default="true"),
             sa.Column("review_notes", sa.Text(), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
             sa.Column("finalized_at", sa.DateTime(timezone=True), nullable=True),
         )
         op.create_index("ix_receipts_user_id", "receipts", ["user_id"])
@@ -131,9 +185,24 @@ def upgrade() -> None:
         op.create_table(
             "expenses",
             sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-            sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-            sa.Column("category_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("categories.id", ondelete="SET NULL"), nullable=True),
-            sa.Column("receipt_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("receipts.id", ondelete="SET NULL"), nullable=True),
+            sa.Column(
+                "user_id",
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("users.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column(
+                "category_id",
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("categories.id", ondelete="SET NULL"),
+                nullable=True,
+            ),
+            sa.Column(
+                "receipt_id",
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("receipts.id", ondelete="SET NULL"),
+                nullable=True,
+            ),
             sa.Column("merchant", sa.String(255), nullable=False),
             sa.Column("description", sa.Text(), nullable=True),
             sa.Column("amount", sa.Numeric(12, 2), nullable=False),
@@ -145,8 +214,18 @@ def upgrade() -> None:
             sa.Column("notes", sa.Text(), nullable=True),
             sa.Column("recurring_group", sa.String(255), nullable=True),
             sa.Column("is_recurring", sa.Boolean(), nullable=False, server_default="false"),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
         )
         op.create_index("ix_expenses_user_id", "expenses", ["user_id"])
         op.create_index("ix_expenses_category_id", "expenses", ["category_id"])
@@ -159,16 +238,36 @@ def upgrade() -> None:
         op.create_table(
             "budgets",
             sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, nullable=False),
-            sa.Column("user_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False),
-            sa.Column("category_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("categories.id", ondelete="SET NULL"), nullable=True),
+            sa.Column(
+                "user_id",
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("users.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column(
+                "category_id",
+                postgresql.UUID(as_uuid=True),
+                sa.ForeignKey("categories.id", ondelete="SET NULL"),
+                nullable=True,
+            ),
             sa.Column("name", sa.String(120), nullable=False),
             sa.Column("amount", sa.Numeric(12, 2), nullable=False),
             sa.Column("currency", sa.String(3), nullable=False, server_default="EUR"),
             sa.Column("period", sa.String(20), nullable=False, server_default="monthly"),
             sa.Column("month_start", sa.Date(), nullable=False),
             sa.Column("notes", sa.Text(), nullable=True),
-            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
-            sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
+            sa.Column(
+                "updated_at",
+                sa.DateTime(timezone=True),
+                server_default=sa.text("now()"),
+                nullable=False,
+            ),
         )
         op.create_index("ix_budgets_user_id", "budgets", ["user_id"])
         op.create_index("ix_budgets_category_id", "budgets", ["category_id"])

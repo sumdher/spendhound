@@ -63,7 +63,9 @@ async def send_email(
         return response.json()
 
 
-async def send_approval_request_email(user_email: str, user_name: str | None, approve_url: str, reject_url: str) -> None:
+async def send_approval_request_email(
+    user_email: str, user_name: str | None, approve_url: str, reject_url: str
+) -> None:
     if not settings.admin_email:
         logger.warning("ADMIN_EMAIL not set — skipping approval request email")
         return
@@ -74,7 +76,11 @@ async def send_approval_request_email(user_email: str, user_name: str | None, ap
             html=_approval_email_html(user_email, user_name, approve_url, reject_url),
         )
         if response is not None:
-            logger.info("Approval request email sent", to=settings.admin_email, resend_email_id=response.get("id"))
+            logger.info(
+                "Approval request email sent",
+                to=settings.admin_email,
+                resend_email_id=response.get("id"),
+            )
     except Exception as error:
         logger.error("Failed to send approval request email", error=str(error))
 
@@ -106,7 +112,12 @@ async def send_monthly_report_email(
     )
     if response is None:
         return None
-    logger.info("Monthly report email sent", to=user_email, report_month=report_month_key, resend_email_id=response.get("id"))
+    logger.info(
+        "Monthly report email sent",
+        to=user_email,
+        report_month=report_month_key,
+        resend_email_id=response.get("id"),
+    )
     return response.get("id")
 
 
@@ -122,15 +133,21 @@ async def send_partner_request_email(
         response = await send_email(
             to=[recipient_email],
             subject=f"[SpendHound] {requester_name or requester_email} wants to add you as an expense partner",
-            html=_partner_request_email_html(requester_name, requester_email, accept_url, reject_url),
+            html=_partner_request_email_html(
+                requester_name, requester_email, accept_url, reject_url
+            ),
         )
         if response is not None:
-            logger.info("Partner request email sent", to=recipient_email, resend_email_id=response.get("id"))
+            logger.info(
+                "Partner request email sent", to=recipient_email, resend_email_id=response.get("id")
+            )
     except Exception as error:
         logger.error("Failed to send partner request email", error=str(error))
 
 
-def _partner_request_email_html(requester_name: str | None, requester_email: str, accept_url: str, reject_url: str) -> str:
+def _partner_request_email_html(
+    requester_name: str | None, requester_email: str, accept_url: str, reject_url: str
+) -> str:
     name = requester_name or requester_email
     return f"""<!DOCTYPE html>
 <html>
@@ -147,7 +164,9 @@ def _partner_request_email_html(requester_name: str | None, requester_email: str
 </html>"""
 
 
-def _approval_email_html(user_email: str, user_name: str | None, approve_url: str, reject_url: str) -> str:
+def _approval_email_html(
+    user_email: str, user_name: str | None, approve_url: str, reject_url: str
+) -> str:
     name = user_name or user_email
     return f"""<!DOCTYPE html>
 <html>
@@ -167,7 +186,9 @@ def _approval_email_html(user_email: str, user_name: str | None, approve_url: st
 </html>"""
 
 
-def _monthly_report_email_html(user_email: str, user_name: str | None, report_month_label: str) -> str:
+def _monthly_report_email_html(
+    user_email: str, user_name: str | None, report_month_label: str
+) -> str:
     name = user_name or user_email
     return f"""<!DOCTYPE html>
 <html>

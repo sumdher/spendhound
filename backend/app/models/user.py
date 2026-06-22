@@ -34,31 +34,69 @@ class User(Base):
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
-    automatic_monthly_reports: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    automatic_monthly_reports: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
     receipt_prompt_override: Mapped[str | None] = mapped_column(Text, nullable=True)
     llm_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
     llm_model: Mapped[str | None] = mapped_column(String(255), nullable=True)
     llm_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     llm_base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
 
-    created_ledgers: Mapped[list["Ledger"]] = relationship("Ledger", foreign_keys="Ledger.created_by", back_populates="creator", cascade="all, delete-orphan")
-    ledger_memberships: Mapped[list["LedgerMembership"]] = relationship("LedgerMembership", back_populates="user", cascade="all, delete-orphan")
-    sent_partner_requests: Mapped[list["PartnerRequest"]] = relationship("PartnerRequest", foreign_keys="PartnerRequest.requester_id", back_populates="requester", cascade="all, delete-orphan")
-    received_partner_requests: Mapped[list["PartnerRequest"]] = relationship("PartnerRequest", foreign_keys="PartnerRequest.recipient_id", back_populates="recipient")
-    categories: Mapped[list["Category"]] = relationship("Category", back_populates="user", cascade="all, delete-orphan")
-    merchant_rules: Mapped[list["MerchantRule"]] = relationship("MerchantRule", back_populates="user", cascade="all, delete-orphan")
-    item_keyword_rules: Mapped[list["ItemKeywordRule"]] = relationship("ItemKeywordRule", back_populates="user", cascade="all, delete-orphan")
-    item_embeddings: Mapped[list["ItemEmbedding"]] = relationship("ItemEmbedding", back_populates="user", cascade="all, delete-orphan")
-    budgets: Mapped[list["Budget"]] = relationship("Budget", back_populates="user", cascade="all, delete-orphan")
-    receipts: Mapped[list["Receipt"]] = relationship("Receipt", back_populates="user", cascade="all, delete-orphan")
-    expenses: Mapped[list["Expense"]] = relationship("Expense", back_populates="user", cascade="all, delete-orphan")
-    monthly_report_deliveries: Mapped[list["MonthlyReportDelivery"]] = relationship("MonthlyReportDelivery", back_populates="user", cascade="all, delete-orphan")
-    chat_sessions: Mapped[list["ChatSession"]] = relationship("ChatSession", back_populates="user", cascade="all, delete-orphan")
-    chat_messages: Mapped[list["ChatMessage"]] = relationship("ChatMessage", back_populates="user", cascade="all, delete-orphan")
+    created_ledgers: Mapped[list["Ledger"]] = relationship(
+        "Ledger",
+        foreign_keys="Ledger.created_by",
+        back_populates="creator",
+        cascade="all, delete-orphan",
+    )
+    ledger_memberships: Mapped[list["LedgerMembership"]] = relationship(
+        "LedgerMembership", back_populates="user", cascade="all, delete-orphan"
+    )
+    sent_partner_requests: Mapped[list["PartnerRequest"]] = relationship(
+        "PartnerRequest",
+        foreign_keys="PartnerRequest.requester_id",
+        back_populates="requester",
+        cascade="all, delete-orphan",
+    )
+    received_partner_requests: Mapped[list["PartnerRequest"]] = relationship(
+        "PartnerRequest", foreign_keys="PartnerRequest.recipient_id", back_populates="recipient"
+    )
+    categories: Mapped[list["Category"]] = relationship(
+        "Category", back_populates="user", cascade="all, delete-orphan"
+    )
+    merchant_rules: Mapped[list["MerchantRule"]] = relationship(
+        "MerchantRule", back_populates="user", cascade="all, delete-orphan"
+    )
+    item_keyword_rules: Mapped[list["ItemKeywordRule"]] = relationship(
+        "ItemKeywordRule", back_populates="user", cascade="all, delete-orphan"
+    )
+    item_embeddings: Mapped[list["ItemEmbedding"]] = relationship(
+        "ItemEmbedding", back_populates="user", cascade="all, delete-orphan"
+    )
+    budgets: Mapped[list["Budget"]] = relationship(
+        "Budget", back_populates="user", cascade="all, delete-orphan"
+    )
+    receipts: Mapped[list["Receipt"]] = relationship(
+        "Receipt", back_populates="user", cascade="all, delete-orphan"
+    )
+    expenses: Mapped[list["Expense"]] = relationship(
+        "Expense", back_populates="user", cascade="all, delete-orphan"
+    )
+    monthly_report_deliveries: Mapped[list["MonthlyReportDelivery"]] = relationship(
+        "MonthlyReportDelivery", back_populates="user", cascade="all, delete-orphan"
+    )
+    chat_sessions: Mapped[list["ChatSession"]] = relationship(
+        "ChatSession", back_populates="user", cascade="all, delete-orphan"
+    )
+    chat_messages: Mapped[list["ChatMessage"]] = relationship(
+        "ChatMessage", back_populates="user", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<User {self.email}>"

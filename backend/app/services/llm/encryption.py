@@ -10,7 +10,7 @@ def _get_fernet() -> Fernet:
     if not secret:
         raise ValueError(
             "LLM_KEY_ENCRYPTION_SECRET is not configured. "
-            "Generate one with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
+            'Generate one with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
         )
     return Fernet(secret.encode() if isinstance(secret, str) else secret)
 
@@ -25,4 +25,6 @@ def decrypt_api_key(encrypted_key: str) -> str:
     try:
         return _get_fernet().decrypt(encrypted_key.encode()).decode()
     except InvalidToken as e:
-        raise ValueError("Failed to decrypt API key — the encryption secret may have changed.") from e
+        raise ValueError(
+            "Failed to decrypt API key — the encryption secret may have changed."
+        ) from e

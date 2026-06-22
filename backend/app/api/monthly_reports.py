@@ -33,7 +33,9 @@ def _parse_report_month(month: str) -> date:
     try:
         return month_start_from_string(month)
     except ValueError as error:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="month must be a valid YYYY-MM value") from error
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="month must be a valid YYYY-MM value"
+        ) from error
 
 
 @router.post("/send", response_model=MonthlyReportSendResponse)

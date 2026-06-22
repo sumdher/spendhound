@@ -100,7 +100,9 @@ async def stream_chat(
         raise HTTPException(status_code=400, detail="Message is required")
     service = ExpenseChatService(db, current_user)
     return StreamingResponse(
-        service.stream_chat(current_user.id, session_id=session_id, request=body, http_request=request),
+        service.stream_chat(
+            current_user.id, session_id=session_id, request=body, http_request=request
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

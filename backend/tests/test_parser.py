@@ -25,13 +25,17 @@ from app.services.receipt_extraction import (
 
 
 def test_extract_json_object_embedded_payload():
-    payload = _extract_json_object('hello {"merchant": "Cafe Roma", "amount": 8.50, "confidence": 0.8} world')
+    payload = _extract_json_object(
+        'hello {"merchant": "Cafe Roma", "amount": 8.50, "confidence": 0.8} world'
+    )
     assert payload is not None
     assert payload["merchant"] == "Cafe Roma"
 
 
 def test_extract_json_object_from_markdown_fence():
-    payload = _extract_json_object('```json\n{"merchant":"Cafe Roma","amount":8.5,"confidence":0.8}\n```')
+    payload = _extract_json_object(
+        '```json\n{"merchant":"Cafe Roma","amount":8.5,"confidence":0.8}\n```'
+    )
     assert payload is not None
     assert payload["amount"] == 8.5
 
@@ -50,7 +54,9 @@ def test_fallback_preview_from_text_uses_filename_for_missing_merchant():
 
 
 def test_merchant_hint_from_receipt_text_prefers_known_supermarket_brand():
-    merchant = _merchant_hint_from_receipt_text("PUNTI FIDELITY\nESSELUNGA ROMA\nVia Example 12\nTotale 24,90")
+    merchant = _merchant_hint_from_receipt_text(
+        "PUNTI FIDELITY\nESSELUNGA ROMA\nVia Example 12\nTotale 24,90"
+    )
     assert merchant == "Esselunga"
 
 
@@ -62,7 +68,10 @@ def test_should_force_groceries_for_supermarket_receipts():
     preview = ReceiptPreviewModel(
         merchant="Carrefour Market",
         transaction_type="debit",
-        items=[ReceiptPreviewItemModel(description="Pomodori datterini"), ReceiptPreviewItemModel(description="Cien shampoo")],
+        items=[
+            ReceiptPreviewItemModel(description="Pomodori datterini"),
+            ReceiptPreviewItemModel(description="Cien shampoo"),
+        ],
     )
     assert _should_force_groceries(preview) is True
 
@@ -112,9 +121,13 @@ async def test_extract_text_from_pdf_prefers_pdfplumber(tmp_path):
 @pytest.mark.asyncio
 async def test_llm_receipt_preview_validates_json_response():
     provider = MagicMock()
-    provider.complete = AsyncMock(return_value='{"merchant":"Trainline","amount":27.4,"currency":"EUR","expense_date":"2026-04-03","description":"Rail ticket","category_name":"Transport","notes":"","items":[{"description":"Rail ticket","total":27.4}],"confidence":0.91}')
+    provider.complete = AsyncMock(
+        return_value='{"merchant":"Trainline","amount":27.4,"currency":"EUR","expense_date":"2026-04-03","description":"Rail ticket","category_name":"Transport","notes":"","items":[{"description":"Rail ticket","total":27.4}],"confidence":0.91}'
+    )
     with patch("app.services.receipt_extraction.get_llm_provider", return_value=provider):
-        preview = await llm_receipt_preview("Trainline receipt", "ticket.txt", LLMConfig(provider="ollama", model="test"))
+        preview = await llm_receipt_preview(
+            "Trainline receipt", "ticket.txt", LLMConfig(provider="ollama", model="test")
+        )
     assert preview is not None
     assert preview.merchant == "Trainline"
     assert preview.category_name == "Transport"
@@ -125,12 +138,16 @@ async def test_llm_receipt_preview_validates_json_response():
 @pytest.mark.asyncio
 async def test_llm_receipt_preview_from_image_uses_multimodal_message(tmp_path):
     provider = MagicMock()
-    provider.complete = AsyncMock(return_value='{"merchant":"Cafe Roma","amount":8.5,"currency":"EUR","expense_date":"2026-04-11","description":"Coffee and pastry","category_name":"Dining","notes":"","items":[{"description":"Coffee","quantity":1,"unit_price":3.5,"total":3.5},{"description":"Pastry","quantity":1,"unit_price":5.0,"total":5.0}],"confidence":0.89}')
+    provider.complete = AsyncMock(
+        return_value='{"merchant":"Cafe Roma","amount":8.5,"currency":"EUR","expense_date":"2026-04-11","description":"Coffee and pastry","category_name":"Dining","notes":"","items":[{"description":"Coffee","quantity":1,"unit_price":3.5,"total":3.5},{"description":"Pastry","quantity":1,"unit_price":5.0,"total":5.0}],"confidence":0.89}'
+    )
     image_path = tmp_path / "receipt.png"
     image_path.write_bytes(b"fake-image-bytes")
 
     with patch("app.services.receipt_extraction.get_llm_provider", return_value=provider):
-        preview = await llm_receipt_preview_from_image(str(image_path), "receipt.png", "image/png", LLMConfig(provider="ollama", model="test"))
+        preview = await llm_receipt_preview_from_image(
+            str(image_path), "receipt.png", "image/png", LLMConfig(provider="ollama", model="test")
+        )
 
     assert preview is not None
     assert preview.merchant == "Cafe Roma"
@@ -147,12 +164,19 @@ async def test_llm_receipt_preview_from_image_uses_multimodal_message(tmp_path):
 @pytest.mark.asyncio
 async def test_llm_receipt_preview_from_image_accepts_partial_json_with_null_fields(tmp_path):
     provider = MagicMock()
-    provider.complete = AsyncMock(return_value='{"merchant":null,"amount":8.5,"currency":null,"expense_date":null,"description":null,"category_name":null,"notes":"","items":null,"confidence":0.74}')
+    provider.complete = AsyncMock(
+        return_value='{"merchant":null,"amount":8.5,"currency":null,"expense_date":null,"description":null,"category_name":null,"notes":"","items":null,"confidence":0.74}'
+    )
     image_path = tmp_path / "cafe-roma_2026-04-11.png"
     image_path.write_bytes(b"fake-image-bytes")
 
     with patch("app.services.receipt_extraction.get_llm_provider", return_value=provider):
-        preview = await llm_receipt_preview_from_image(str(image_path), "cafe-roma_2026-04-11.png", "image/png", LLMConfig(provider="ollama", model="test"))
+        preview = await llm_receipt_preview_from_image(
+            str(image_path),
+            "cafe-roma_2026-04-11.png",
+            "image/png",
+            LLMConfig(provider="ollama", model="test"),
+        )
 
     assert preview is not None
     assert preview.merchant == "Cafe Roma"

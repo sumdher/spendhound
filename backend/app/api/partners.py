@@ -33,7 +33,9 @@ def _serialize_request(req: PartnerRequest, *, viewer_id: uuid.UUID) -> dict:
         "id": str(req.id),
         "direction": "sent" if is_sender else "received",
         "status": req.status,
-        "email": req.recipient_email if is_sender else (req.requester.email if req.requester else ""),
+        "email": req.recipient_email
+        if is_sender
+        else (req.requester.email if req.requester else ""),
         "name": None if is_sender else (req.requester.name if req.requester else None),
         "avatar_url": None if is_sender else (req.requester.avatar_url if req.requester else None),
         "created_at": req.created_at.isoformat(),
@@ -62,7 +64,10 @@ async def list_partners(
     result = await db.execute(
         select(PartnerRequest)
         .where(
-            or_(PartnerRequest.requester_id == current_user.id, PartnerRequest.recipient_id == current_user.id)
+            or_(
+                PartnerRequest.requester_id == current_user.id,
+                PartnerRequest.recipient_id == current_user.id,
+            )
         )
         .order_by(PartnerRequest.created_at.desc())
     )
@@ -80,7 +85,11 @@ async def list_partners(
         partner_result = await db.execute(select(User).where(User.id.in_(accepted_partner_ids)))
         partners = [_serialize_partner(u) for u in partner_result.scalars().all()]
 
-    pending = [_serialize_request(r, viewer_id=current_user.id) for r in requests if r.status == PARTNER_STATUS_PENDING]
+    pending = [
+        _serialize_request(r, viewer_id=current_user.id)
+        for r in requests
+        if r.status == PARTNER_STATUS_PENDING
+    ]
     return {"partners": partners, "pending_requests": pending}
 
 
@@ -103,20 +112,27 @@ async def send_partner_request(
         )
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=409, detail="A pending request to this email already exists")
+        raise HTTPException(
+            status_code=409, detail="A pending request to this email already exists"
+        )
 
     recipient_result = await db.execute(select(User).where(func.lower(User.email) == target_email))
     recipient = recipient_result.scalar_one_or_none()
 
     if not recipient:
-        raise HTTPException(status_code=404, detail="No SpendHound account found with that email. Only existing users can be added as partners.")
+        raise HTTPException(
+            status_code=404,
+            detail="No SpendHound account found with that email. Only existing users can be added as partners.",
+        )
 
     if recipient:
         already_partners = await db.execute(
             select(PartnerRequest).where(
                 or_(
-                    (PartnerRequest.requester_id == current_user.id) & (PartnerRequest.recipient_id == recipient.id),
-                    (PartnerRequest.requester_id == recipient.id) & (PartnerRequest.recipient_id == current_user.id),
+                    (PartnerRequest.requester_id == current_user.id)
+                    & (PartnerRequest.recipient_id == recipient.id),
+                    (PartnerRequest.requester_id == recipient.id)
+                    & (PartnerRequest.recipient_id == current_user.id),
                 ),
                 PartnerRequest.status == PARTNER_STATUS_ACCEPTED,
             )
@@ -164,7 +180,10 @@ async def accept_partner_request(
     req = result.scalar_one_or_none()
     if not req:
         raise HTTPException(status_code=404, detail="Request not found")
-    if req.recipient_id != current_user.id and func.lower(req.recipient_email) != current_user.email.lower():
+    if (
+        req.recipient_id != current_user.id
+        and func.lower(req.recipient_email) != current_user.email.lower()
+    ):
         raise HTTPException(status_code=403, detail="Not your request to accept")
     if req.status != PARTNER_STATUS_PENDING:
         raise HTTPException(status_code=409, detail=f"Request is already {req.status}")
@@ -185,7 +204,10 @@ async def reject_partner_request(
     req = result.scalar_one_or_none()
     if not req:
         raise HTTPException(status_code=404, detail="Request not found")
-    if req.recipient_id != current_user.id and req.recipient_email.lower() != current_user.email.lower():
+    if (
+        req.recipient_id != current_user.id
+        and req.recipient_email.lower() != current_user.email.lower()
+    ):
         raise HTTPException(status_code=403, detail="Not your request to reject")
     if req.status != PARTNER_STATUS_PENDING:
         raise HTTPException(status_code=409, detail=f"Request is already {req.status}")

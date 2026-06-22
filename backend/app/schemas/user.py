@@ -26,7 +26,9 @@ class UserResponse(BaseModel):
     llm_provider: str | None = None
     llm_model: str | None = None
     llm_base_url: str | None = None
-    has_llm_api_key: bool = False  # True if a stored encrypted key exists — never return the raw key
+    has_llm_api_key: bool = (
+        False  # True if a stored encrypted key exists — never return the raw key
+    )
     created_at: datetime
 
 
@@ -45,9 +47,9 @@ class UserLLMSettingsUpdateRequest(BaseModel):
 
     llm_provider: str | None = None
     llm_model: str | None = None
-    llm_api_key: str | None = None   # Plaintext; backend encrypts before storing
+    llm_api_key: str | None = None  # Plaintext; backend encrypts before storing
     llm_base_url: str | None = None
-    clear_api_key: bool = False          # If True, delete the stored key
+    clear_api_key: bool = False  # If True, delete the stored key
 
 
 class LLMTestRequest(BaseModel):
@@ -55,7 +57,7 @@ class LLMTestRequest(BaseModel):
 
     provider: str | None = None
     model: str | None = None
-    api_key: str | None = None       # Plaintext, NOT saved to DB
+    api_key: str | None = None  # Plaintext, NOT saved to DB
     base_url: str | None = None
 
 
@@ -63,23 +65,23 @@ class LLMTestResponse(BaseModel):
     """Response schema for the LLM test endpoint."""
 
     success: bool
-    response: str | None = None     # LLM reply on success
-    error: str | None = None        # Error message on failure
+    response: str | None = None  # LLM reply on success
+    error: str | None = None  # Error message on failure
 
 
 class LLMModelPricing(BaseModel):
     """Per-provider token pricing when the API exposes it."""
 
-    input_per_1m: float | None = None   # USD per 1M input tokens
+    input_per_1m: float | None = None  # USD per 1M input tokens
     output_per_1m: float | None = None  # USD per 1M output tokens
 
 
 class LLMModelInfo(BaseModel):
     """Metadata for a single chat/vision model returned by the listing endpoint."""
 
-    id: str                                 # model identifier (used in API calls)
-    name: str                               # display name
+    id: str  # model identifier (used in API calls)
+    name: str  # display name
     description: str | None = None
     context_length: int | None = None
     pricing: LLMModelPricing | None = None  # None = no pricing info available
-    supports_vision: bool = False           # true if image input supported
+    supports_vision: bool = False  # true if image input supported
