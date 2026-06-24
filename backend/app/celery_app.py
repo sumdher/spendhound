@@ -51,11 +51,17 @@ celery_app.conf.update(
 )
 
 # Beat schedule — runs when `celery beat` is started (see docker-compose celery_beat service).
-# Wall-clock crontab (UTC :00 and :30) so the reset time is predictable and the
-# frontend can derive an accurate countdown without any server-side state.
 celery_app.conf.beat_schedule = {
+    # Wall-clock crontab (UTC :00 and :30) so the reset time is predictable and the
+    # frontend can derive an accurate countdown without any server-side state.
     "reset-demo-user-on-the-half-hour": {
         "task": "app.tasks.demo_tasks.reset_demo_user",
         "schedule": crontab(minute="0,30"),
+    },
+    # 1st of each month at 00:20 UTC - matches the former systemd timer schedule.
+    # Fans out one deliver_monthly_report task per eligible user.
+    "dispatch-monthly-reports": {
+        "task": "app.tasks.report_tasks.dispatch_monthly_reports",
+        "schedule": crontab(hour=0, minute=20, day_of_month=1),
     },
 }

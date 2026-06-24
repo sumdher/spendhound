@@ -8,8 +8,7 @@ plans
 .claude*
 CLAUDE.md
 temp*
-.next_features
-.envv
+.env*
 .infisical.json
 .task*
 task*
