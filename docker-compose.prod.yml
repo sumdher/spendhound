@@ -3,14 +3,39 @@
 
 services:
   db:
-    # Pin by digest so a tag re-push cannot silently swap the image.
-    # To update: docker pull pgvector/pgvector:pg16 && docker inspect --format='{{index .RepoDigests 0}}' pgvector/pgvector:pg16
-    image: pgvector/pgvector@sha256:7d400e340efb42f4d8c9c12c6427adb253f726881a9985d2a471bf0eed824dff
+    # Custom image: pgvector:pg16 + WAL-G binary (see postgres/Dockerfile).
+    # The base image digest is pinned inside the Dockerfile FROM line.
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
     container_name: spendhound_db_prod
+    # Enable WAL archiving. archive_mode requires a server restart to toggle,
+    # so it must be set here (not via ALTER SYSTEM). archive_timeout=60 caps
+    # WAL data loss at ~60 seconds when the database is idle (no writes fill
+    # a full 16 MB segment naturally).
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=wal-g wal-push %p
+      - -c
+      - archive_timeout=60
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-spendhound}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-spendhound}
+      # WAL-G credentials - injected by infisical run.
+      # archive_command inherits the Postgres process environment, so wal-g
+      # picks these up automatically on each WAL segment upload.
+      WALG_S3_PREFIX: ${WALG_S3_PREFIX}
+      AWS_ENDPOINT: ${WALG_R2_ENDPOINT}
+      AWS_ACCESS_KEY_ID: ${WALG_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${WALG_SECRET_ACCESS_KEY}
+      AWS_REGION: auto
+      WALG_S3_USE_PATH_STYLE: "true"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -25,6 +50,47 @@ services:
         limits:
           memory: 1G
         reservations:
+          memory: 256M
+
+  wal-g-backup:
+    # Shares the same image as db (WAL-G + supercronic already installed).
+    # Runs the daily base backup cron. WAL segment archiving is handled by
+    # Postgres itself via archive_command - this sidecar only does base backups.
+    # On FIRST DEPLOYMENT run a manual base backup before this schedule fires:
+    #   docker exec spendhound_walg_backup_prod wal-g backup-push "$PGDATA"
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
+    container_name: spendhound_walg_backup_prod
+    entrypoint: []
+    command: [/usr/local/bin/supercronic, /etc/backup-cron]
+    # Run as the postgres user (UID 999) so it can read the data directory.
+    user: "999:999"
+    environment:
+      PGDATA: /var/lib/postgresql/data
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER:-spendhound}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-spendhound}
+      WALG_S3_PREFIX: ${WALG_S3_PREFIX}
+      AWS_ENDPOINT: ${WALG_R2_ENDPOINT}
+      AWS_ACCESS_KEY_ID: ${WALG_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${WALG_SECRET_ACCESS_KEY}
+      AWS_REGION: auto
+      WALG_S3_USE_PATH_STYLE: "true"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/backup-cron:/etc/backup-cron:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
           memory: 256M
 
   redis:
@@ -49,6 +115,39 @@ services:
         reservations:
           memory: 64M
 
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.23.1-p3
+    container_name: spendhound_pgbouncer_prod
+    # Write userlist.txt at startup from env vars - same pattern as Prometheus
+    # writing the metrics token to /run/metrics_token.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        printf '"%s" "%s"\n' "$$POSTGRES_USER" "$$POSTGRES_PASSWORD" > /tmp/pgbouncer_userlist.txt
+        exec pgbouncer /etc/pgbouncer/pgbouncer.ini
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-spendhound}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 5432"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
   backend:
     build:
       context: ./backend
@@ -59,7 +158,7 @@ services:
       - path: ./backend/.env    # non-secret config only — optional, all secrets via env block
         required: false
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-spendhound}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-spendhound}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-spendhound}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB:-spendhound}?prepared_statement_cache_size=0
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       # Secrets — injected by `infisical run` via Makefile
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
@@ -74,6 +173,9 @@ services:
       MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
       MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
       METRICS_TOKEN: ${METRICS_TOKEN}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      OTEL_ENDPOINT: http://tempo:4318
+      OTEL_SERVICE_NAME: spendhound-api
     volumes:
       - receipt_storage:/app/storage/receipts
     command:
@@ -87,6 +189,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
     security_opt:
       - no-new-privileges:true
@@ -118,7 +222,7 @@ services:
       - path: ./backend/.env
         required: false
     environment:
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-spendhound}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-spendhound}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-spendhound}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB:-spendhound}?prepared_statement_cache_size=0
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       # Secrets — injected by `infisical run` via Makefile
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
@@ -132,6 +236,9 @@ services:
       LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET}
       MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
       MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      OTEL_ENDPOINT: http://tempo:4318
+      OTEL_SERVICE_NAME: spendhound-worker
     command: celery -A app.celery_app worker --loglevel=info --concurrency=1
     volumes:
       - receipt_storage:/app/storage/receipts
@@ -139,6 +246,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
     security_opt:
       - no-new-privileges:true
@@ -154,6 +263,39 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: production
+    container_name: spendhound_celery_beat_prod
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-spendhound}:${POSTGRES_PASSWORD}@pgbouncer:5432/${POSTGRES_DB:-spendhound}?prepared_statement_cache_size=0
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+    command: celery -A app.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
   prometheus:
     image: prom/prometheus:v2.53.0
     container_name: spendhound_prometheus_prod
@@ -163,7 +305,7 @@ services:
       - /bin/sh
       - -c
       - |
-        printf '%s' "$$METRICS_TOKEN" > /run/metrics_token
+        printf '%s' "$$METRICS_TOKEN" > /tmp/metrics_token
         exec /bin/prometheus \
           --config.file=/etc/prometheus/prometheus.yml \
           --storage.tsdb.path=/prometheus \
@@ -174,6 +316,7 @@ services:
       - "127.0.0.1:9090:9090"    # SSH tunnel: ssh -L 9090:localhost:9090 user@server
     volumes:
       - ./prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
       - prometheus_data:/prometheus
     depends_on:
       backend:
@@ -208,6 +351,80 @@ services:
       resources:
         limits:
           memory: 256M
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    container_name: spendhound_tempo_prod
+    command: -config.file=/etc/tempo/tempo.yml
+    volumes:
+      - ./tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo_data:/var/tempo
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  loki:
+    image: grafana/loki:3.1.0
+    container_name: spendhound_loki_prod
+    command: -config.file=/etc/loki/loki.yml
+    volumes:
+      - ./loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  promtail:
+    image: grafana/promtail:3.1.0
+    container_name: spendhound_promtail_prod
+    command: -config.file=/etc/promtail/promtail.yml
+    volumes:
+      - ./promtail/promtail.yml:/etc/promtail/promtail.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - promtail_positions:/var/promtail
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: spendhound_alertmanager_prod
+    # Write SLACK_WEBHOOK_URL to a file; alertmanager.yml reads it via api_url_file.
+    # Same pattern as Prometheus reading the metrics token from /run/metrics_token.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        printf '%s' "$$SLACK_WEBHOOK_URL" > /tmp/slack_webhook_url
+        exec /bin/alertmanager \
+          --config.file=/etc/alertmanager/alertmanager.yml \
+          --storage.path=/alertmanager \
+          --web.listen-address=0.0.0.0:9093
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL}
+    ports:
+      - "127.0.0.1:9095:9093"    # SSH tunnel: ssh -L 9095:localhost:9095 user@server
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    depends_on:
+      - prometheus
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
 
   frontend:
     build:
@@ -273,4 +490,8 @@ volumes:
   postgres_data:
   receipt_storage:
   prometheus_data:
+  alertmanager_data:
+  loki_data:
+  promtail_positions:
+  tempo_data:
   grafana_data:

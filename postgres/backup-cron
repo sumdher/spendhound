@@ -1,0 +1,13 @@
+# WAL-G daily base backup schedule for SpendHound.
+# Runs inside the wal-g-backup sidecar container via supercronic.
+#
+# 02:00 UTC daily:
+#   1. Take a full base backup and upload to Cloudflare R2.
+#   2. Delete base backups beyond the 7 most recent (and associated WAL).
+#
+# WAL segments are archived continuously by Postgres archive_command - this
+# cron only handles the periodic base backup that WAL segments are anchored to.
+# On first deployment, trigger a manual backup before this schedule runs:
+#   docker exec spendhound_walg_backup_prod wal-g backup-push "$PGDATA"
+
+0 2 * * * wal-g backup-push "$PGDATA" && wal-g delete retain FULL 7 --confirm

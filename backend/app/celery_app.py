@@ -17,8 +17,30 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_init
 
 from app.config import settings
+
+if settings.sentry_dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.celery import CeleryIntegration
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment,
+        traces_sample_rate=0.0,
+        send_default_pii=False,
+        integrations=[CeleryIntegration()],
+    )
+
+
+@worker_init.connect
+def _on_worker_init(**kwargs: object) -> None:
+    if settings.otel_endpoint:
+        from app.services.tracing import setup_tracing
+
+        setup_tracing(settings.otel_service_name, settings.otel_endpoint)
+
 
 celery_app = Celery(
     "spendhound",

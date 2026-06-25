@@ -8,6 +8,10 @@ plans
 .claude*
 CLAUDE.md
 temp*
+!tempo
+!tempo/
+!**/tempo.yaml
+!**/tempo.yml
 .env*
 .infisical.json
 .task*

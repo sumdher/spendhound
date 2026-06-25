@@ -1,0 +1,40 @@
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+  grpc_listen_port: 9096
+
+# Single-node deployment: all components run in one process.
+common:
+  instance_addr: 127.0.0.1
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: loki_index_
+        period: 24h
+
+limits_config:
+  # 7-day retention. Compactor enforces this on a background schedule.
+  retention_period: 168h
+
+compactor:
+  working_directory: /loki/retention
+  retention_enabled: true
+  # Wait 2h after marking a chunk for deletion before actually removing it.
+  # Gives time to cancel an accidental config change.
+  retention_delete_delay: 2h
+  delete_request_store: filesystem

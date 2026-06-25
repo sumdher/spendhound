@@ -127,6 +127,15 @@ export default function PrivacyPolicyPage() {
                 </p>
               </div>
               <div className="rounded-lg border border-border bg-card p-4">
+                <p className="font-medium">Sentry — Error monitoring</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  We use Sentry to capture application errors and exceptions. Error reports contain
+                  stack traces, request URLs, and an anonymous user identifier (a random ID, never
+                  your email or financial data). Data is processed on Sentry&apos;s EU infrastructure
+                  (<strong>ingest.de.sentry.io</strong>). Governed by Sentry&apos;s Privacy Policy.
+                </p>
+              </div>
+              <div className="rounded-lg border border-border bg-card p-4">
                 <p className="font-medium">LLM Providers — Receipt &amp; statement parsing</p>
                 <p className="text-xs text-muted-foreground mt-1">
                   When you upload a receipt or bank statement for automatic extraction, the file
