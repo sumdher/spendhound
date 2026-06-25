@@ -50,8 +50,12 @@ Licensed under the [GNU Affero General Public License v3.0](LICENSE).
   Mistral)
 - Celery + Redis task queue: receipt extraction, statement parsing, and report delivery all
   run as durable background tasks that survive process restarts
-- Prometheus metrics + Grafana dashboards for request latency, LLM latency, queue depth,
-  and rate-limit hits
+- Full observability stack: Prometheus metrics + Alertmanager (Slack alerts) + Grafana
+  dashboards + Loki log aggregation + Grafana Tempo distributed tracing (OpenTelemetry
+  auto-instrumented: FastAPI, SQLAlchemy, HTTPX, Redis, Celery; manual LLM spans)
+- Continuous Postgres backup via WAL-G to Cloudflare R2 (WAL archiving + daily base
+  backup, 7-day retention, point-in-time recovery)
+- PgBouncer connection pooling (session mode) between application and Postgres
 - Demo mode: public Bruce Wayne account, automatically reset every 30 minutes via Celery Beat
 - GDPR Article 17 compliance: full account erasure and selective data deletion endpoints
 
@@ -71,7 +75,9 @@ Licensed under the [GNU Affero General Public License v3.0](LICENSE).
 | Embeddings | Ollama (768-dim) + pgvector |
 | PDF generation | Puppeteer (headless Chromium via Next.js internal route) |
 | Email | Resend API |
-| Observability | Prometheus + Grafana (provisioned dashboards) + Flower (Celery monitor) |
+| Connection pooling | PgBouncer (session mode, scram-sha-256) |
+| Observability | Prometheus + Alertmanager (Slack) + Grafana + Loki + Promtail + Tempo (OTel traces) + Flower (Celery monitor) + Sentry |
+| Backup | WAL-G continuous backup to Cloudflare R2 (WAL archiving + daily base backup, 7-day retention, PITR) |
 | Secrets | Infisical (CLI-injected at runtime; no .env files in source) |
 | Containerization | Docker + Docker Compose |
 
@@ -169,13 +175,19 @@ configured as `ADMIN_EMAIL`. That account is auto-approved. All other accounts s
 |---|---|---|
 | Frontend | http://localhost:3000 | Next.js app |
 | Backend API | http://localhost:8000 | FastAPI; `/docs` only when `DEBUG=true` |
-| PostgreSQL | localhost:5432 | pgvector-enabled |
+| PostgreSQL | localhost:5432 | pgvector-enabled; custom image with WAL-G in prod |
+| PgBouncer | (internal only) | Connection pooler; prod only |
 | Redis | (internal only) | Task broker + cache; no host port exposed |
 | Celery worker | (no HTTP) | Processes receipt extraction and report tasks |
 | Celery Beat | (no HTTP) | Runs scheduled tasks (demo reset, recurring expenses) |
+| WAL-G backup | (no HTTP) | Daily base backup sidecar; prod only |
 | Flower | http://localhost:5555 | Celery task monitor (dev only) |
-| Prometheus | http://localhost:9090 | Metrics scraper |
+| Prometheus | http://localhost:9090 | Metrics scraper (SSH tunnel in prod) |
+| Alertmanager | http://localhost:9095 | Slack alert routing (SSH tunnel in prod) |
 | Grafana | http://localhost:3004 | Pre-provisioned dashboards; anonymous admin in dev |
+| Loki | (internal only) | Log aggregation; queried via Grafana |
+| Promtail | (internal only) | Docker log shipper to Loki |
+| Tempo | (internal only) | Distributed trace storage (OTel OTLP HTTP) |
 
 ---
 
@@ -268,15 +280,35 @@ Custom metrics exposed at `GET /metrics` (requires `Authorization: Bearer <METRI
 
 ### Grafana
 
-Pre-provisioned dashboards are in `grafana/provisioning/`. Grafana reads from the
-Prometheus datasource automatically. In dev, anonymous admin access is enabled. In
-production, set `GRAFANA_ADMIN_PASSWORD` and disable anonymous access.
+Pre-provisioned dashboards, datasources, and alert rules are in `grafana/provisioning/`
+(mounted read-only). Grafana starts with Prometheus, Loki, and Tempo datasources already
+configured. In dev, anonymous admin access is enabled. In production, set
+`GRAFANA_ADMIN_PASSWORD` and disable anonymous access.
 
-In production, Prometheus and Grafana are bound to `127.0.0.1` only. Access via SSH tunnel:
+Grafana Explore -> Loki: query logs across all containers with LogQL.
+Grafana Explore -> Tempo: search traces by service, duration, or status.
+Traces and logs are linked: a `traceID` field in structured logs becomes a clickable
+link to the Tempo trace.
+
+In production, all monitoring services are bound to `127.0.0.1` only. Access via SSH tunnel:
 
 ```bash
-ssh -L 9090:localhost:9090 -L 3004:localhost:3004 user@your-server
+ssh -L 9090:localhost:9090 -L 9095:localhost:9095 -L 3004:localhost:3004 user@your-server
 ```
+
+### Alertmanager
+
+Alert rules are in `prometheus/alert_rules.yml` (`BackendDown`, `HighErrorRate`).
+Alertmanager routes firing alerts to Slack via webhook. Set `SLACK_WEBHOOK_URL` in
+Infisical. The webhook URL is never stored in config files - it is injected at container
+startup via the entrypoint.
+
+### Distributed tracing (OpenTelemetry + Tempo)
+
+The backend and Celery worker auto-instrument FastAPI, SQLAlchemy, HTTPX, Redis, and
+Celery via the OpenTelemetry SDK. Spans are exported to Grafana Tempo over OTLP HTTP.
+Set `OTEL_ENDPOINT=http://tempo:4318` (already set in both compose files). Tracing is
+disabled when `OTEL_ENDPOINT` is empty.
 
 ---
 
@@ -359,29 +391,45 @@ The prod stack includes a `cloudflared` sidecar that establishes a Cloudflare Tu
 Set `CLOUDFLARE_TUNNEL_TOKEN` in Infisical and configure your Cloudflare dashboard to
 route your domain to `http://frontend:3000`. No port 443 needs to be open on the host.
 
-### PostgreSQL backups
+### PostgreSQL backups (WAL-G + Cloudflare R2)
 
-A host-side systemd backup setup is in [`deploy/backup/`](deploy/backup/). Run once on
-the production host:
+Production uses WAL-G for continuous backup to Cloudflare R2.
 
-```bash
-sudo bash ./deploy/backup/install-spendhound-db-backup.sh
+The production Postgres image (`postgres/Dockerfile`) starts with WAL archiving enabled:
+
+```
+-c wal_level=replica
+-c archive_mode=on
+-c archive_command=wal-g wal-push %p
+-c archive_timeout=60
 ```
 
-This installs a systemd timer that:
-- Runs daily at 03:15 UTC (`Persistent=true` catches missed runs)
-- Dumps the `db` container with `pg_dump`
-- Validates the archive with `pg_restore --list` and writes a SHA-256 checksum
-- Atomically renames the validated archive into place
-- Prunes old backups after the configured retention period
-- Uses `set -Eeuo pipefail`, `umask 077`, and `flock` to prevent overlapping runs
+Every WAL segment (up to 16 MB of changes, or at most 60 seconds of idle time) is
+compressed and uploaded to R2. A separate sidecar (`wal-g-backup`) runs a daily base
+backup at 02:00 UTC and prunes base backups older than 7 days.
 
-Backups are stored in `/var/backups/spendhound`.
+Required Infisical secrets: `WALG_S3_PREFIX`, `WALG_R2_ENDPOINT`, `WALG_ACCESS_KEY_ID`,
+`WALG_SECRET_ACCESS_KEY`.
+
+Trigger the first backup manually after initial deploy (before the 02:00 UTC cron fires):
 
 ```bash
-sudo systemctl status spendhound-db-backup.timer --no-pager
-sudo journalctl -u spendhound-db-backup.service -n 50 --no-pager
+docker exec spendhound_walg_backup_prod /usr/local/bin/wal-g backup-push /var/lib/postgresql/data
+docker exec spendhound_walg_backup_prod /usr/local/bin/wal-g backup-list
 ```
+
+To restore (PITR):
+
+```bash
+# 1. Stop the stack and clear the data directory
+# 2. Fetch the most recent base backup
+docker exec spendhound_db_prod wal-g backup-fetch /var/lib/postgresql/data LATEST
+# 3. Create recovery.signal and set recovery_target_time in postgresql.conf
+# 4. Start Postgres - it replays WAL up to the target time
+```
+
+Maximum data loss is 60 seconds (set by `archive_timeout`). Retention: 7 daily base
+backups + all WAL since the oldest retained base backup.
 
 ### Single-worker constraint
 

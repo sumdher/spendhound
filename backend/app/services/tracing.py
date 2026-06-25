@@ -53,7 +53,7 @@ def setup_tracing(service_name: str, endpoint: str) -> None:
     SQLAlchemyInstrumentor().instrument()
     HTTPXClientInstrumentor().instrument()
     RedisInstrumentor().instrument()
-    CeleryInstrumentor().instrument()
+    CeleryInstrumentor().instrument()  # type: ignore[no-untyped-call]
 
     logger.info("tracing.initialized", service=service_name, endpoint=endpoint)
 
