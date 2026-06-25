@@ -1,0 +1,32 @@
+# Grafana Tempo - single-binary mode, local filesystem storage.
+# Accepts OTLP over gRPC (4317) and HTTP (4318).
+# The app uses HTTP; gRPC is available for other senders (e.g. OTel Collector).
+
+server:
+  http_listen_port: 3200
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+ingester:
+  # Flush blocks to storage after 5 min so traces appear in search quickly.
+  max_block_duration: 5m
+
+storage:
+  trace:
+    backend: local
+    local:
+      path: /var/tempo/blocks
+    wal:
+      path: /var/tempo/wal
+
+compactor:
+  compaction:
+    # Keep traces for 7 days - matches Loki log retention.
+    block_retention: 168h

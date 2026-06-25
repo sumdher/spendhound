@@ -1,0 +1,40 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'severity']
+  # Wait 30s after first alert fires before sending - collects related alerts into one message.
+  group_wait: 30s
+  # After the initial message, wait 5m before sending an update if new alerts join the group.
+  group_interval: 5m
+  # If an alert is still firing, re-notify every 4h so it doesn't silently stay broken.
+  repeat_interval: 4h
+  receiver: slack-alerts
+
+receivers:
+  - name: slack-alerts
+    slack_configs:
+      # Webhook URL is written to this file by the container entrypoint from $SLACK_WEBHOOK_URL.
+      # Same pattern as Prometheus reading the metrics bearer token from /run/metrics_token.
+      - api_url_file: /tmp/slack_webhook_url
+        channel: '#spendhound-alerts'
+        username: SpendHound
+        send_resolved: true
+        color: '{{ if eq .CommonLabels.severity "critical" }}danger{{ else }}warning{{ end }}'
+        title: '{{ if eq .Status "firing" }}[FIRING]{{ else }}[RESOLVED]{{ end }} {{ .CommonLabels.alertname }}'
+        text: |
+          {{ range .Alerts -}}
+          *{{ .Annotations.summary }}*
+          Severity: {{ .Labels.severity }}
+          {{ .Annotations.description }}
+          {{ if eq .Status "firing" }}Since: {{ .StartsAt.Format "2006-01-02 15:04 UTC" }}{{ else }}Resolved: {{ .EndsAt.Format "2006-01-02 15:04 UTC" }}{{ end }}
+          {{ end }}
+
+# Suppress downstream alerts when the root cause is already firing.
+# If BackendDown fires, HighErrorRate is a symptom - no need for two messages.
+inhibit_rules:
+  - source_match:
+      alertname: BackendDown
+    target_match:
+      alertname: HighErrorRate
+    equal: []

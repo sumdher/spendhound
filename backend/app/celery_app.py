@@ -17,8 +17,30 @@ from __future__ import annotations
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_init
 
 from app.config import settings
+
+if settings.sentry_dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.celery import CeleryIntegration
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment,
+        traces_sample_rate=0.0,
+        send_default_pii=False,
+        integrations=[CeleryIntegration()],
+    )
+
+
+@worker_init.connect
+def _on_worker_init(**kwargs: object) -> None:
+    if settings.otel_endpoint:
+        from app.services.tracing import setup_tracing
+
+        setup_tracing(settings.otel_service_name, settings.otel_endpoint)
+
 
 celery_app = Celery(
     "spendhound",
@@ -51,11 +73,17 @@ celery_app.conf.update(
 )
 
 # Beat schedule — runs when `celery beat` is started (see docker-compose celery_beat service).
-# Wall-clock crontab (UTC :00 and :30) so the reset time is predictable and the
-# frontend can derive an accurate countdown without any server-side state.
 celery_app.conf.beat_schedule = {
+    # Wall-clock crontab (UTC :00 and :30) so the reset time is predictable and the
+    # frontend can derive an accurate countdown without any server-side state.
     "reset-demo-user-on-the-half-hour": {
         "task": "app.tasks.demo_tasks.reset_demo_user",
         "schedule": crontab(minute="0,30"),
+    },
+    # 1st of each month at 00:20 UTC - matches the former systemd timer schedule.
+    # Fans out one deliver_monthly_report task per eligible user.
+    "dispatch-monthly-reports": {
+        "task": "app.tasks.report_tasks.dispatch_monthly_reports",
+        "schedule": crontab(hour=0, minute=20, day_of_month=1),
     },
 }

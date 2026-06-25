@@ -21,6 +21,28 @@ from app.middleware.rate_limit import limiter
 from app.services.cache import close_redis, get_celery_queue_depth, init_redis
 from app.services.metrics import RATE_LIMIT_HITS_TOTAL, RECEIPT_QUEUE_DEPTH, classify_limit_type
 
+if settings.sentry_dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment,
+        traces_sample_rate=0.0,
+        send_default_pii=False,
+        integrations=[StarletteIntegration(), FastApiIntegration()],
+    )
+
+if settings.otel_endpoint:
+    from app.services.tracing import setup_tracing
+
+    setup_tracing(settings.otel_service_name, settings.otel_endpoint)
+    # FastAPI instrumentation is deferred to create_app() via instrument_fastapi()
+    # because the FastAPI app must exist before middleware can be attached.
+    # Calling FastAPIInstrumentor().instrument() here (before app creation) patches
+    # FastAPI.__init__ globally and conflicts with the Prometheus Instrumentator.
+
 logger = structlog.get_logger(__name__)
 
 
@@ -85,6 +107,11 @@ def create_app() -> FastAPI:
 
     app.add_exception_handler(RateLimitExceeded, _rate_limit_handler)
 
+    if settings.otel_endpoint:
+        from app.services.tracing import instrument_fastapi
+
+        instrument_fastapi(app)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -92,6 +119,27 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    if settings.sentry_dsn:
+
+        @app.middleware("http")
+        async def _attach_sentry_user(request: Request, call_next):  # type: ignore[no-untyped-def]
+            auth = request.headers.get("authorization", "")
+            if auth.startswith("Bearer "):
+                try:
+                    from jose import jwt as _jwt
+
+                    payload = _jwt.decode(
+                        auth.removeprefix("Bearer "),
+                        settings.jwt_secret,
+                        algorithms=[settings.jwt_algorithm],
+                    )
+                    user_id = payload.get("sub")
+                    if user_id:
+                        sentry_sdk.set_user({"id": user_id})
+                except Exception:
+                    pass
+            return await call_next(request)
 
     # Starlette 0.40+ adds _IncludedRouter objects to app.routes when include_router()
     # is used. prometheus-fastapi-instrumentator unconditionally accesses route.path on

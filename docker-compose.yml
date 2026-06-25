@@ -31,6 +31,31 @@ services:
       retries: 5
     restart: unless-stopped
 
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.23.1-p3
+    container_name: spendhound_pgbouncer
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        printf '"%s" "%s"\n' "$$POSTGRES_USER" "$$POSTGRES_PASSWORD" > /tmp/pgbouncer_userlist.txt
+        exec pgbouncer /etc/pgbouncer/pgbouncer.ini
+    environment:
+      POSTGRES_USER: spendhound
+      POSTGRES_PASSWORD: localdev
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 5432"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
@@ -41,7 +66,7 @@ services:
       - path: ./backend/.env    # non-secret config only — optional, all secrets via env block
         required: false
     environment:
-      DATABASE_URL: postgresql+asyncpg://spendhound:localdev@db:5432/spendhound
+      DATABASE_URL: postgresql+asyncpg://spendhound:localdev@pgbouncer:5432/spendhound?prepared_statement_cache_size=0
       REDIS_URL: redis://redis:6379/0
       # Secrets — injected by `infisical run` via Makefile
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
@@ -56,6 +81,9 @@ services:
       MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
       MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
       METRICS_TOKEN: dev-metrics-token
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      OTEL_ENDPOINT: http://tempo:4318
+      OTEL_SERVICE_NAME: spendhound-api
     ports:
       - "8000:8000"
     volumes:
@@ -68,6 +96,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -88,7 +118,7 @@ services:
       - path: ./backend/.env
         required: false
     environment:
-      DATABASE_URL: postgresql+asyncpg://spendhound:localdev@db:5432/spendhound
+      DATABASE_URL: postgresql+asyncpg://spendhound:localdev@pgbouncer:5432/spendhound?prepared_statement_cache_size=0
       REDIS_URL: redis://redis:6379/0
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
@@ -101,6 +131,9 @@ services:
       LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET}
       MONTHLY_REPORTS_FRONTEND_TOKEN: ${MONTHLY_REPORTS_FRONTEND_TOKEN}
       MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER: ${MONTHLY_REPORTS_FRONTEND_TOKEN_HEADER:-X-SpendHound-Internal-Token}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      OTEL_ENDPOINT: http://tempo:4318
+      OTEL_SERVICE_NAME: spendhound-worker
     command: celery -A app.celery_app worker --loglevel=info --concurrency=1
     volumes:
       - ./backend:/app
@@ -109,6 +142,8 @@ services:
       db:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      pgbouncer:
         condition: service_healthy
     restart: unless-stopped
     extra_hosts:
@@ -124,7 +159,7 @@ services:
       - path: ./backend/.env
         required: false
     environment:
-      DATABASE_URL: postgresql+asyncpg://spendhound:localdev@db:5432/spendhound
+      DATABASE_URL: postgresql+asyncpg://spendhound:localdev@pgbouncer:5432/spendhound?prepared_statement_cache_size=0
       REDIS_URL: redis://redis:6379/0
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
@@ -132,6 +167,7 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LLM_KEY_ENCRYPTION_SECRET: ${LLM_KEY_ENCRYPTION_SECRET}
+      SENTRY_DSN: ${SENTRY_DSN:-}
     command: celery -A app.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     volumes:
       - ./backend:/app
@@ -155,9 +191,33 @@ services:
       - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
       - prometheus_data:/prometheus
     depends_on:
       - backend
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: spendhound_alertmanager
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        printf '%s' "$$SLACK_WEBHOOK_URL" > /tmp/slack_webhook_url
+        exec /bin/alertmanager \
+          --config.file=/etc/alertmanager/alertmanager.yml \
+          --storage.path=/alertmanager \
+          --web.listen-address=0.0.0.0:9093
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+    ports:
+      - "127.0.0.1:9095:9093"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+    depends_on:
+      - prometheus
     restart: unless-stopped
 
   grafana:
@@ -174,6 +234,37 @@ services:
       - grafana_data:/var/lib/grafana
     depends_on:
       - prometheus
+    restart: unless-stopped
+
+  loki:
+    image: grafana/loki:3.1.0
+    container_name: spendhound_loki
+    command: -config.file=/etc/loki/loki.yml
+    volumes:
+      - ./loki/loki.yml:/etc/loki/loki.yml:ro
+      - loki_data:/loki
+    restart: unless-stopped
+
+  promtail:
+    image: grafana/promtail:3.1.0
+    container_name: spendhound_promtail
+    command: -config.file=/etc/promtail/promtail.yml
+    volumes:
+      - ./promtail/promtail.yml:/etc/promtail/promtail.yml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - promtail_positions:/var/promtail
+    depends_on:
+      - loki
+    restart: unless-stopped
+
+  tempo:
+    image: grafana/tempo:2.6.0
+    container_name: spendhound_tempo
+    command: -config.file=/etc/tempo/tempo.yml
+    volumes:
+      - ./tempo/tempo.yml:/etc/tempo/tempo.yml:ro
+      - tempo_data:/var/tempo
     restart: unless-stopped
 
   flower:
@@ -220,3 +311,7 @@ volumes:
   postgres_data:
   prometheus_data:
   grafana_data:
+  alertmanager_data:
+  loki_data:
+  promtail_positions:
+  tempo_data:

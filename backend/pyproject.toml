@@ -45,6 +45,15 @@ dependencies = [
     "celery[redis]>=5.3",
     "prometheus-client>=0.20.0",
     "prometheus-fastapi-instrumentator==7.1.0",
+    "sentry-sdk[fastapi]>=2.0.0",
+    # OpenTelemetry - distributed tracing to Grafana Tempo
+    "opentelemetry-sdk>=1.24.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.24.0",
+    "opentelemetry-instrumentation-fastapi>=0.45b0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.45b0",
+    "opentelemetry-instrumentation-httpx>=0.45b0",
+    "opentelemetry-instrumentation-redis>=0.45b0",
+    "opentelemetry-instrumentation-celery>=0.45b0",
 ]
 
 [project.optional-dependencies]

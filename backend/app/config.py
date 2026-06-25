@@ -152,6 +152,22 @@ class Settings(BaseSettings):
         default="",
         description="Bearer token required to scrape /metrics. Empty = endpoint blocked. Set in Infisical for prod.",
     )
+    sentry_dsn: str = Field(
+        default="",
+        description="Sentry DSN for error tracking. Empty = Sentry disabled. Set in Infisical for prod.",
+    )
+    sentry_environment: str = Field(
+        default="production",
+        description="Sentry environment tag sent with every event (production / development).",
+    )
+    otel_endpoint: str = Field(
+        default="",
+        description="OTLP HTTP base URL for OpenTelemetry traces (e.g. http://tempo:4318). Empty = tracing disabled.",
+    )
+    otel_service_name: str = Field(
+        default="spendhound",
+        description="OTel service name shown in Grafana Tempo. Set per container: spendhound-api, spendhound-worker.",
+    )
 
     debug: bool = Field(default=False, description="Enable debug mode")
     cors_origins: list[str] = Field(

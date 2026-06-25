@@ -1,0 +1,58 @@
+groups:
+  - name: spendhound
+    rules:
+      # ── Critical ───────────────────────────────────────────────────────────────
+
+      - alert: BackendDown
+        # Prometheus built-in 'up' metric is 0 when the scrape target is unreachable.
+        expr: up{job="spendhound_backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: SpendHound backend is unreachable
+          description: >-
+            Prometheus cannot scrape the backend for more than 2 minutes.
+            The container may be down or the health check is failing.
+
+      - alert: HighErrorRate
+        # Rate of 5xx responses as a fraction of all responses over 5 minutes.
+        # NaN (no traffic) is not > 0.05, so this does not fire when idle.
+        expr: |
+          (
+            rate(http_requests_total{status=~"5.."}[5m])
+            /
+            rate(http_requests_total[5m])
+          ) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: High HTTP 5xx error rate
+          description: >-
+            More than 5% of HTTP requests are returning 5xx errors
+            over the last 5 minutes.
+
+      # ── Warning ────────────────────────────────────────────────────────────────
+
+      - alert: CeleryQueueBackedUp
+        expr: receipt_queue_depth > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Celery receipt queue is backed up
+          description: >-
+            {{ $value | humanize }} tasks have been waiting in the Celery queue
+            for more than 5 minutes. The worker may be overloaded or crashed.
+
+      - alert: LLMLatencyHigh
+        expr: histogram_quantile(0.95, rate(llm_response_seconds_bucket[5m])) > 30
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: LLM p95 latency is high
+          description: >-
+            p95 LLM response time is {{ $value | humanizeDuration }}.
+            The AI provider may be degraded or the model is overloaded.

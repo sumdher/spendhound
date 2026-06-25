@@ -17,6 +17,7 @@ from __future__ import annotations
 import time
 from collections.abc import AsyncGenerator
 
+from opentelemetry import trace as _otel_trace
 from prometheus_client import Counter, Gauge, Histogram
 
 from app.services.llm.base import BaseLLMProvider, LLMConfig, Message
@@ -58,13 +59,22 @@ class MeteredLLMProvider(BaseLLMProvider):
         self._provider_name = provider_name
 
     async def complete(self, messages: list[Message], config: LLMConfig | None = None) -> str:
-        start = time.monotonic()
-        try:
-            return await self._inner.complete(messages, config)
-        finally:
-            LLM_RESPONSE_SECONDS.labels(provider=self._provider_name).observe(
-                time.monotonic() - start
-            )
+        tracer = _otel_trace.get_tracer(__name__)
+        with tracer.start_as_current_span(
+            "llm.complete",
+            attributes={"gen_ai.system": self._provider_name},
+        ) as span:
+            start = time.monotonic()
+            try:
+                return await self._inner.complete(messages, config)
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(_otel_trace.Status(_otel_trace.StatusCode.ERROR))
+                raise
+            finally:
+                LLM_RESPONSE_SECONDS.labels(provider=self._provider_name).observe(
+                    time.monotonic() - start
+                )
 
     async def stream(
         self, messages: list[Message], config: LLMConfig | None = None
