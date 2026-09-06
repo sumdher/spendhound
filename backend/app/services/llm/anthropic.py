@@ -12,8 +12,6 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from typing import Any
 
-# import httpx
-
 from app.config import settings
 from app.services.llm.base import BaseLLMProvider, LLMConfig, Message
 
