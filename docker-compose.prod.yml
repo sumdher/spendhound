@@ -164,6 +164,9 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       JWT_SECRET: ${JWT_SECRET}
+      # Public origin used for approval links in admin emails. This must be
+      # reachable by the admin's browser, not the internal Docker hostname.
+      APP_URL: ${APP_URL:-https://spendhound.dodecahedrons.com}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
